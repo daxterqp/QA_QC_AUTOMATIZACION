@@ -10,18 +10,21 @@ import { useAuth } from '@context/AuthContext';
 import type Protocol from '@models/Protocol';
 import type Location from '@models/Location';
 import type { ProtocolStatus } from '@models/Protocol';
+import { Colors, Radius, Shadow } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProtocolList'>;
 
 const STATUS_COLORS: Record<ProtocolStatus, string> = {
-  DRAFT: '#e37400',
-  SUBMITTED: '#1a73e8',
-  APPROVED: '#1e8e3e',
-  REJECTED: '#d93025',
+  DRAFT: Colors.warning,
+  IN_PROGRESS: Colors.warning,
+  SUBMITTED: Colors.primary,
+  APPROVED: Colors.success,
+  REJECTED: Colors.danger,
 };
 
 const STATUS_LABELS: Record<ProtocolStatus, string> = {
   DRAFT: 'Pendiente',
+  IN_PROGRESS: 'En progreso',
   SUBMITTED: 'Enviado',
   APPROVED: 'Aprobado',
   REJECTED: 'Rechazado',
@@ -36,6 +39,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
   const [filterStatus, setFilterStatus] = useState<ProtocolStatus | 'ALL'>('ALL');
 
   const isJefe = currentUser?.role === 'RESIDENT';
+  const isCreator = currentUser?.role === 'CREATOR';
   const isSupervisor = currentUser?.role === 'SUPERVISOR';
 
   useEffect(() => {
@@ -67,12 +71,17 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
   });
 
   const handlePress = (protocol: Protocol) => {
-    if (isJefe) {
-      navigation.navigate('ProtocolAudit', { protocolId: protocol.id });
-    } else if (isSupervisor) {
-      navigation.navigate('ProtocolFill', { protocolId: protocol.id });
+    const canFillStatus = protocol.status === 'DRAFT' || protocol.status === 'IN_PROGRESS' ||
+      (protocol.status === 'REJECTED' && (protocol as any).correctionsAllowed);
+    if (isCreator || isSupervisor || isJefe) {
+      // CREATOR, SUPERVISOR, RESIDENT: editan DRAFT/REJECTED, auditan SUBMITTED/APPROVED
+      if (canFillStatus) {
+        navigation.navigate('ProtocolFill', { protocolId: protocol.id });
+      } else {
+        navigation.navigate('ProtocolAudit', { protocolId: protocol.id });
+      }
     } else {
-      // OPERATOR: solo vista (usa ProtocolAudit en modo lectura)
+      // OPERATOR: solo vista
       navigation.navigate('ProtocolAudit', { protocolId: protocol.id });
     }
   };
@@ -84,7 +93,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={styles.backText}>Volver</Text>
         </TouchableOpacity>
         <View style={styles.headerTitle}>
           <Text style={styles.title} numberOfLines={1}>{projectName}</Text>
@@ -134,8 +143,8 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
         renderItem={({ item }) => {
           const loc = item.locationId ? locations.get(item.locationId) : null;
           const canFill =
-            isSupervisor &&
-            (item.status === 'DRAFT' ||
+            (isSupervisor || isCreator || isJefe) &&
+            (item.status === 'DRAFT' || item.status === 'IN_PROGRESS' ||
               (item.status === 'REJECTED' && item.correctionsAllowed));
 
           return (
@@ -150,7 +159,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
                 <Text style={styles.cardLoc}>{loc.name} · {loc.referencePlan}</Text>
               )}
               <Text style={styles.cardDate}>
-                {new Date(item.createdAt).toLocaleDateString('es-PE')}
+                {new Date(item.createdAt).toLocaleString('es-PE')}
               </Text>
               {canFill && (
                 <Text style={styles.fillHint}>Toca para rellenar ›</Text>
@@ -164,45 +173,45 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.surface },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0',
+    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
+    backgroundColor: Colors.navy,
   },
-  backBtn: { padding: 4 },
-  backText: { fontSize: 28, color: '#1a73e8', lineHeight: 32 },
+  backBtn: { padding: 4, minWidth: 60 },
+  backText: { fontSize: 14, color: Colors.light, fontWeight: '600' },
   headerTitle: { flex: 1 },
-  title: { fontSize: 17, fontWeight: '700', color: '#1a1a2e' },
-  subtitle: { fontSize: 12, color: '#777' },
-  searchBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#fff' },
+  title: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
+  subtitle: { fontSize: 11, color: Colors.light },
+  searchBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider },
   searchInput: {
-    backgroundColor: '#f1f3f4', borderRadius: 10, paddingHorizontal: 14,
-    paddingVertical: 10, fontSize: 15,
+    backgroundColor: Colors.surface, borderRadius: Radius.md, paddingHorizontal: 14,
+    paddingVertical: 10, fontSize: 14, borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary,
   },
   filterRow: {
-    flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 10,
-    gap: 8, flexWrap: 'wrap', backgroundColor: '#fff',
+    flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10,
+    gap: 8, flexWrap: 'wrap', backgroundColor: Colors.white,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   filterChip: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: '#f1f3f4', borderWidth: 1, borderColor: '#e0e0e0',
+    paddingHorizontal: 12, paddingVertical: 5, borderRadius: Radius.xl,
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border,
   },
-  filterChipActive: { backgroundColor: '#1a73e8', borderColor: '#1a73e8' },
-  filterChipText: { fontSize: 12, color: '#555', fontWeight: '600' },
-  filterChipTextActive: { color: '#fff' },
+  filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterChipText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+  filterChipTextActive: { color: Colors.white },
   list: { padding: 16, gap: 10, paddingBottom: 40 },
-  empty: { color: '#aaa', textAlign: 'center', marginTop: 40 },
+  empty: { color: Colors.textMuted, textAlign: 'center', marginTop: 40 },
   card: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 16,
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
-    gap: 4,
+    backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 16,
+    ...Shadow.subtle, gap: 4,
   },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardNumber: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', flex: 1 },
-  badge: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  cardLoc: { fontSize: 13, color: '#555' },
-  cardDate: { fontSize: 11, color: '#aaa' },
-  fillHint: { fontSize: 12, color: '#1a73e8', fontWeight: '600', marginTop: 4 },
+  cardNumber: { fontSize: 14, fontWeight: '700', color: Colors.navy, flex: 1 },
+  badge: { borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 3 },
+  badgeText: { color: Colors.white, fontSize: 10, fontWeight: '700' },
+  cardLoc: { fontSize: 12, color: Colors.textSecondary },
+  cardDate: { fontSize: 11, color: Colors.textMuted },
+  fillHint: { fontSize: 11, color: Colors.primary, fontWeight: '700', marginTop: 4 },
 });

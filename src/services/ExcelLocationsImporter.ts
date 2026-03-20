@@ -7,18 +7,23 @@ import * as FileSystem from 'expo-file-system';
 export const LOCATIONS_REQUIRED_COLUMNS = [
   'Ubicación',
   'PLANO DE REFERENCIA',
+  'ID_Protocolos',
 ] as const;
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
 export interface ExcelLocation {
-  name: string;           // "Cocina 1- Piso 1"
-  referencePlan: string;  // "Plano_Cocina_P1"
+  name: string;           // "P1-Sector1-Cimiento"
+  locationOnly: string;   // "P1-Sector1" (columna Ubicación_Sola, opcional)
+  specialty: string;      // "Cimiento"   (columna Especialidad_Sola, opcional)
+  referencePlan: string;  // "CIM,DetalleCimientos"
+  templateIds: string;    // "PROY-OP-01,PROY-OP-02" — IDs separados por coma
 }
 
 export interface LocationsImportResult {
   locations: ExcelLocation[];
   totalRows: number;
+  fileUri: string;
 }
 
 export class LocationsImportError extends Error {
@@ -31,22 +36,44 @@ export class LocationsImportError extends Error {
   }
 }
 
-// ─── Funcion principal ───────────────────────────────────────────────────────
+// ─── Funcion desde URI (sin file picker) ─────────────────────────────────────
 
-/**
- * Abre el selector de archivos, parsea el Excel de Ubicaciones y retorna
- * la lista de ubicaciones con sus planos de referencia.
- *
- * Estructura esperada del Excel:
- * | Ubicación        | PLANO DE REFERENCIA |
- * |------------------|---------------------|
- * | Cocina 1- Piso 1 | Plano_Cocina_P1     |
- *
- * @throws LocationsImportError si faltan columnas o el formato es invalido
- * @returns null si el usuario cancela la seleccion
- */
+export async function importExcelLocationsFromUri(uri: string): Promise<LocationsImportResult> {
+  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as const });
+  const workbook = XLSX.read(base64, { type: 'base64' });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new LocationsImportError('El archivo Excel no contiene hojas de calculo.');
+  const worksheet = workbook.Sheets[firstSheetName];
+  const rows: string[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+  if (rows.length < 2) throw new LocationsImportError('El archivo Excel esta vacio o solo tiene cabecera.');
+  const headers = rows[0].map((h) => String(h).trim());
+  const missing = LOCATIONS_REQUIRED_COLUMNS.filter((col) => !headers.includes(col));
+  if (missing.length > 0) throw new LocationsImportError(`Faltan columnas requeridas: ${missing.join(', ')}`, missing);
+
+  const ubIdx       = headers.indexOf('Ubicación');
+  const ubSolaIdx   = headers.indexOf('Ubicación_Sola');
+  const espSolaIdx  = headers.indexOf('Especialidad_Sola');
+  const planIdx     = headers.indexOf('PLANO DE REFERENCIA');
+  const idsIdx      = headers.indexOf('ID_Protocolos');
+
+  const locations: ExcelLocation[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const name = String(row[ubIdx] ?? '').trim();
+    if (!name) continue;
+    const locationOnly = ubSolaIdx >= 0 ? String(row[ubSolaIdx] ?? '').trim() : '';
+    const specialty    = espSolaIdx >= 0 ? String(row[espSolaIdx] ?? '').trim() : '';
+    const referencePlan = String(row[planIdx] ?? '').trim();
+    const templateIds   = String(row[idsIdx] ?? '').trim();
+    locations.push({ name, locationOnly, specialty, referencePlan, templateIds });
+  }
+  if (locations.length === 0) throw new LocationsImportError('El archivo no contiene ubicaciones validas.');
+  return { locations, totalRows: rows.length - 1, fileUri: uri };
+}
+
+// ─── Funcion principal con file picker ───────────────────────────────────────
+
 export async function importExcelLocations(): Promise<LocationsImportResult | null> {
-  // 1. Seleccionar archivo
   const pickerResult = await DocumentPicker.getDocumentAsync({
     type: [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -59,60 +86,5 @@ export async function importExcelLocations(): Promise<LocationsImportResult | nu
     return null;
   }
 
-  const { uri } = pickerResult.assets[0];
-
-  // 2. Leer como base64
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: 'base64' as const,
-  });
-
-  // 3. Parsear con SheetJS
-  const workbook = XLSX.read(base64, { type: 'base64' });
-  const firstSheetName = workbook.SheetNames[0];
-
-  if (!firstSheetName) {
-    throw new LocationsImportError('El archivo Excel no contiene hojas de calculo.');
-  }
-
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows: string[][] = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    defval: '',
-  });
-
-  if (rows.length < 2) {
-    throw new LocationsImportError('El archivo Excel esta vacio o solo tiene cabecera.');
-  }
-
-  // 4. Validar columnas
-  const headers = rows[0].map((h) => String(h).trim());
-  const missing = LOCATIONS_REQUIRED_COLUMNS.filter((col) => !headers.includes(col));
-  if (missing.length > 0) {
-    throw new LocationsImportError(
-      `Faltan columnas requeridas: ${missing.join(', ')}`,
-      missing
-    );
-  }
-
-  const ubIdx = headers.indexOf('Ubicación');
-  const planIdx = headers.indexOf('PLANO DE REFERENCIA');
-
-  // 5. Parsear filas
-  const locations: ExcelLocation[] = [];
-
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const name = String(row[ubIdx] ?? '').trim();
-    const referencePlan = String(row[planIdx] ?? '').trim();
-
-    if (!name) continue; // Saltar filas vacias
-
-    locations.push({ name, referencePlan });
-  }
-
-  if (locations.length === 0) {
-    throw new LocationsImportError('El archivo no contiene ubicaciones validas.');
-  }
-
-  return { locations, totalRows: rows.length - 1 };
+  return importExcelLocationsFromUri(pickerResult.assets[0].uri);
 }

@@ -1,9 +1,12 @@
 import { useCallback, useState } from 'react';
+import { Alert } from 'react-native';
 import { database, locationsCollection } from '@db/index';
 import {
   importExcelLocations,
   LocationsImportError,
 } from '@services/ExcelLocationsImporter';
+import { uploadToS3 } from '@services/S3Service';
+import { s3ProjectPrefix } from '@config/aws';
 
 export type LocationsImportState =
   | { status: 'idle' }
@@ -12,16 +15,7 @@ export type LocationsImportState =
   | { status: 'success'; totalLocations: number }
   | { status: 'error'; message: string; missingColumns?: string[] };
 
-/**
- * Hook que orquesta la importacion del Excel de Ubicaciones hacia WatermelonDB.
- *
- * Crea registros en la tabla `locations` asociados al proyecto.
- * Si la ubicacion ya existe (mismo nombre en el mismo proyecto), la omite
- * para evitar duplicados en re-importaciones.
- *
- * @param projectId  ID del Project al que pertenecen las ubicaciones
- */
-export function useLocationsImport(projectId: string) {
+export function useLocationsImport(projectId: string, projectName: string) {
   const [importState, setImportState] = useState<LocationsImportState>({ status: 'idle' });
 
   const startImport = useCallback(async () => {
@@ -37,10 +31,7 @@ export function useLocationsImport(projectId: string) {
 
       setImportState({ status: 'importing' });
 
-      // Cargar ubicaciones existentes para evitar duplicados
-      const existing = await locationsCollection
-        .query()
-        .fetch();
+      const existing = await locationsCollection.query().fetch();
       const existingNames = new Set(
         existing
           .filter((l) => l.projectId === projectId)
@@ -56,12 +47,26 @@ export function useLocationsImport(projectId: string) {
           await locationsCollection.create((record) => {
             record.projectId = projectId;
             record.name = loc.name;
+            record.locationOnly = loc.locationOnly || null;
+            record.specialty = loc.specialty || null;
             record.referencePlan = loc.referencePlan;
+            record.templateIds = loc.templateIds || null;
           });
         }
       });
 
       setImportState({ status: 'success', totalLocations: toInsert.length });
+
+      // Subir a S3 (no bloquea si falla)
+      try {
+        await uploadToS3(
+          result.fileUri,
+          `${s3ProjectPrefix(projectName)}/locations/${result.fileUri.split('/').pop() ?? 'locations.xlsx'}`,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+      } catch (e) {
+        Alert.alert('S3 Error', String(e));
+      }
     } catch (err) {
       if (err instanceof LocationsImportError) {
         setImportState({

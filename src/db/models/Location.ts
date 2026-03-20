@@ -10,10 +10,16 @@ export default class Location extends Model {
   };
 
   @field('project_id') projectId!: string;
-  /** Nombre de la ubicacion, ej: "Cocina 1- Piso 1" */
+  /** Nombre completo, ej: "P1-Sector1-Cimiento" */
   @field('name') name!: string;
-  /** Plano de referencia asociado, ej: "Plano_Cocina_P1" */
+  /** Solo la parte de ubicación, ej: "P1-Sector1" */
+  @field('location_only') locationOnly!: string | null;
+  /** Especialidad, ej: "Cimiento" */
+  @field('specialty') specialty!: string | null;
+  /** Plano de referencia asociado, ej: "CIM,DetalleCimientos" */
   @field('reference_plan') referencePlan!: string;
+  /** IDs de plantillas requeridas, separados por coma, ej: "1,2,3" */
+  @field('template_ids') templateIds!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

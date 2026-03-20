@@ -15,6 +15,7 @@ export default class Project extends Model {
 
   @field('name') name!: string;
   @field('status') status!: ProjectStatus;
+  @field('password') password!: string | null;
   @field('created_by_id') createdById!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;

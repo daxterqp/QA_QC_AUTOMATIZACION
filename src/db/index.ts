@@ -8,8 +8,16 @@ import Project from './models/Project';
 import Location from './models/Location';
 import Protocol from './models/Protocol';
 import ProtocolItem from './models/ProtocolItem';
+import ProtocolTemplate from './models/ProtocolTemplate';
+import ProtocolTemplateItem from './models/ProtocolTemplateItem';
 import Evidence from './models/Evidence';
 import NonConformity from './models/NonConformity';
+import Plan from './models/Plan';
+import PlanAnnotation from './models/PlanAnnotation';
+import AnnotationComment from './models/AnnotationComment';
+import AnnotationCommentPhoto from './models/AnnotationCommentPhoto';
+import DashboardNote from './models/DashboardNote';
+import UserProjectAccess from './models/UserProjectAccess';
 
 const adapter = new SQLiteAdapter({
   schema,
@@ -23,7 +31,13 @@ const adapter = new SQLiteAdapter({
 
 export const database = new Database({
   adapter,
-  modelClasses: [User, Project, Location, Protocol, ProtocolItem, Evidence, NonConformity],
+  modelClasses: [
+    User, Project, Location, Protocol, ProtocolItem,
+    ProtocolTemplate, ProtocolTemplateItem,
+    Evidence, NonConformity, Plan, PlanAnnotation,
+    AnnotationComment, AnnotationCommentPhoto,
+    DashboardNote, UserProjectAccess,
+  ],
 });
 
 export const usersCollection = database.get<User>('users');
@@ -31,5 +45,13 @@ export const projectsCollection = database.get<Project>('projects');
 export const locationsCollection = database.get<Location>('locations');
 export const protocolsCollection = database.get<Protocol>('protocols');
 export const protocolItemsCollection = database.get<ProtocolItem>('protocol_items');
+export const protocolTemplatesCollection = database.get<ProtocolTemplate>('protocol_templates');
+export const protocolTemplateItemsCollection = database.get<ProtocolTemplateItem>('protocol_template_items');
 export const evidencesCollection = database.get<Evidence>('evidences');
 export const nonConformitiesCollection = database.get<NonConformity>('non_conformities');
+export const plansCollection = database.get<Plan>('plans');
+export const planAnnotationsCollection = database.get<PlanAnnotation>('plan_annotations');
+export const annotationCommentsCollection = database.get<AnnotationComment>('annotation_comments');
+export const annotationCommentPhotosCollection = database.get<AnnotationCommentPhoto>('annotation_comment_photos');
+export const dashboardNotesCollection = database.get<DashboardNote>('dashboard_notes');
+export const userProjectAccessCollection = database.get<UserProjectAccess>('user_project_access');

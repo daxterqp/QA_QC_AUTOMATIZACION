@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { evidencesCollection } from '@db/index';
 import { compressImage } from '@services/ImageCompressor';
+import { uploadEvidencePhoto } from '@services/S3PhotoService';
 
 export interface SaveEvidenceOptions {
   protocolItemId: string;
@@ -38,20 +39,27 @@ export function useEvidence() {
         evidenceId = record.id;
       });
 
-      // PASO 2: Comprimir en segundo plano y actualizar el registro
-      // No hacemos await aqui para no bloquear — se resuelve de forma async
+      // PASO 2: Comprimir y subir a S3 en segundo plano (no bloquea la UI)
       compressImage(localUri)
-        .then(({ uri: compressedUri }) => {
-          evidencesCollection.database.write(async () => {
+        .then(async ({ uri: compressedUri }) => {
+          // 2a. Actualizar localUri con la versión comprimida
+          await evidencesCollection.database.write(async () => {
             const record = await evidencesCollection.find(evidenceId);
             await record.update((ev) => {
-              ev.localUri = compressedUri; // Reemplazar por la version comprimida
+              ev.localUri = compressedUri;
             });
           });
+          // 2b. Subir a S3 con nombre {protocolId}-F001.jpg, F002...
+          try {
+            await uploadEvidencePhoto(evidenceId, compressedUri);
+          } catch (err) {
+            console.warn('[Evidence] Upload S3 fallo, foto guardada solo localmente:', err);
+          }
         })
         .catch((err) => {
-          // La foto original sigue valida aunque falle la compresion
-          console.warn('[Evidence] Compresion fallo, se usara imagen original:', err);
+          // Compresión falló: intentar subir con la imagen original
+          console.warn('[Evidence] Compresion fallo, intentando subir original:', err);
+          uploadEvidencePhoto(evidenceId, localUri).catch(() => {});
         });
 
       return {

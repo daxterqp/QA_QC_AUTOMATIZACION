@@ -4,7 +4,7 @@ import type Project from './Project';
 import type Location from './Location';
 import type ProtocolItem from './ProtocolItem';
 
-export type ProtocolStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+export type ProtocolStatus = 'DRAFT' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type UploadStatus = 'PENDING' | 'SYNCED';
 
 export default class Protocol extends Model {
@@ -18,6 +18,7 @@ export default class Protocol extends Model {
 
   @field('project_id') projectId!: string;
   @field('location_id') locationId!: string | null;
+  @field('template_id') templateId!: string | null;
   @field('status') status!: ProtocolStatus;
   @field('protocol_number') protocolNumber!: string;
   @field('location_reference') locationReference!: string;
@@ -29,6 +30,8 @@ export default class Protocol extends Model {
   @field('signed_at') signedAt!: number | null;
   @field('filled_by_id') filledById!: string | null;
   @field('filled_at') filledAt!: number | null;
+  @field('submitted_at') submittedAt!: number | null;
+  @field('rejection_reason') rejectionReason!: string | null;
   @field('upload_status') uploadStatus!: UploadStatus;
 
   @readonly @date('created_at') createdAt!: Date;

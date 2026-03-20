@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { LOCATIONS_REQUIRED_COLUMNS } from '@services/ExcelLocationsImporter';
+import { Colors, Radius, Shadow } from '../theme/colors';
 
 interface LocationsImportScreenProps {
   projectId: string;
@@ -32,7 +33,7 @@ export default function LocationsImportScreen({
   onClose,
   onImportSuccess,
 }: LocationsImportScreenProps) {
-  const { importState, startImport, reset } = useLocationsImport(projectId);
+  const { importState, startImport, reset } = useLocationsImport(projectId, projectName);
 
   const isActive = importState.status === 'picking' || importState.status === 'importing';
 
@@ -45,7 +46,7 @@ export default function LocationsImportScreen({
           <Text style={styles.headerSub}>Excel de Ubicaciones y Planos</Text>
         </View>
         <TouchableOpacity onPress={onClose} disabled={isActive} style={styles.closeBtn}>
-          <Text style={styles.closeBtnText}>✕</Text>
+          <Text style={styles.closeBtnText}>Cerrar</Text>
         </TouchableOpacity>
       </View>
 
@@ -76,21 +77,23 @@ export default function LocationsImportScreen({
                 <View style={styles.tableHeader}>
                   <Text style={styles.tableHeaderCell}>Ubicación</Text>
                   <Text style={styles.tableHeaderCell}>PLANO DE REFERENCIA</Text>
+                  <Text style={styles.tableHeaderCell}>ID_Protocolos</Text>
                 </View>
                 {[
-                  ['Cocina 1- Piso 1', 'Plano_Cocina_P1'],
-                  ['Sala 2- Piso 1', 'Plano_Sala_P1'],
-                  ['Dormitorio 3- Piso 2', 'Plano_Dorm_P2'],
-                ].map(([ub, plano]) => (
+                  ['P1-Sector1-Cimiento', 'CIM', '1,2'],
+                  ['P1-Sector2-Cimiento', 'CIM', '1,2'],
+                  ['P1-Sector1-ARQ', 'ARQ-P1', '1,2,3'],
+                ].map(([ub, plano, ids]) => (
                   <View key={ub} style={styles.tableRow}>
                     <Text style={styles.tableCell}>{ub}</Text>
                     <Text style={styles.tableCell}>{plano}</Text>
+                    <Text style={styles.tableCell}>{ids}</Text>
                   </View>
                 ))}
               </View>
               <Text style={styles.hint}>
-                Las ubicaciones cargadas apareceran como lista desplegable al
-                crear o asignar un protocolo en campo.
+                En ID_Protocolos coloca los ID_Protocolo del Excel maestro separados por coma.
+                Cada ubicacion mostrara exactamente los protocolos vinculados.
               </Text>
             </View>
           </>
@@ -99,7 +102,7 @@ export default function LocationsImportScreen({
         {/* Estado: picking / importing */}
         {(importState.status === 'picking' || importState.status === 'importing') && (
           <View style={styles.stateBox}>
-            <ActivityIndicator size="large" color={BLUE} />
+            <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.stateText}>
               {importState.status === 'picking'
                 ? 'Seleccionando archivo...'
@@ -111,7 +114,6 @@ export default function LocationsImportScreen({
         {/* Estado: exito */}
         {importState.status === 'success' && (
           <View style={[styles.stateBox, styles.stateSuccess]}>
-            <Text style={styles.stateIcon}>✓</Text>
             <Text style={styles.stateTitle}>Importacion exitosa</Text>
             <Text style={styles.statNumber}>{importState.totalLocations}</Text>
             <Text style={styles.statLabel}>
@@ -135,7 +137,6 @@ export default function LocationsImportScreen({
         {/* Estado: error */}
         {importState.status === 'error' && (
           <View style={[styles.stateBox, styles.stateError]}>
-            <Text style={styles.stateIcon}>✕</Text>
             <Text style={styles.stateTitle}>Error al importar</Text>
             <Text style={styles.errorMessage}>{importState.message}</Text>
             {importState.missingColumns && importState.missingColumns.length > 0 && (
@@ -168,134 +169,55 @@ export default function LocationsImportScreen({
   );
 }
 
-// ─── Estilos ──────────────────────────────────────────────────────────────────
-
-const BLUE = '#1a73e8';
-const GREEN = '#1e8e3e';
-const RED = '#d93025';
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: Colors.surface },
 
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
+    backgroundColor: Colors.navy,
   },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#1a1a2e' },
-  headerSub: { fontSize: 12, color: '#777', marginTop: 2 },
-  closeBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#f1f3f4',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  closeBtnText: { fontSize: 16, color: '#555' },
+  headerTitle: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
+  headerSub: { fontSize: 11, color: Colors.light, marginTop: 2 },
+  closeBtn: { padding: 4 },
+  closeBtnText: { fontSize: 13, color: Colors.light, fontWeight: '600' },
 
-  body: { padding: 20, gap: 16 },
+  body: { padding: 16, gap: 16 },
 
-  projectBadge: {
-    backgroundColor: '#e8f0fe',
-    borderRadius: 10,
-    padding: 14,
-  },
-  projectBadgeLabel: { fontSize: 11, color: BLUE, fontWeight: '600', textTransform: 'uppercase' },
-  projectBadgeName: { fontSize: 16, fontWeight: '700', color: '#1a1a2e', marginTop: 2 },
+  projectBadge: { backgroundColor: Colors.light, borderRadius: Radius.md, padding: 14 },
+  projectBadgeLabel: { fontSize: 10, color: Colors.primary, fontWeight: '700', letterSpacing: 1 },
+  projectBadgeName: { fontSize: 14, fontWeight: '700', color: Colors.navy, marginTop: 2 },
 
-  section: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 16,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 4 },
+  section: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 16, gap: 8, ...Shadow.subtle },
+  sectionTitle: { fontSize: 12, fontWeight: '700', color: Colors.navy, marginBottom: 4, letterSpacing: 0.5 },
   columnRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  columnBullet: { color: BLUE, fontSize: 10 },
-  columnName: { fontSize: 14, color: '#222', fontFamily: 'monospace' },
-  hint: { fontSize: 12, color: '#777', lineHeight: 18, marginTop: 4 },
+  columnBullet: { color: Colors.primary, fontSize: 10 },
+  columnName: { fontSize: 13, color: Colors.textPrimary },
+  hint: { fontSize: 12, color: Colors.textMuted, lineHeight: 18, marginTop: 4 },
 
-  // Tabla ejemplo
-  tableExample: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#f1f3f4',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  tableHeaderCell: {
-    flex: 1,
-    padding: 8,
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#333',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  tableCell: {
-    flex: 1,
-    padding: 8,
-    fontSize: 12,
-    color: '#555',
-  },
+  tableExample: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, overflow: 'hidden' },
+  tableHeader: { flexDirection: 'row', backgroundColor: Colors.light, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  tableHeaderCell: { flex: 1, padding: 8, fontSize: 10, fontWeight: '700', color: Colors.navy },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  tableCell: { flex: 1, padding: 8, fontSize: 11, color: Colors.textSecondary },
 
-  stateBox: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  stateSuccess: { borderLeftWidth: 4, borderLeftColor: GREEN },
-  stateError: { borderLeftWidth: 4, borderLeftColor: RED },
-  stateIcon: { fontSize: 40 },
-  stateTitle: { fontSize: 18, fontWeight: '700', color: '#1a1a2e' },
-  stateText: { fontSize: 15, color: '#555', textAlign: 'center' },
-  statNumber: { fontSize: 40, fontWeight: '800', color: BLUE },
-  statLabel: { fontSize: 16, color: '#555' },
+  stateBox: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, alignItems: 'center', gap: 12, ...Shadow.subtle },
+  stateSuccess: { borderLeftWidth: 4, borderLeftColor: Colors.success },
+  stateError: { borderLeftWidth: 4, borderLeftColor: Colors.danger },
+  stateTitle: { fontSize: 15, fontWeight: '700', color: Colors.navy },
+  stateText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center' },
+  statNumber: { fontSize: 36, fontWeight: '800', color: Colors.primary },
+  statLabel: { fontSize: 14, color: Colors.textSecondary },
 
-  errorMessage: { fontSize: 14, color: RED, textAlign: 'center', lineHeight: 20 },
-  missingCols: {
-    alignSelf: 'stretch', backgroundColor: '#fce8e6',
-    borderRadius: 8, padding: 12, gap: 4,
-  },
-  missingColsLabel: { fontSize: 12, fontWeight: '700', color: RED, marginBottom: 4 },
-  missingColItem: { fontSize: 13, color: '#c5221f', fontFamily: 'monospace' },
+  errorMessage: { fontSize: 13, color: Colors.danger, textAlign: 'center', lineHeight: 20 },
+  missingCols: { alignSelf: 'stretch', backgroundColor: '#fdecea', borderRadius: Radius.sm, padding: 12, gap: 4 },
+  missingColsLabel: { fontSize: 11, fontWeight: '700', color: Colors.danger, marginBottom: 4 },
+  missingColItem: { fontSize: 12, color: Colors.danger },
 
-  footer: {
-    padding: 20,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  btn: {
-    paddingHorizontal: 24,
-    paddingVertical: 13,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  btnPrimary: { backgroundColor: BLUE },
-  btnSecondary: { backgroundColor: '#5f6368' },
+  footer: { padding: 16, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.divider },
+  btn: { paddingHorizontal: 24, paddingVertical: 13, borderRadius: Radius.md, alignItems: 'center' },
+  btnPrimary: { backgroundColor: Colors.primary },
+  btnSecondary: { backgroundColor: Colors.secondary },
   btnFull: { width: '100%' },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  btnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
 });

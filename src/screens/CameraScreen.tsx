@@ -10,14 +10,18 @@ import {
 import { Camera } from 'react-native-vision-camera';
 import { useCamera } from '@hooks/useCamera';
 import { useEvidence } from '@hooks/useEvidence';
+import { database, annotationCommentPhotosCollection } from '@db/index';
+import { uploadAnnotationCommentPhoto } from '@services/S3PhotoService';
 
 interface CameraScreenProps {
-  /** ID del item de protocolo al que pertenecen las fotos */
-  protocolItemId: string;
+  /** ID del item de protocolo al que pertenecen las fotos (uso en protocolos) */
+  protocolItemId?: string;
+  /** ID del comentario de anotación al que pertenecen las fotos (uso en planos) */
+  annotationCommentId?: string;
   /** Callback al cerrar la pantalla */
   onClose: () => void;
   /** Callback opcional al guardar una foto exitosamente */
-  onPhotoSaved?: (evidenceId: string) => void;
+  onPhotoSaved?: (id: string) => void;
 }
 
 /**
@@ -32,6 +36,7 @@ interface CameraScreenProps {
  */
 export default function CameraScreen({
   protocolItemId,
+  annotationCommentId,
   onClose,
   onPhotoSaved,
 }: CameraScreenProps) {
@@ -44,26 +49,42 @@ export default function CameraScreen({
   const [photoCount, setPhotoCount] = useState(0);
 
   const handleCapture = useCallback(async () => {
-    if (isTaking) return; // Evitar doble disparo
+    if (isTaking) return;
     setIsTaking(true);
 
     try {
       const photo = await takePhoto();
       if (!photo) return;
 
-      // Prefijo de URI segun plataforma (vision-camera v4 retorna path sin prefijo en Android)
       const uri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
 
-      // Guardar en WatermelonDB de forma INSTANTANEA (sin esperar compresion)
-      const { evidenceId } = await saveEvidence({ protocolItemId, localUri: uri });
+      let savedId = '';
+      if (annotationCommentId) {
+        // Guardar como foto de comentario de anotación
+        await database.write(async () => {
+          const rec = await annotationCommentPhotosCollection.create((p) => {
+            p.annotationCommentId = annotationCommentId;
+            p.localUri = uri;
+            p.storagePath = null;
+          });
+          savedId = rec.id;
+        });
+        // Subir a S3 en segundo plano: obs-{annotationId}-F001.jpg ...
+        uploadAnnotationCommentPhoto(savedId, uri).catch((err) => {
+          console.warn('[CameraScreen] Upload S3 fallo para foto de observacion:', err);
+        });
+      } else if (protocolItemId) {
+        const { evidenceId } = await saveEvidence({ protocolItemId, localUri: uri });
+        savedId = evidenceId;
+      }
 
       setLastPhotoUri(uri);
       setPhotoCount((n) => n + 1);
-      onPhotoSaved?.(evidenceId);
+      onPhotoSaved?.(savedId);
     } finally {
       setIsTaking(false);
     }
-  }, [isTaking, takePhoto, saveEvidence, protocolItemId, onPhotoSaved]);
+  }, [isTaking, takePhoto, saveEvidence, protocolItemId, annotationCommentId, onPhotoSaved]);
 
   // ── Sin permisos ─────────────────────────────────────────────────────────────
   if (isLoading) {
@@ -115,7 +136,7 @@ export default function CameraScreen({
       {/* Contador de fotos tomadas */}
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-          <Text style={styles.closeBtnText}>✕</Text>
+          <Text style={styles.closeBtnText}>X</Text>
         </TouchableOpacity>
         <View style={styles.counter}>
           <Text style={styles.counterText}>{photoCount} foto{photoCount !== 1 ? 's' : ''}</Text>
@@ -167,7 +188,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   btn: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#394e7d',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,

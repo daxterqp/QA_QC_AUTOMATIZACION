@@ -7,6 +7,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { database, nonConformitiesCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
+import { Colors, Radius, Shadow } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NonConformity'>;
 
@@ -50,7 +51,7 @@ export default function NonConformityScreen({ navigation, route }: Props) {
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={styles.backText}>Volver</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Levantar No Conformidad</Text>
       </View>
@@ -92,33 +93,33 @@ export default function NonConformityScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#f8f9fa' },
+  flex: { flex: 1, backgroundColor: Colors.surface },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0',
+    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
+    backgroundColor: Colors.navy,
   },
-  backBtn: { padding: 4 },
-  backText: { fontSize: 28, color: '#1a73e8', lineHeight: 32 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1a1a2e' },
+  backBtn: { padding: 4, minWidth: 60 },
+  backText: { fontSize: 14, color: Colors.light, fontWeight: '600' },
+  headerTitle: { fontSize: 13, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
   body: { padding: 20, gap: 14 },
   infoBox: {
-    backgroundColor: '#fff3e0', borderRadius: 10, padding: 14,
-    borderLeftWidth: 4, borderLeftColor: '#e37400',
+    backgroundColor: '#fef9f0', borderRadius: Radius.md, padding: 14,
+    borderLeftWidth: 4, borderLeftColor: Colors.warning,
   },
-  infoTitle: { fontSize: 13, fontWeight: '700', color: '#bf5600', marginBottom: 6 },
-  infoText: { fontSize: 13, color: '#5f4000', lineHeight: 19 },
-  label: { fontSize: 13, fontWeight: '700', color: '#555' },
+  infoTitle: { fontSize: 12, fontWeight: '700', color: Colors.warning, marginBottom: 6 },
+  infoText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 19 },
+  label: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, letterSpacing: 1 },
   textArea: {
-    backgroundColor: '#fff', borderRadius: 10, padding: 14,
-    fontSize: 15, borderWidth: 1, borderColor: '#e0e0e0',
+    backgroundColor: Colors.white, borderRadius: Radius.md, padding: 14,
+    fontSize: 13, borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary,
     minHeight: 140,
   },
-  charCount: { fontSize: 11, color: '#aaa', textAlign: 'right', marginTop: -8 },
+  charCount: { fontSize: 11, color: Colors.textMuted, textAlign: 'right', marginTop: -8 },
   saveBtn: {
-    backgroundColor: '#e37400', borderRadius: 12, padding: 16,
+    backgroundColor: Colors.warning, borderRadius: Radius.lg, padding: 16,
     alignItems: 'center', marginTop: 8,
   },
-  saveBtnDisabled: { backgroundColor: '#bdc1c6' },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  saveBtnDisabled: { backgroundColor: Colors.light },
+  saveBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
 });

@@ -1,10 +1,14 @@
 import { useCallback, useState } from 'react';
-import { database, protocolsCollection, protocolItemsCollection } from '@db/index';
+import { Alert } from 'react-native';
+import { database, protocolTemplatesCollection, protocolTemplateItemsCollection } from '@db/index';
 import {
   importExcelMaestro,
   ExcelImportError,
   type ExcelProtocolGroup,
 } from '@services/ExcelImporter';
+import { uploadToS3 } from '@services/S3Service';
+import { s3ProjectPrefix } from '@config/aws';
+import { Q } from '@nozbe/watermelondb';
 
 export type ImportState =
   | { status: 'idle' }
@@ -14,29 +18,19 @@ export type ImportState =
   | { status: 'error'; message: string; missingColumns?: string[] };
 
 /**
- * Hook que orquesta la importacion del Excel maestro hacia WatermelonDB.
- *
- * Flujo:
- * 1. Abre el file picker
- * 2. Parsea y valida el Excel (ExcelImporter)
- * 3. Por cada protocolo unico del Excel, crea un registro en `protocols`
- * 4. Por cada actividad, crea un registro en `protocol_items`
- * 5. Todo en una sola transaccion batch para maxima velocidad
- *
- * @param projectId  ID del Project al que se asociaran los protocolos importados
+ * Hook que importa el Excel maestro y escribe en protocol_templates.
+ * Re-importar es seguro: los modelos con el mismo ID_Protocolo se omiten.
  */
-export function useExcelImport(projectId: string) {
+export function useExcelImport(projectId: string, projectName: string) {
   const [importState, setImportState] = useState<ImportState>({ status: 'idle' });
 
   const startImport = useCallback(async () => {
     setImportState({ status: 'picking' });
 
     try {
-      // ── Paso 1: Seleccionar y parsear Excel ────────────────────────────────
       const result = await importExcelMaestro();
 
       if (!result) {
-        // Usuario cancelo el picker
         setImportState({ status: 'idle' });
         return;
       }
@@ -44,23 +38,44 @@ export function useExcelImport(projectId: string) {
       const { protocols } = result;
       setImportState({ status: 'importing', current: 0, total: protocols.length });
 
-      // ── Paso 2: Escribir en WatermelonDB con batch ─────────────────────────
+      // Cargar IDs existentes para evitar duplicados en re-importaciones
+      const existing = await protocolTemplatesCollection
+        .query(Q.where('project_id', projectId))
+        .fetch();
+      const existingIds = new Set(existing.map((t) => t.idProtocolo));
+
       let totalActivities = 0;
+      let imported = 0;
 
       await database.write(async () => {
         for (let i = 0; i < protocols.length; i++) {
           const group = protocols[i];
           setImportState({ status: 'importing', current: i + 1, total: protocols.length });
-          await importProtocolGroup(group, projectId);
+
+          if (existingIds.has(group.idProtocolo)) continue;
+
+          await importTemplateGroup(group, projectId);
           totalActivities += group.activities.length;
+          imported++;
         }
       });
 
       setImportState({
         status: 'success',
-        totalProtocols: protocols.length,
+        totalProtocols: imported,
         totalActivities,
       });
+
+      // Subir a S3 (no bloquea si falla)
+      try {
+        await uploadToS3(
+          result.fileUri,
+          `${s3ProjectPrefix(projectName)}/activities/${result.fileUri.split('/').pop() ?? 'activities.xlsx'}`,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+      } catch (e) {
+        Alert.alert('S3 Error', String(e));
+      }
     } catch (err) {
       if (err instanceof ExcelImportError) {
         setImportState({
@@ -69,10 +84,7 @@ export function useExcelImport(projectId: string) {
           missingColumns: err.missingColumns,
         });
       } else {
-        setImportState({
-          status: 'error',
-          message: 'Error inesperado al importar el archivo.',
-        });
+        setImportState({ status: 'error', message: 'Error inesperado al importar el archivo.' });
         console.error('[useExcelImport]', err);
       }
     }
@@ -83,33 +95,23 @@ export function useExcelImport(projectId: string) {
   return { importState, startImport, reset };
 }
 
-// ─── Helper interno ───────────────────────────────────────────────────────────
-
-async function importProtocolGroup(
+async function importTemplateGroup(
   group: ExcelProtocolGroup,
   projectId: string
 ): Promise<void> {
-  // Crear el protocolo
-  const protocol = await protocolsCollection.create((p) => {
-    p.projectId = projectId;
-    p.protocolNumber = group.protocolName;
-    p.locationReference = '';   // El usuario puede completar despues en el formulario
-    p.status = 'DRAFT';
-    p.isLocked = false;
-    p.uploadStatus = 'PENDING';
-    p.latitude = null;
-    p.longitude = null;
+  const template = await protocolTemplatesCollection.create((t) => {
+    t.projectId = projectId;
+    t.idProtocolo = group.idProtocolo;
+    t.name = group.protocolName;
   });
 
-  // Crear todos los items del protocolo
   for (const activity of group.activities) {
-    await protocolItemsCollection.create((item) => {
-      item.protocolId = protocol.id;
+    await protocolTemplateItemsCollection.create((item) => {
+      item.templateId = template.id;
       item.partidaItem = activity.partidaItem || null;
       item.itemDescription = activity.actividadRealizada;
       item.validationMethod = activity.metodoValidacion || null;
-      item.isCompliant = false;   // Estado inicial — el usuario completa en campo
-      item.comments = activity.observaciones ?? null;
+      (item as any).section = activity.seccion ?? null;
     });
   }
 }

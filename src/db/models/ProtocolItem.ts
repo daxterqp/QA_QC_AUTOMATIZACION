@@ -18,7 +18,10 @@ export default class ProtocolItem extends Model {
   @field('item_description') itemDescription!: string;
   /** Metodo de validacion, ej: "In Situ", "Nivel", "Plano" */
   @field('validation_method') validationMethod!: string | null;
+  /** Agrupacion visual, ej: "Pisos". null/NA = sin sección */
+  @field('section') section!: string | null;
   @field('is_compliant') isCompliant!: boolean;
+  @field('has_answer') hasAnswer!: boolean;
   @field('comments') comments!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;
