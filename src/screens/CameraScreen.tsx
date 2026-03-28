@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,45 +9,47 @@ import {
 } from 'react-native';
 import { Camera } from 'react-native-vision-camera';
 import { useCamera } from '@hooks/useCamera';
-import { useEvidence } from '@hooks/useEvidence';
-import { database, annotationCommentPhotosCollection } from '@db/index';
-import { uploadAnnotationCommentPhoto } from '@services/S3PhotoService';
+import { database, annotationCommentPhotosCollection, evidencesCollection } from '@db/index';
+import { uploadAnnotationCommentPhoto, uploadEvidencePhoto } from '@services/S3PhotoService';
+import { compressImage } from '@services/ImageCompressor';
+import { applyPhotoStamps } from '@services/PhotoStampService';
+import { getProjectSettings, type ProjectStampSettings } from '@services/ProjectSettings';
 
 interface CameraScreenProps {
-  /** ID del item de protocolo al que pertenecen las fotos (uso en protocolos) */
   protocolItemId?: string;
-  /** ID del comentario de anotación al que pertenecen las fotos (uso en planos) */
   annotationCommentId?: string;
-  /** Callback al cerrar la pantalla */
+  projectId?: string;
   onClose: () => void;
-  /** Callback opcional al guardar una foto exitosamente */
   onPhotoSaved?: (id: string) => void;
 }
 
-/**
- * Pantalla de camara de alta velocidad para S-CUA.
- *
- * Diseno de "3 clics maximo":
- *   Clic 1 — Abrir pantalla (camara ya esta en standby, isActive=true)
- *   Clic 2 — Obturador: foto guardada INSTANTANEAMENTE en WatermelonDB
- *   Clic 3 — Cerrar o tomar otra foto
- *
- * La compresion ocurre en segundo plano sin bloquear esta pantalla.
- */
 export default function CameraScreen({
   protocolItemId,
   annotationCommentId,
+  projectId,
   onClose,
   onPhotoSaved,
 }: CameraScreenProps) {
   const { cameraRef, device, hasPermission, isLoading, requestPermission, takePhoto } =
     useCamera();
-  const { saveEvidence } = useEvidence();
 
   const [isTaking, setIsTaking] = useState(false);
   const [lastPhotoUri, setLastPhotoUri] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
 
+  // ── Configuración de stamps ──────────────────────────────────────────────
+  const [settings, setSettings] = useState<ProjectStampSettings>({
+    stampEnabled: false,
+    stampPhotoUri: null,
+    signatureUri: null,
+  });
+
+  useEffect(() => {
+    if (!projectId) return;
+    getProjectSettings(projectId).then(setSettings).catch(() => {});
+  }, [projectId]);
+
+  // ── Captura ──────────────────────────────────────────────────────────────
   const handleCapture = useCallback(async () => {
     if (isTaking) return;
     setIsTaking(true);
@@ -56,37 +58,89 @@ export default function CameraScreen({
       const photo = await takePhoto();
       if (!photo) return;
 
-      const uri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+      const rawUri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
 
-      let savedId = '';
+      // Actualizar miniatura inmediatamente (respuesta visual instantánea)
+      setLastPhotoUri(rawUri);
+      setPhotoCount((n) => n + 1);
+
       if (annotationCommentId) {
-        // Guardar como foto de comentario de anotación
+        // ── Foto de observación ────────────────────────────────────────────
+        // Guardar con URI original AHORA → el usuario puede seguir tomando fotos.
+        // El procesamiento (stamp/compresión + upload) ocurre en background.
+        let savedId = '';
         await database.write(async () => {
           const rec = await annotationCommentPhotosCollection.create((p) => {
             p.annotationCommentId = annotationCommentId;
-            p.localUri = uri;
+            p.localUri = rawUri;
             p.storagePath = null;
           });
           savedId = rec.id;
         });
-        // Subir a S3 en segundo plano: obs-{annotationId}-F001.jpg ...
-        uploadAnnotationCommentPhoto(savedId, uri).catch((err) => {
-          console.warn('[CameraScreen] Upload S3 fallo para foto de observacion:', err);
-        });
-      } else if (protocolItemId) {
-        const { evidenceId } = await saveEvidence({ protocolItemId, localUri: uri });
-        savedId = evidenceId;
-      }
+        onPhotoSaved?.(savedId);
 
-      setLastPhotoUri(uri);
-      setPhotoCount((n) => n + 1);
-      onPhotoSaved?.(savedId);
+        // Background: compresión + stamp + update DB + upload S3
+        (async () => {
+          try {
+            const { uri: compressed } = await compressImage(rawUri);
+            const finalUri = settings.stampEnabled
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri)
+              : compressed;
+
+            await database.write(async () => {
+              const rec = await annotationCommentPhotosCollection.find(savedId);
+              await rec.update((p) => { p.localUri = finalUri; });
+            });
+            await uploadAnnotationCommentPhoto(savedId, finalUri);
+          } catch (err) {
+            console.warn('[CameraScreen] procesamiento background falló:', err);
+            uploadAnnotationCommentPhoto(savedId, rawUri).catch(() => {});
+          }
+        })();
+      } else if (protocolItemId) {
+        // ── Foto de protocolo ──────────────────────────────────────────────
+        // Guardar con URI original AHORA → el usuario puede seguir tomando fotos.
+        // El procesamiento (compresión + stamp + upload) ocurre en background.
+        let evidenceId = '';
+        await database.write(async () => {
+          const rec = await evidencesCollection.create((ev) => {
+            ev.protocolItemId = protocolItemId;
+            ev.localUri = rawUri;
+            ev.uploadStatus = 'PENDING';
+            ev.s3UrlPlaceholder = null;
+          });
+          evidenceId = rec.id;
+        });
+        onPhotoSaved?.(evidenceId);
+
+        // Background: comprimir → stamp → update DB → upload S3
+        (async () => {
+          try {
+            const { uri: compressed } = await compressImage(rawUri);
+            const finalUri = settings.stampEnabled
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri)
+              : compressed;
+            await database.write(async () => {
+              const r2 = await evidencesCollection.find(evidenceId);
+              await r2.update((ev) => { ev.localUri = finalUri; });
+            });
+            await uploadEvidencePhoto(evidenceId, finalUri);
+          } catch (err) {
+            console.warn('[CameraScreen] procesamiento protocolo falló:', err);
+            uploadEvidencePhoto(evidenceId, rawUri).catch(() => {});
+          }
+        })();
+      }
     } finally {
       setIsTaking(false);
     }
-  }, [isTaking, takePhoto, saveEvidence, protocolItemId, annotationCommentId, onPhotoSaved]);
+  }, [
+    isTaking, takePhoto,
+    protocolItemId, annotationCommentId, onPhotoSaved,
+    settings,
+  ]);
 
-  // ── Sin permisos ─────────────────────────────────────────────────────────────
+  // ── Sin permisos ─────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -113,18 +167,23 @@ export default function CameraScreen({
   if (!device) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.label}>No se encontro camara trasera</Text>
+        <Text style={styles.label}>
+          No se encontró cámara trasera.{'\n'}
+          Verifica que la app tenga permiso de Cámara en Ajustes del dispositivo.
+        </Text>
+        <TouchableOpacity style={styles.btn} onPress={requestPermission}>
+          <Text style={styles.btnText}>Reintentar permisos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={onClose}>
+          <Text style={styles.btnText}>Volver</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  // ── Pantalla principal ───────────────────────────────────────────────────────
+  // ── Pantalla principal ───────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      {/*
-        isActive=true: el sensor queda en standby desde que se monta el componente.
-        Esto garantiza "cero tiempos de carga" al presionar el obturador.
-      */}
       <Camera
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -133,7 +192,7 @@ export default function CameraScreen({
         photo={true}
       />
 
-      {/* Contador de fotos tomadas */}
+      {/* Barra superior */}
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
           <Text style={styles.closeBtnText}>X</Text>
@@ -141,9 +200,14 @@ export default function CameraScreen({
         <View style={styles.counter}>
           <Text style={styles.counterText}>{photoCount} foto{photoCount !== 1 ? 's' : ''}</Text>
         </View>
+        {settings.stampEnabled && (
+          <View style={styles.stampBadge}>
+            <Text style={styles.stampBadgeText}>STAMP</Text>
+          </View>
+        )}
       </View>
 
-      {/* Miniatura de la ultima foto */}
+      {/* Miniatura última foto */}
       {lastPhotoUri && (
         <View style={styles.thumbnail}>
           <Image source={{ uri: lastPhotoUri }} style={styles.thumbnailImage} />
@@ -170,111 +234,54 @@ export default function CameraScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+  container: { flex: 1, backgroundColor: '#000' },
   centered: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+    flex: 1, backgroundColor: '#000',
+    alignItems: 'center', justifyContent: 'center', gap: 16,
   },
-  label: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    paddingHorizontal: 24,
-  },
+  label: { color: '#fff', fontSize: 16, textAlign: 'center', paddingHorizontal: 24 },
   btn: {
-    backgroundColor: '#394e7d',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#394e7d', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8,
   },
-  btnSecondary: {
-    backgroundColor: '#555',
-  },
-  btnText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
+  btnSecondary: { backgroundColor: '#555' },
+  btnText: { color: '#fff', fontWeight: '600' },
   topBar: {
-    position: 'absolute',
-    top: 48,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    position: 'absolute', top: 48, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', paddingHorizontal: 20,
   },
   closeBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
   },
-  closeBtnText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
+  closeBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   counter: {
     backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12,
   },
-  counterText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+  counterText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  stampBadge: {
+    backgroundColor: 'rgba(255,180,0,0.85)',
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
   },
+  stampBadgeText: { color: '#000', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
   thumbnail: {
-    position: 'absolute',
-    bottom: 110,
-    left: 24,
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#fff',
+    position: 'absolute', bottom: 110, left: 24,
+    width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
+    borderWidth: 2, borderColor: '#fff',
   },
-  thumbnailImage: {
-    width: '100%',
-    height: '100%',
-  },
+  thumbnailImage: { width: '100%', height: '100%' },
   bottomBar: {
-    position: 'absolute',
-    bottom: 40,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
+    position: 'absolute', bottom: 40, left: 0, right: 0, alignItems: 'center',
   },
   shutter: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.4)',
+    width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 4, borderColor: 'rgba(255,255,255,0.4)',
   },
-  shutterDisabled: {
-    opacity: 0.5,
-  },
+  shutterDisabled: { opacity: 0.5 },
   shutterInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#ccc',
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: '#fff', borderWidth: 2, borderColor: '#ccc',
   },
 });

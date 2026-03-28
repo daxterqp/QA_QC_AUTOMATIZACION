@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, ActivityIndicator,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -108,13 +109,7 @@ export default function UserManagementScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>USUARIOS</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader title="Usuarios" onBack={() => navigation.goBack()} />
 
       <View style={styles.importBar}>
         <TouchableOpacity
@@ -173,14 +168,6 @@ export default function UserManagementScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 16, fontWeight: '700', color: Colors.white, letterSpacing: 1 },
   importBar: {
     padding: 16, gap: 6, backgroundColor: Colors.white,
     borderBottomWidth: 1, borderBottomColor: Colors.divider,

@@ -12,7 +12,7 @@ export type RootStackParamList = {
   ChangePassword: undefined;
 
   // ── Camara ────────────────────────────────────────────────────────────────
-  Camera: { protocolItemId?: string; annotationCommentId?: string };
+  Camera: { protocolItemId?: string; annotationCommentId?: string; projectId?: string };
 
   // ── Jefe (RESIDENT) + Creador ──────────────────────────────────────────────
   ExcelImport: { projectId: string; projectName: string };
@@ -21,9 +21,13 @@ export type RootStackParamList = {
   NonConformity: { protocolId: string; projectId: string };
   Dossier: { projectId: string; projectName: string };
   PlansManagement: { projectId: string; projectName: string };
+  FileUpload: { projectId: string; projectName: string };
   PlanViewer: { planId: string; planName: string; protocolId?: string; annotationId?: string; locationId?: string };
   AnnotationComments: { projectId: string; projectName: string };
 
   // ── Creador ────────────────────────────────────────────────────────────────
   UserManagement: undefined;
+
+  // ── PDF Preview ────────────────────────────────────────────────────────────
+  DossierPreview: { pdfUri: string; projectName: string };
 };

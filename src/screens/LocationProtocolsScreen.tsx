@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import {
@@ -14,6 +15,9 @@ import {
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
+import { Ionicons } from '@expo/vector-icons';
 import type ProtocolTemplate from '@models/ProtocolTemplate';
 import type Protocol from '@models/Protocol';
 import type { ProtocolStatus } from '@models/Protocol';
@@ -45,6 +49,18 @@ const STATUS_LABELS: Record<ProtocolStatus, string> = {
 export default function LocationProtocolsScreen({ navigation, route }: Props) {
   const { locationId, locationName, projectId, projectName } = route.params;
   const { currentUser } = useAuth();
+
+  const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
+  // Tour refs
+  const protocolRowRef = useTourStep('protocol_row');
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
+
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -161,13 +177,17 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
     }
   };
 
-  const renderItem = ({ item }: { item: TemplateRow }) => {
+  const renderItem = ({ item, index }: { item: TemplateRow; index: number }) => {
     const status = item.instance?.status;
     const correctionsAllowed = (item.instance as any)?.correctionsAllowed ?? false;
     const canFill = (isCreator || isSupervisor || isJefe) &&
       (!status || status === 'DRAFT' || status === 'IN_PROGRESS' || (status === 'REJECTED' && correctionsAllowed));
     return (
-      <TouchableOpacity style={styles.card} onPress={() => handleOpenProtocol(item)}>
+      <TouchableOpacity
+        ref={index === 0 ? protocolRowRef : undefined}
+        style={styles.card}
+        onPress={() => handleOpenProtocol(item)}
+      >
         <View style={styles.cardLeft}>
           <Text style={styles.templateName}>{item.template.name}</Text>
           <Text style={styles.templateId}>ID: {item.template.idProtocolo}</Text>
@@ -191,13 +211,16 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>‹ {projectName}</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{locationName}</Text>
-        <Text style={styles.headerSub}>Protocolos requeridos</Text>
-      </View>
+      <AppHeader
+        title={locationName}
+        subtitle="Protocolos requeridos"
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('protocol_row')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       {loading ? (
         <View style={styles.loadingBox}>
@@ -225,17 +248,6 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-
-  header: {
-    backgroundColor: Colors.navy,
-    paddingTop: 52,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { marginBottom: 4 },
-  backBtnText: { color: Colors.light, fontSize: 13 },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: Colors.white },
-  headerSub: { fontSize: 11, color: Colors.light, marginTop: 2 },
 
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 

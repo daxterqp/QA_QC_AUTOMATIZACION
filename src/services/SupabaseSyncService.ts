@@ -10,7 +10,10 @@
  */
 
 import { Q } from '@nozbe/watermelondb';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from '@config/supabase';
+import { downloadFromS3, listS3Keys } from './S3Service';
+import { s3ProjectPrefix } from '@config/aws';
 import { downloadMissingPhotosForProject } from './S3PhotoDownloader';
 import {
   database,
@@ -47,31 +50,26 @@ function toRow(raw: any): any {
 }
 
 /**
- * Upsert local: para cada registro remoto, crea o actualiza en WatermelonDB.
- * Gana el updated_at más reciente.
+ * Prepara (sin ejecutar) las operaciones de merge: agrega/actualiza desde remoto.
+ * NO elimina registros locales que no están en remoto — pueden ser registros
+ * recién creados offline que aún no se sincronizaron con Supabase.
  */
-async function upsertLocal(collection: any, remoteRows: any[]): Promise<number> {
-  if (remoteRows.length === 0) return 0;
-
-  const ids = remoteRows.map((r) => r.id);
-  const existing = await collection.query(Q.where('id', Q.oneOf(ids))).fetch();
+function prepareOverride(collection: any, remoteRows: any[], localRows: any[]): any[] {
   const existingMap: Record<string, any> = {};
-  for (const rec of existing) existingMap[rec.id] = rec;
+  for (const l of localRows) existingMap[l.id] = l;
 
   const prepares: any[] = [];
 
   for (const remote of remoteRows) {
     const local = existingMap[remote.id];
     if (!local) {
-      // Crear nuevo
       prepares.push(
         collection.prepareCreate((rec: any) => {
           rec._raw.id = remote.id;
           Object.assign(rec._raw, remote);
         })
       );
-    } else if (remote.updated_at > local._raw.updated_at) {
-      // Actualizar si el remoto es más nuevo
+    } else {
       prepares.push(
         local.prepareUpdate((rec: any) => {
           Object.assign(rec._raw, remote);
@@ -80,15 +78,63 @@ async function upsertLocal(collection: any, remoteRows: any[]): Promise<number> 
     }
   }
 
-  if (prepares.length > 0) await database.batch(...prepares);
-  return prepares.length;
+  return prepares;
 }
 
-/** Upsert remoto: envía todos los raw rows a Supabase */
+/**
+ * Como prepareOverride, pero normaliza file_uri al path local canónico del dispositivo.
+ * Evita guardar en WatermelonDB el path del dispositivo que subió el PDF.
+ */
+function preparePlansOverride(collection: any, remoteRows: any[], localRows: any[]): any[] {
+  const existingMap: Record<string, any> = {};
+  for (const l of localRows) existingMap[l.id] = l;
+  const prepares: any[] = [];
+
+  for (const remote of remoteRows) {
+    const localPath = `${FileSystem.documentDirectory}plans/${remote.name}.pdf`;
+    const row = { ...remote, file_uri: localPath };
+    const local = existingMap[remote.id];
+    if (!local) {
+      prepares.push(collection.prepareCreate((rec: any) => {
+        rec._raw.id = remote.id;
+        Object.assign(rec._raw, row);
+      }));
+    } else {
+      prepares.push(local.prepareUpdate((rec: any) => {
+        Object.assign(rec._raw, row);
+      }));
+    }
+  }
+  return prepares;
+}
+
+/** Upsert remoto: envía todos los raw rows a Supabase. Loguea errores pero no lanza. */
 async function pushTable(table: string, rows: any[]): Promise<void> {
   if (rows.length === 0) return;
   const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
-  if (error) throw new Error(`[push:${table}] ${error.message}`);
+  if (error) {
+    console.warn(`[push:${table}] ${error.message}`);
+  }
+}
+
+/**
+ * Empuja inmediatamente el estado de un protocolo a Supabase.
+ * Llamar después de aprobar/rechazar/enviar para que el sync remoto no revierta el cambio local.
+ */
+export async function pushProtocolStatus(protocol: any): Promise<void> {
+  try {
+    await pushTable('protocols', [toRow(protocol._raw)]);
+  } catch { /* sin red, ignorar */ }
+}
+
+/**
+ * Empuja un ítem de protocolo a Supabase inmediatamente.
+ * Llamar después de cada guardado local para que el sync remoto no revierta el avance.
+ */
+export async function pushProtocolItem(item: any): Promise<void> {
+  try {
+    await pushTable('protocol_items', [toRow(item._raw)]);
+  } catch { /* sin red, ignorar */ }
 }
 
 // ─── push ───────────────────────────────────────────────────────────────────
@@ -192,102 +238,113 @@ async function pushProject(projectId: string): Promise<number> {
 // ─── pull ───────────────────────────────────────────────────────────────────
 
 async function pullProject(projectId: string): Promise<number> {
-  let pulled = 0;
+  // ── 1. Descarga todo desde Supabase (red, fuera del write lock) ───────────
 
-  // Helper para fetch paginado de Supabase (máx 1000 filas por llamada)
-  const fetchAll = async (table: string, column: string, value: string) => {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq(column, value);
-    if (error) throw new Error(`[pull:${table}] ${error.message}`);
+  const fetchAll = async (table: string, col: string, val: string) => {
+    const { data, error } = await supabase.from(table).select('*').eq(col, val);
+    if (error) { console.warn(`[pull:${table}] ${error.message}`); return []; }
+    return data ?? [];
+  };
+  const fetchIn = async (table: string, col: string, ids: string[]) => {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabase.from(table).select('*').in(col, ids);
+    if (error) { console.warn(`[pull:${table}] ${error.message}`); return []; }
     return data ?? [];
   };
 
-  // 1. Proyecto
-  const { data: projectData, error: projError } = await supabase
+  const { data: remoteProject, error: projErr } = await supabase
     .from('projects').select('*').eq('id', projectId);
-  if (projError) throw new Error(`[pull:projects] ${projError.message}`);
-  pulled += await upsertLocal(projectsCollection, projectData ?? []);
+  if (projErr) throw new Error(`[pull:projects] ${projErr.message}`);
 
-  // 2. Tablas directas por project_id
-  const [
-    remoteLocations,
-    remoteTemplates,
-    remoteProtocols,
-    remotePlans,
-    remoteNotes,
-    remoteAccess,
-  ] = await Promise.all([
-    fetchAll('locations', 'project_id', projectId),
-    fetchAll('protocol_templates', 'project_id', projectId),
-    fetchAll('protocols', 'project_id', projectId),
-    fetchAll('plans', 'project_id', projectId),
-    fetchAll('dashboard_notes', 'project_id', projectId),
-    fetchAll('user_project_access', 'project_id', projectId),
-  ]);
-
-  pulled += await upsertLocal(locationsCollection, remoteLocations);
-  pulled += await upsertLocal(protocolTemplatesCollection, remoteTemplates);
-  pulled += await upsertLocal(protocolsCollection, remoteProtocols);
-  pulled += await upsertLocal(plansCollection, remotePlans);
-  pulled += await upsertLocal(dashboardNotesCollection, remoteNotes);
-  pulled += await upsertLocal(userProjectAccessCollection, remoteAccess);
-
-  // 3. Template items
-  if (remoteTemplates.length > 0) {
-    const tIds = remoteTemplates.map((t: any) => t.id);
-    const { data: tItems } = await supabase
-      .from('protocol_template_items').select('*').in('template_id', tIds);
-    pulled += await upsertLocal(protocolTemplateItemsCollection, tItems ?? []);
-  }
-
-  // 4. Protocol items + non conformities
-  if (remoteProtocols.length > 0) {
-    const pIds = remoteProtocols.map((p: any) => p.id);
-
-    const [{ data: pItems }, { data: nonConfs }] = await Promise.all([
-      supabase.from('protocol_items').select('*').in('protocol_id', pIds),
-      supabase.from('non_conformities').select('*').in('protocol_id', pIds),
+  const [remoteLocations, remoteTemplates, remoteProtocols, remotePlans, remoteNotes, remoteAccess] =
+    await Promise.all([
+      fetchAll('locations',            'project_id', projectId),
+      fetchAll('protocol_templates',   'project_id', projectId),
+      fetchAll('protocols',            'project_id', projectId),
+      fetchAll('plans',                'project_id', projectId),
+      fetchAll('dashboard_notes',      'project_id', projectId),
+      fetchAll('user_project_access',  'project_id', projectId),
     ]);
 
-    pulled += await upsertLocal(protocolItemsCollection, pItems ?? []);
-    pulled += await upsertLocal(nonConformitiesCollection, nonConfs ?? []);
+  const tIds    = remoteTemplates.map((t: any) => t.id);
+  const pIds    = remoteProtocols.map((p: any) => p.id);
+  const planIds = remotePlans.map((p: any) => p.id);
 
-    // 5. Evidencias
-    if ((pItems ?? []).length > 0) {
-      const iIds = (pItems ?? []).map((i: any) => i.id);
-      const { data: evs } = await supabase
-        .from('evidences').select('*').in('protocol_item_id', iIds);
-      pulled += await upsertLocal(evidencesCollection, evs ?? []);
-    }
-  }
+  const [remoteTemplateItems, remotePItems, remoteNonConfs, remoteAnnotations] = await Promise.all([
+    fetchIn('protocol_template_items', 'template_id', tIds),
+    fetchIn('protocol_items',          'protocol_id', pIds),
+    fetchIn('non_conformities',        'protocol_id', pIds),
+    fetchIn('plan_annotations',        'plan_id',     planIds),
+  ]);
 
-  // 6. Anotaciones de planos
-  if (remotePlans.length > 0) {
-    const planIds = remotePlans.map((p: any) => p.id);
-    const { data: annotations } = await supabase
-      .from('plan_annotations').select('*').in('plan_id', planIds);
-    pulled += await upsertLocal(planAnnotationsCollection, annotations ?? []);
+  const iIds = remotePItems.map((i: any) => i.id);
+  const aIds = remoteAnnotations.map((a: any) => a.id);
+  const [remoteEvidences, remoteComments] = await Promise.all([
+    fetchIn('evidences',           'protocol_item_id', iIds),
+    fetchIn('annotation_comments', 'annotation_id',    aIds),
+  ]);
+  const cIds = remoteComments.map((c: any) => c.id);
+  const remoteCommentPhotos = await fetchIn('annotation_comment_photos', 'annotation_comment_id', cIds);
 
-    // 7. Comentarios
-    if ((annotations ?? []).length > 0) {
-      const aIds = (annotations ?? []).map((a: any) => a.id);
-      const { data: comments } = await supabase
-        .from('annotation_comments').select('*').in('annotation_id', aIds);
-      pulled += await upsertLocal(annotationCommentsCollection, comments ?? []);
+  // ── 2. Lee locales + aplica cambios en una sola write transaction ─────────
+  // database.write() serializa con otros writes y da acceso exclusivo al DB.
 
-      // 8. Fotos de comentarios
-      if ((comments ?? []).length > 0) {
-        const cIds = (comments ?? []).map((c: any) => c.id);
-        const { data: cPhotos } = await supabase
-          .from('annotation_comment_photos').select('*').in('annotation_comment_id', cIds);
-        pulled += await upsertLocal(annotationCommentPhotosCollection, cPhotos ?? []);
-      }
-    }
-  }
+  return database.write(async () => {
+    const [
+      localProject, localLocs, localTemplates, localProtocols, localPlans, localNotes, localAccess,
+      localTemplateItems, localPItems, localNonConfs, localAnnotations,
+      localEvidences, localComments, localCommentPhotos,
+    ] = await Promise.all([
+      projectsCollection.query(Q.where('id', projectId)).fetch(),
+      locationsCollection.query(Q.where('project_id', projectId)).fetch(),
+      protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
+      protocolsCollection.query(Q.where('project_id', projectId)).fetch(),
+      plansCollection.query(Q.where('project_id', projectId)).fetch(),
+      dashboardNotesCollection.query(Q.where('project_id', projectId)).fetch(),
+      userProjectAccessCollection.query(Q.where('project_id', projectId)).fetch(),
+      tIds.length > 0
+        ? protocolTemplateItemsCollection.query(Q.where('template_id', Q.oneOf(tIds))).fetch()
+        : Promise.resolve([]),
+      pIds.length > 0
+        ? protocolItemsCollection.query(Q.where('protocol_id', Q.oneOf(pIds))).fetch()
+        : Promise.resolve([]),
+      pIds.length > 0
+        ? nonConformitiesCollection.query(Q.where('protocol_id', Q.oneOf(pIds))).fetch()
+        : Promise.resolve([]),
+      planIds.length > 0
+        ? planAnnotationsCollection.query(Q.where('plan_id', Q.oneOf(planIds))).fetch()
+        : Promise.resolve([]),
+      iIds.length > 0
+        ? evidencesCollection.query(Q.where('protocol_item_id', Q.oneOf(iIds))).fetch()
+        : Promise.resolve([]),
+      aIds.length > 0
+        ? annotationCommentsCollection.query(Q.where('annotation_id', Q.oneOf(aIds))).fetch()
+        : Promise.resolve([]),
+      cIds.length > 0
+        ? annotationCommentPhotosCollection.query(Q.where('annotation_comment_id', Q.oneOf(cIds))).fetch()
+        : Promise.resolve([]),
+    ]);
 
-  return pulled;
+    const allPrepares = [
+      ...prepareOverride(projectsCollection,              remoteProject ?? [],  localProject),
+      ...prepareOverride(locationsCollection,             remoteLocations,      localLocs),
+      ...prepareOverride(protocolTemplatesCollection,     remoteTemplates,      localTemplates),
+      ...prepareOverride(protocolsCollection,             remoteProtocols,      localProtocols),
+      ...preparePlansOverride(plansCollection,             remotePlans,          localPlans),
+      ...prepareOverride(dashboardNotesCollection,        remoteNotes,          localNotes),
+      ...prepareOverride(userProjectAccessCollection,     remoteAccess,         localAccess),
+      ...prepareOverride(protocolTemplateItemsCollection, remoteTemplateItems,  localTemplateItems),
+      ...prepareOverride(protocolItemsCollection,         remotePItems,         localPItems),
+      ...prepareOverride(nonConformitiesCollection,       remoteNonConfs,       localNonConfs),
+      ...prepareOverride(planAnnotationsCollection,       remoteAnnotations,    localAnnotations),
+      ...prepareOverride(evidencesCollection,             remoteEvidences,      localEvidences),
+      ...prepareOverride(annotationCommentsCollection,    remoteComments,       localComments),
+      ...prepareOverride(annotationCommentPhotosCollection, remoteCommentPhotos, localCommentPhotos),
+    ];
+
+    if (allPrepares.length > 0) await database.batch(allPrepares);
+    return allPrepares.length;
+  });
 }
 
 // ─── public API ─────────────────────────────────────────────────────────────
@@ -333,6 +390,65 @@ export async function pushProjectToSupabase(projectId: string): Promise<SyncResu
 }
 
 /**
+ * Pushea solo los planes de un proyecto a Supabase.
+ * Llamar inmediatamente después de crear/modificar registros de planes localmente
+ * para que el siguiente pull (cloud-wins) no los destruya.
+ */
+export async function pushPlansToSupabase(projectId: string): Promise<void> {
+  const plans = await plansCollection.query(Q.where('project_id', projectId)).fetch();
+  if (plans.length > 0) {
+    await pushTable('plans', plans.map((r) => toRow((r as any)._raw)));
+  }
+}
+
+/** Descarga en segundo plano los DWGs del proyecto que no existen en el filesystem del dispositivo */
+async function downloadMissingDwgsForProject(projectId: string): Promise<void> {
+  const projects = await projectsCollection.query(Q.where('id', projectId)).fetch();
+  if (projects.length === 0) return;
+  const projectName = (projects[0] as any).name as string;
+
+  const prefix = s3ProjectPrefix(projectName);
+  const destDir = `${FileSystem.documentDirectory}plansdwg/`;
+  try { await FileSystem.makeDirectoryAsync(destDir, { intermediates: true }); } catch { /* ya existe */ }
+
+  try {
+    const keys = await listS3Keys(`${prefix}/plansdwg/`);
+    for (const key of keys) {
+      const fileName = key.split('/').pop();
+      if (!fileName) continue;
+      const localUri = `${destDir}${fileName}`;
+      const info = await FileSystem.getInfoAsync(localUri).catch(() => ({ exists: false }));
+      if (info.exists) continue;
+      try { await downloadFromS3(key, localUri); } catch { /* sin S3 o sin conectividad */ }
+    }
+  } catch { /* sin conectividad */ }
+}
+
+/** Descarga en segundo plano los PDFs de planes que no existen en el filesystem del dispositivo */
+async function downloadMissingPlansForProject(projectId: string): Promise<void> {
+  const projects = await projectsCollection.query(Q.where('id', projectId)).fetch();
+  if (projects.length === 0) return;
+  const projectName = (projects[0] as any).name as string;
+
+  const plans = await plansCollection.query(Q.where('project_id', projectId)).fetch();
+  if (plans.length === 0) return;
+
+  const prefix = s3ProjectPrefix(projectName);
+  const destDir = `${FileSystem.documentDirectory}plans/`;
+  try { await FileSystem.makeDirectoryAsync(destDir, { intermediates: true }); } catch { /* ya existe */ }
+
+  for (const plan of plans) {
+    const fileName = (plan as any).name + '.pdf';
+    const localUri = `${destDir}${fileName}`;
+    try {
+      const info = await FileSystem.getInfoAsync(localUri);
+      if (info.exists) continue;
+      await downloadFromS3(`${prefix}/plans/${fileName}`, localUri);
+    } catch { /* sin S3 o sin conectividad, ignorar */ }
+  }
+}
+
+/**
  * Descarga un proyecto completo desde Supabase al dispositivo local.
  * Deduplicación: si ya hay un pull en curso para el mismo projectId,
  * reutiliza la misma Promise en vez de lanzar una segunda escritura concurrente.
@@ -348,8 +464,13 @@ export function pullProjectFromCloud(projectId: string): Promise<SyncResult> {
     const errors: string[] = [];
     let pulled = 0;
     try {
+      // Push primero para que los datos locales (ej: is_na, has_answer) no sean
+      // sobreescritos por el pull con datos más viejos de Supabase
+      await pushProject(projectId).catch(() => {});
       pulled = await pullProject(projectId);
       downloadMissingPhotosForProject(projectId).catch(() => {});
+      downloadMissingPlansForProject(projectId).catch(() => {});
+      downloadMissingDwgsForProject(projectId).catch(() => {});
     } catch (e: any) {
       errors.push(`Pull: ${e.message}`);
     }
@@ -391,7 +512,20 @@ export async function syncAllUsers(): Promise<void> {
   // Pull todos los usuarios de Supabase que no existan localmente
   const { data: remoteUsers } = await supabase.from('users').select('*');
   if (remoteUsers && remoteUsers.length > 0) {
-    await upsertLocal(usersCollection, remoteUsers);
+    const existingLocal = await usersCollection.query().fetch();
+    const existingIds = new Set(existingLocal.map((u: any) => u.id));
+    const toCreate = remoteUsers.filter((r: any) => !existingIds.has(r.id));
+    if (toCreate.length > 0) {
+      await database.write(async () => {
+        const prepares = toCreate.map((r: any) =>
+          usersCollection.prepareCreate((u: any) => {
+            u._raw.id = r.id;
+            Object.assign(u._raw, r);
+          })
+        );
+        await database.batch(...prepares);
+      });
+    }
   }
 }
 
@@ -402,19 +536,40 @@ export async function syncAllUsers(): Promise<void> {
  * En reinstalación: busca en Supabase todos los proyectos del usuario
  * (por user_project_access y por created_by_id) y los descarga localmente.
  */
-export async function restoreUserProjectsFromCloud(userId: string): Promise<void> {
+export async function restoreUserProjectsFromCloud(userId: string, role?: string): Promise<void> {
   try {
-    const [accessRes, createdRes] = await Promise.all([
-      supabase.from('user_project_access').select('project_id').eq('user_id', userId),
-      supabase.from('projects').select('id').eq('created_by_id', userId),
-    ]);
-
     const projectIds = new Set<string>();
-    for (const a of accessRes.data ?? []) projectIds.add(a.project_id);
-    for (const p of createdRes.data ?? []) projectIds.add(p.id);
 
-    for (const projectId of projectIds) {
-      pullProjectFromCloud(projectId).catch(() => {});
+    if (role === 'CREATOR') {
+      // CREATOR ve todos los proyectos
+      const { data, error } = await supabase.from('projects').select('id');
+      console.log('[restore] CREATOR query → data:', JSON.stringify(data), 'error:', JSON.stringify(error));
+      for (const p of data ?? []) projectIds.add(p.id);
+    } else {
+      // Otros roles: proyectos por acceso o por creación
+      const [accessRes, createdRes] = await Promise.all([
+        supabase.from('user_project_access').select('project_id').eq('user_id', userId),
+        supabase.from('projects').select('id').eq('created_by_id', userId),
+      ]);
+      for (const a of accessRes.data ?? []) projectIds.add(a.project_id);
+      for (const p of createdRes.data ?? []) projectIds.add(p.id);
+    }
+
+    // Borrar localmente proyectos que ya no existen en Supabase
+    const localProjects = await projectsCollection.query().fetch();
+    const toDeleteLocally = localProjects.filter((p) => !projectIds.has(p.id));
+    if (toDeleteLocally.length > 0) {
+      console.log(`[restore] borrando ${toDeleteLocally.length} proyectos obsoletos localmente`);
+      await database.write(async () => {
+        for (const p of toDeleteLocally) {
+          await p.destroyPermanently();
+        }
+      });
+    }
+
+    // Pulls secuenciales para evitar deadlock en WatermelonDB async mode
+    for (const id of Array.from(projectIds)) {
+      await pullProjectFromCloud(id).catch(() => {});
     }
   } catch { /* sin conectividad */ }
 }

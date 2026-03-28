@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { protocolsCollection, locationsCollection } from '@db/index';
@@ -90,16 +91,11 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitle}>
-          <Text style={styles.title} numberOfLines={1}>{projectName}</Text>
-          <Text style={styles.subtitle}>{filtered.length} protocolo{filtered.length !== 1 ? 's' : ''}</Text>
-        </View>
-      </View>
+      <AppHeader
+        title={projectName}
+        subtitle={`${filtered.length} protocolo${filtered.length !== 1 ? 's' : ''}`}
+        onBack={() => navigation.goBack()}
+      />
 
       {/* Buscador */}
       <View style={styles.searchBar}>
@@ -174,16 +170,6 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { fontSize: 14, color: Colors.light, fontWeight: '600' },
-  headerTitle: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
-  subtitle: { fontSize: 11, color: Colors.light },
   searchBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider },
   searchInput: {
     backgroundColor: Colors.surface, borderRadius: Radius.md, paddingHorizontal: 14,

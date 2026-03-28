@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   Alert, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { database, nonConformitiesCollection } from '@db/index';
@@ -49,12 +50,7 @@ export default function NonConformityScreen({ navigation, route }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Levantar No Conformidad</Text>
-      </View>
+      <AppHeader title="No Conformidad" onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.infoBox}>
@@ -94,14 +90,6 @@ export default function NonConformityScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { fontSize: 14, color: Colors.light, fontWeight: '600' },
-  headerTitle: { fontSize: 13, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
   body: { padding: 20, gap: 14 },
   infoBox: {
     backgroundColor: '#fef9f0', borderRadius: Radius.md, padding: 14,

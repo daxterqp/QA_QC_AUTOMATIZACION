@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '@components/AppHeader';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { LOCATIONS_REQUIRED_COLUMNS } from '@services/ExcelLocationsImporter';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -39,16 +41,15 @@ export default function LocationsImportScreen({
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Cargar Ubicaciones</Text>
-          <Text style={styles.headerSub}>Excel de Ubicaciones y Planos</Text>
-        </View>
-        <TouchableOpacity onPress={onClose} disabled={isActive} style={styles.closeBtn}>
-          <Text style={styles.closeBtnText}>Cerrar</Text>
-        </TouchableOpacity>
-      </View>
+      <AppHeader
+        title="Cargar Ubicaciones"
+        subtitle={projectName}
+        rightContent={
+          <TouchableOpacity onPress={onClose}>
+            <Ionicons name="close" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Badge del proyecto */}
@@ -171,16 +172,6 @@ export default function LocationsImportScreen({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  headerTitle: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
-  headerSub: { fontSize: 11, color: Colors.light, marginTop: 2 },
-  closeBtn: { padding: 4 },
-  closeBtnText: { fontSize: 13, color: Colors.light, fontWeight: '600' },
 
   body: { padding: 16, gap: 16 },
 

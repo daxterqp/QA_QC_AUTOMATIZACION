@@ -9,6 +9,7 @@ import {
 import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { Q } from '@nozbe/watermelondb';
+import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 
 export type ImportState =
   | { status: 'idle' }
@@ -65,6 +66,9 @@ export function useExcelImport(projectId: string, projectName: string) {
         totalProtocols: imported,
         totalActivities,
       });
+
+      // Push a Supabase (no bloquea si falla)
+      pushProjectToSupabase(projectId).catch(() => {});
 
       // Subir a S3 (no bloquea si falla)
       try {

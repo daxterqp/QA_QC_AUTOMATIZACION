@@ -290,5 +290,29 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      // v12 → v13: page en plan_annotations (soporte multi-página PDF)
+      toVersion: 13,
+      steps: [
+        addColumns({
+          table: 'plan_annotations',
+          columns: [
+            { name: 'page', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      // v13 → v14: is_na en protocol_items (respuesta N/A)
+      toVersion: 14,
+      steps: [
+        addColumns({
+          table: 'protocol_items',
+          columns: [
+            { name: 'is_na', type: 'boolean', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

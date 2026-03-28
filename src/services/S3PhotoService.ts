@@ -4,8 +4,8 @@
  * Sube fotos de campo a S3 con la convención de nombres:
  *
  *   Evidencias de protocolo:
- *     projects/{projectName}/photos/{protocolId}-F001.jpg
- *     projects/{projectName}/photos/{protocolId}-F002.jpg  ...
+ *     projects/{projectName}/photos/{protocolNumber}-{location}-F001.jpg
+ *     projects/{projectName}/photos/{protocolNumber}-{location}-F002.jpg  ...
  *
  *   Fotos de comentarios de observación:
  *     projects/{projectName}/photos/obs-{annotationId}-F001.jpg
@@ -20,6 +20,7 @@ import {
   protocolItemsCollection,
   protocolsCollection,
   projectsCollection,
+  locationsCollection,
   evidencesCollection,
   annotationCommentsCollection,
   planAnnotationsCollection,
@@ -34,6 +35,17 @@ function seq(n: number): string {
   return String(n).padStart(3, '0');
 }
 
+/** Sanitiza un texto para uso seguro en nombre de archivo S3 */
+function sanitizeSegment(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // quitar tildes
+    .replace(/[^a-zA-Z0-9._-]/g, '_') // reemplazar caracteres especiales
+    .replace(/_+/g, '_')              // colapsar underscores consecutivos
+    .replace(/^_|_$/g, '')            // quitar underscore al inicio/fin
+    .slice(0, 60);
+}
+
 // ─── Evidencias de protocolo ─────────────────────────────────────────────────
 
 /**
@@ -43,12 +55,23 @@ function seq(n: number): string {
  * Llamar DESPUÉS de comprimir la imagen.
  */
 export async function uploadEvidencePhoto(evidenceId: string, localUri: string): Promise<void> {
-  // Cadena: evidence → protocolItem → protocol → project
+  // Cadena: evidence → protocolItem → protocol → location → project
   const evidence = await evidencesCollection.find(evidenceId);
   const protocolItem = await protocolItemsCollection.find(evidence.protocolItemId);
   const protocol = await protocolsCollection.find(protocolItem.protocolId!);
   const project = await projectsCollection.find(protocol.projectId);
   const prefix = s3ProjectPrefix(project.name);
+
+  // Obtener nombre de ubicación
+  let locationSegment = 'SIN_UBICACION';
+  if (protocol.locationId) {
+    try {
+      const locs = await locationsCollection.query(Q.where('id', protocol.locationId)).fetch();
+      if (locs.length > 0) locationSegment = sanitizeSegment(locs[0].name);
+    } catch { /* usar fallback */ }
+  } else if (protocol.locationReference) {
+    locationSegment = sanitizeSegment(protocol.locationReference);
+  }
 
   // Contar todas las evidencias de este protocolo para determinar posición
   const allItems = await protocolItemsCollection
@@ -61,7 +84,8 @@ export async function uploadEvidencePhoto(evidenceId: string, localUri: string):
 
   // Posición 1-based de esta evidencia en el protocolo
   const position = allEvidences.findIndex((e) => e.id === evidenceId) + 1;
-  const s3Key = `${prefix}/photos/${protocol.id}-F${seq(position)}.jpg`;
+  const protocolSegment = sanitizeSegment(protocol.protocolNumber || protocol.id);
+  const s3Key = `${prefix}/photos/${protocolSegment}-${locationSegment}-F${seq(position)}.jpg`;
 
   // Subir a S3
   await uploadToS3(localUri, s3Key, 'image/jpeg');
@@ -73,6 +97,38 @@ export async function uploadEvidencePhoto(evidenceId: string, localUri: string):
       ev.uploadStatus = 'SYNCED';
     });
   });
+}
+
+// ─── Fotos extra de protocolo (evidencia adicional) ──────────────────────────
+
+/**
+ * Sube una foto extra de protocolo a S3.
+ * Naming: {protocolNumber}-{location}-extra-F001.jpg, F002 ...
+ * position es el índice 1-based en el array de fotos extra.
+ */
+export async function uploadExtraPhoto(
+  protocolId: string,
+  localUri: string,
+  position: number,
+): Promise<void> {
+  const protocol = await protocolsCollection.find(protocolId);
+  const project = await projectsCollection.find(protocol.projectId);
+  const prefix = s3ProjectPrefix(project.name);
+
+  let locationSegment = 'SIN_UBICACION';
+  if (protocol.locationId) {
+    try {
+      const locs = await locationsCollection.query(Q.where('id', protocol.locationId)).fetch();
+      if (locs.length > 0) locationSegment = sanitizeSegment(locs[0].name);
+    } catch { /* usar fallback */ }
+  } else if (protocol.locationReference) {
+    locationSegment = sanitizeSegment(protocol.locationReference);
+  }
+
+  const protocolSegment = sanitizeSegment(protocol.protocolNumber || protocol.id);
+  const s3Key = `${prefix}/photos/${protocolSegment}-${locationSegment}-extra-F${seq(position)}.jpg`;
+
+  await uploadToS3(localUri, s3Key, 'image/jpeg');
 }
 
 // ─── Fotos de comentarios de observación ────────────────────────────────────

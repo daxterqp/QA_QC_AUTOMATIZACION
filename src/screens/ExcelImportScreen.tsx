@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '@components/AppHeader';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { REQUIRED_COLUMNS } from '@services/ExcelImporter';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -41,13 +43,15 @@ export default function ExcelImportScreen({
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Cargar Excel Maestro</Text>
-        <TouchableOpacity onPress={onClose} disabled={isActive} style={styles.closeBtn}>
-          <Text style={styles.closeBtnText}>Cerrar</Text>
-        </TouchableOpacity>
-      </View>
+      <AppHeader
+        title="Cargar Excel Maestro"
+        subtitle={projectName}
+        rightContent={
+          <TouchableOpacity onPress={onClose} disabled={isActive} style={{ opacity: isActive ? 0.4 : 1 }}>
+            <Ionicons name="close" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Info del proyecto */}
@@ -155,15 +159,6 @@ export default function ExcelImportScreen({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  headerTitle: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },
-  closeBtn: { padding: 4 },
-  closeBtnText: { fontSize: 13, color: Colors.light, fontWeight: '600' },
 
   body: { padding: 16, gap: 16 },
 

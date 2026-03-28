@@ -14,7 +14,8 @@
       "@services/*": ["src/services/*"],
       "@context/*": ["src/context/*"],
       "@navigation/*": ["src/navigation/*"],
-      "@config/*": ["src/config/*"]
+      "@config/*": ["src/config/*"],
+      "@components/*": ["src/components/*"]
     }
   },
   "include": ["src", "index.js", "app.json"]

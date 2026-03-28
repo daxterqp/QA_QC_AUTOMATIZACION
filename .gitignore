@@ -38,3 +38,8 @@ yarn-error.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Secrets / config con credenciales (no subir al repo)
+src/config/aws.ts
+src/config/supabase.ts
+android/app/google-services.json

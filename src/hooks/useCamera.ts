@@ -35,15 +35,19 @@ export function useCamera(): UseCameraReturn {
   const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('back');
   const { hasPermission, requestPermission } = useCameraPermission();
-  const [isLoading, setIsLoading] = useState(!hasPermission);
+  // isLoading también cubre el tiempo en que los dispositivos aún no están enumerados
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Solicitar permisos automaticamente al montar el hook
   useEffect(() => {
-    if (!hasPermission) {
-      setIsLoading(true);
-      requestPermission().finally(() => setIsLoading(false));
-    }
-  }, [hasPermission, requestPermission]);
+    let cancelled = false;
+    (async () => {
+      if (!hasPermission) {
+        await requestPermission();
+      }
+      if (!cancelled) setIsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const takePhoto = useCallback(async (): Promise<PhotoFile | null> => {
     if (!cameraRef.current || !hasPermission) return null;

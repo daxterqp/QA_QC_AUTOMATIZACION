@@ -11,6 +11,7 @@ import { downloadFromS3, listS3Keys } from './S3Service';
 import { importExcelMaestroFromUri } from './ExcelImporter';
 import { importExcelLocationsFromUri } from './ExcelLocationsImporter';
 import { s3ProjectPrefix } from '@config/aws';
+import { pushPlansToSupabase } from './SupabaseSyncService';
 
 export interface S3SyncResult {
   activities: { imported: number; skipped: number; error?: string };
@@ -163,6 +164,9 @@ export async function syncProjectFromS3(
       });
       result.plans.downloaded++;
     }
+    if (result.plans.downloaded > 0) {
+      pushPlansToSupabase(projectId).catch(() => {});
+    }
   } catch (e) {
     result.plans.error = String(e);
   }
@@ -242,9 +246,44 @@ export async function downloadPlansFromS3(
       });
       result.downloaded++;
     }
+    if (result.downloaded > 0) {
+      pushPlansToSupabase(projectId).catch(() => {});
+    }
   } catch (e) {
     result.error = String(e);
   }
 
+  return result;
+}
+
+// ── Descarga solo DWG desde S3 ────────────────────────────────────────────────
+
+export interface S3DwgResult {
+  downloaded: number;
+  skipped: number;
+  error?: string;
+}
+
+export async function downloadDwgFromS3(
+  projectName: string,
+  destDir: string
+): Promise<S3DwgResult> {
+  const result: S3DwgResult = { downloaded: 0, skipped: 0 };
+  const prefix = s3ProjectPrefix(projectName);
+  try {
+    const keys = await listS3Keys(`${prefix}/plansdwg/`);
+    await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
+    const existing = await FileSystem.readDirectoryAsync(destDir).catch(() => [] as string[]);
+    const existingSet = new Set(existing.map((f) => f.toLowerCase()));
+    for (const key of keys) {
+      const fileName = key.split('/').pop();
+      if (!fileName) continue;
+      if (existingSet.has(fileName.toLowerCase())) { result.skipped++; continue; }
+      await downloadFromS3(key, `${destDir}${fileName}`);
+      result.downloaded++;
+    }
+  } catch (e) {
+    result.error = String(e);
+  }
   return result;
 }

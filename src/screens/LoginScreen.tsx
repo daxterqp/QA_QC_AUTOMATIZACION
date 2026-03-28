@@ -1,19 +1,33 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, Image,
+  KeyboardAvoidingView, Platform, ScrollView, Alert, Image, Modal,
 } from 'react-native';
 import { useAuth } from '@context/AuthContext';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, loginDemo } = useAuth();
+  const [showDemoModal, setShowDemoModal] = useState(false);
+  const [demoPassword, setDemoPassword] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const canContinue = name.trim().length >= 2 && password.length >= 1;
+
+  const demoExpired = new Date() > new Date('2026-04-30T23:59:59');
+
+  const handleDemoAccess = () => {
+    if (demoPassword === '2026flow') {
+      setShowDemoModal(false);
+      setDemoPassword('');
+      loginDemo();
+    } else {
+      Alert.alert('Contraseña incorrecta', 'La contraseña de demo no es correcta.');
+    }
+  };
 
   const handleLogin = async () => {
     if (!canContinue) return;
@@ -46,7 +60,18 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>INICIAR SESION</Text>
+          <View style={styles.formTitleRow}>
+            <Text style={styles.formTitle}>INICIAR SESION</Text>
+            <TouchableOpacity
+              style={[styles.demoBadge, demoExpired && styles.demoBadgeExpired]}
+              onPress={() => { if (!demoExpired) setShowDemoModal(true); }}
+              activeOpacity={demoExpired ? 1 : 0.7}
+            >
+              <Text style={styles.demoBadgeText}>
+                {demoExpired ? 'Demo expirada' : 'Ver demo'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>NOMBRE</Text>
@@ -98,6 +123,7 @@ export default function LoginScreen() {
               {loading ? 'Verificando...' : 'INGRESAR'}
             </Text>
           </TouchableOpacity>
+
         </View>
 
         <Text style={styles.footer}>
@@ -105,6 +131,36 @@ export default function LoginScreen() {
         </Text>
 
       </ScrollView>
+
+      {/* Modal contraseña demo */}
+      <Modal visible={showDemoModal} transparent animationType="fade" onRequestClose={() => { setShowDemoModal(false); setDemoPassword(''); }}>
+        <View style={styles.demoOverlay}>
+          <View style={styles.demoCard}>
+            <Text style={styles.demoCardTitle}>Acceso Demo</Text>
+            <Text style={styles.demoCardSubtitle}>Ingresa la contraseña de demostración</Text>
+            <TextInput
+              style={styles.demoInput}
+              placeholder="Contraseña demo"
+              placeholderTextColor={Colors.textMuted}
+              value={demoPassword}
+              onChangeText={setDemoPassword}
+              secureTextEntry
+              returnKeyType="done"
+              onSubmitEditing={handleDemoAccess}
+              autoFocus
+            />
+            <View style={styles.demoActions}>
+              <TouchableOpacity onPress={() => { setShowDemoModal(false); setDemoPassword(''); }}>
+                <Text style={styles.demoCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.demoConfirmBtn} onPress={handleDemoAccess}>
+                <Text style={styles.demoConfirmText}>Entrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }
@@ -119,6 +175,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     alignItems: 'center',
     gap: 8,
+  },
+  formTitleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  demoBadge: {
+    backgroundColor: '#8a0659',
+    borderRadius: Radius.md,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  demoBadgeExpired: {
+    backgroundColor: '#6b7280',
+  },
+  demoBadgeText: {
+    color: Colors.white, fontWeight: '700', fontSize: 12, letterSpacing: 0.5,
   },
   logo: { width: 340, height: 260 },
   appTagline: {
@@ -168,5 +238,37 @@ const styles = StyleSheet.create({
   footer: {
     textAlign: 'center', color: Colors.light, fontSize: 11,
     padding: 28, lineHeight: 18,
+  },
+
+  demoOverlay: {
+    flex: 1, backgroundColor: 'rgba(14,33,61,0.75)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  demoCard: {
+    backgroundColor: Colors.white, borderRadius: Radius.lg,
+    padding: 28, width: '100%', gap: 16,
+  },
+  demoCardTitle: {
+    fontSize: 17, fontWeight: '700', color: Colors.navy, textAlign: 'center',
+  },
+  demoCardSubtitle: {
+    fontSize: 13, color: Colors.textSecondary, textAlign: 'center',
+  },
+  demoInput: {
+    backgroundColor: Colors.surface, borderRadius: Radius.md, padding: 14,
+    fontSize: 15, borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary,
+  },
+  demoActions: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  demoCancelText: {
+    fontSize: 13, color: Colors.textMuted, padding: 8,
+  },
+  demoConfirmBtn: {
+    backgroundColor: Colors.primary, borderRadius: Radius.md,
+    paddingHorizontal: 24, paddingVertical: 12,
+  },
+  demoConfirmText: {
+    color: Colors.white, fontWeight: '700', fontSize: 13,
   },
 });

@@ -10,6 +10,8 @@ try { Notifications = require('expo-notifications'); } catch { /* módulo nativo
 import type { RootStackParamList as RootStackParamListFull } from './types';
 
 import { useAuth } from '@context/AuthContext';
+import { TourProvider, useTour } from '@context/TourContext';
+import TourOverlay from '@components/TourOverlay';
 import type { RootStackParamList } from './types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -29,9 +31,11 @@ import UserManagementScreen from '@screens/UserManagementScreen';
 import ChangePasswordScreen from '@screens/ChangePasswordScreen';
 import DossierScreen from '@screens/DossierScreen';
 import PlansManagementScreen from '@screens/PlansManagementScreen';
+import FileUploadScreen from '@screens/FileUploadScreen';
 import PlanViewerScreen from '@screens/PlanViewerScreen';
 import HistoricalScreen from '@screens/HistoricalScreen';
 import AnnotationCommentsScreen from '@screens/AnnotationCommentsScreen';
+import DossierPreviewScreen from '@screens/DossierPreviewScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -71,43 +75,48 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator
-        screenOptions={{ headerShown: false }}
-        // La ruta inicial cambia dinámicamente según si hay sesión activa
-        initialRouteName={currentUser ? 'ProjectList' : 'Login'}
-      >
-        {!currentUser ? (
-          // ── Stack sin sesión ──────────────────────────────────────────────
-          <Stack.Screen name="Login" component={LoginScreen} />
-        ) : (
-          // ── Stack con sesión ──────────────────────────────────────────────
-          <>
-            <Stack.Screen name="ProjectList" component={ProjectListScreen} />
-            <Stack.Screen name="LocationList" component={LocationListScreen} />
-            <Stack.Screen name="LocationProtocols" component={LocationProtocolsScreen} />
-            <Stack.Screen name="ProtocolList" component={ProtocolListScreen} />
-            <Stack.Screen name="ProtocolFill" component={ProtocolFillScreen} />
-            <Stack.Screen name="ProtocolAudit" component={ProtocolAuditScreen} />
-            <Stack.Screen name="NonConformity" component={NonConformityScreen} />
-            <Stack.Screen name="Historical" component={HistoricalScreen} />
-            <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-            <Stack.Screen name="UserManagement" component={UserManagementScreen} />
-            <Stack.Screen name="Dossier" component={DossierScreenWrapper} />
-            <Stack.Screen name="PlansManagement" component={PlansManagementScreenWrapper} />
-            <Stack.Screen name="PlanViewer" component={PlanViewerScreen} />
-            <Stack.Screen name="AnnotationComments" component={AnnotationCommentsScreen} />
-            <Stack.Screen name="ExcelImport" component={ExcelImportScreenWrapper} />
-            <Stack.Screen name="LocationsImport" component={LocationsImportScreenWrapper} />
-            <Stack.Screen
-              name="Camera"
-              component={CameraScreenWrapper}
-              options={{ animation: 'fade' }}
-            />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <TourProvider navigationRef={navigationRef}>
+      <NavigationContainer ref={navigationRef}>
+        <Stack.Navigator
+          screenOptions={{ headerShown: false }}
+          // La ruta inicial cambia dinámicamente según si hay sesión activa
+          initialRouteName={currentUser ? 'ProjectList' : 'Login'}
+        >
+          {!currentUser ? (
+            // ── Stack sin sesión ──────────────────────────────────────────────
+            <Stack.Screen name="Login" component={LoginScreen} />
+          ) : (
+            // ── Stack con sesión ──────────────────────────────────────────────
+            <>
+              <Stack.Screen name="ProjectList" component={ProjectListScreen} />
+              <Stack.Screen name="LocationList" component={LocationListScreen} />
+              <Stack.Screen name="LocationProtocols" component={LocationProtocolsScreen} />
+              <Stack.Screen name="ProtocolList" component={ProtocolListScreen} />
+              <Stack.Screen name="ProtocolFill" component={ProtocolFillScreen} />
+              <Stack.Screen name="ProtocolAudit" component={ProtocolAuditScreen} />
+              <Stack.Screen name="NonConformity" component={NonConformityScreen} />
+              <Stack.Screen name="Historical" component={HistoricalScreen} />
+              <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+              <Stack.Screen name="UserManagement" component={UserManagementScreen} />
+              <Stack.Screen name="Dossier" component={DossierScreenWrapper} />
+              <Stack.Screen name="PlansManagement" component={PlansManagementScreenWrapper} />
+              <Stack.Screen name="FileUpload" component={FileUploadScreen} />
+              <Stack.Screen name="PlanViewer" component={PlanViewerScreen} />
+              <Stack.Screen name="AnnotationComments" component={AnnotationCommentsScreen} />
+              <Stack.Screen name="DossierPreview" component={DossierPreviewScreen} />
+              <Stack.Screen name="ExcelImport" component={ExcelImportScreenWrapper} />
+              <Stack.Screen name="LocationsImport" component={LocationsImportScreenWrapper} />
+              <Stack.Screen
+                name="Camera"
+                component={CameraScreenWrapper}
+                options={{ animation: 'fade' }}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+        <TourOverlay />
+      </NavigationContainer>
+    </TourProvider>
   );
 }
 
@@ -149,6 +158,7 @@ function CameraScreenWrapper({
     <CameraScreen
       protocolItemId={route.params.protocolItemId}
       annotationCommentId={route.params.annotationCommentId}
+      projectId={route.params.projectId}
       onClose={() => navigation.goBack()}
     />
   );
@@ -158,12 +168,20 @@ function DossierScreenWrapper({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'Dossier'>) {
+  const { isActive: tourActive, isContextual, dismissTour } = useTour();
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
   return (
     <DossierScreen
       projectId={route.params.projectId}
       projectName={route.params.projectName}
       onBack={() => navigation.goBack()}
       onOpenProtocol={(protocolId) => navigation.navigate('ProtocolAudit', { protocolId })}
+      onPreviewPdf={(pdfUri) => navigation.navigate('DossierPreview', { pdfUri, projectName: route.params.projectName })}
     />
   );
 }

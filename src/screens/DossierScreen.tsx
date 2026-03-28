@@ -1,19 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, StyleSheet, SectionList, TouchableOpacity, Alert,
+  View, Text, StyleSheet, SectionList, TouchableOpacity, Alert, ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { database, protocolsCollection, usersCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
+import { useTour } from '@context/TourContext';
+import { useTourStep } from '@hooks/useTourStep';
 import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
+import { exportDossierPdf } from '@services/DossierExportService';
+import { pushProtocolStatus } from '@services/SupabaseSyncService';
 
 interface Props {
   projectId: string;
   projectName: string;
   onBack: () => void;
   onOpenProtocol: (protocolId: string) => void;
+  onPreviewPdf?: (pdfUri: string) => void;
 }
 
 interface DaySection {
@@ -29,12 +36,35 @@ function toDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export default function DossierScreen({ projectId, projectName, onBack, onOpenProtocol }: Props) {
+export default function DossierScreen({ projectId, projectName, onBack, onOpenProtocol, onPreviewPdf }: Props) {
   const { currentUser } = useAuth();
   const [sections, setSections] = useState<DaySection[]>([]);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+
+  const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep } = useTour();
+
+  // Tour refs
+  const dossierExportBtnRef = useTourStep('dossier_export_btn');
+  const dossierItem0Ref = useTourStep('dossier_item_0');
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPdf = async () => {
+    if (!currentUser) return;
+    setExporting(true);
+    if (tourActive && tourStep?.id === 'dossier_export_btn') tourNextStep();
+    try {
+      const uri = await exportDossierPdf(projectId, projectName, currentUser.id);
+      if (onPreviewPdf) {
+        onPreviewPdf(uri);
+      }
+    } catch (e) {
+      Alert.alert('Error', `No se pudo generar el PDF.\n${String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     const protocols = await protocolsCollection
@@ -81,14 +111,16 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
       {
         text: 'Aprobar',
         onPress: async () => {
+          let updated: Protocol | null = null;
           await database.write(async () => {
-            await protocol.update((p) => {
+            updated = await protocol.update((p) => {
               p.status = 'APPROVED';
               p.isLocked = true;
               p.signedById = currentUser?.id ?? null;
               (p as any).signedAt = Date.now();
             });
           });
+          if (updated) pushProtocolStatus(updated).catch(() => {});
           await loadData();
         },
       },
@@ -104,12 +136,14 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
         {
           text: 'Rechazar', style: 'destructive',
           onPress: async () => {
+            let updated: Protocol | null = null;
             await database.write(async () => {
-              await protocol.update((p) => {
+              updated = await protocol.update((p) => {
                 p.status = 'REJECTED';
                 p.correctionsAllowed = true;
               });
             });
+            if (updated) pushProtocolStatus(updated).catch(() => {});
             await loadData();
           },
         },
@@ -125,17 +159,34 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <View>
-          <Text style={styles.title}>DOSIER DE PROTOCOLOS</Text>
-          <Text style={styles.subtitle}>{projectName}</Text>
-        </View>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader
+        title="Dosier de Protocolos"
+        subtitle={projectName}
+        onBack={onBack}
+        rightContent={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {isJefe && (
+              <TouchableOpacity
+                ref={dossierExportBtnRef}
+                onPress={handleExportPdf}
+                disabled={exporting}
+                style={styles.exportBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {exporting
+                  ? <ActivityIndicator color={Colors.white} size="small" />
+                  : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
+                }
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => jumpToStep('dossier_protocol_list')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
+      <View style={{ flex: 1 }}>
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
@@ -154,7 +205,8 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
             <Text style={styles.dayCount}>{section.data.length} protocolo(s)</Text>
           </View>
         )}
-        renderItem={({ item }) => {
+        renderItem={({ item, index, section }) => {
+          const isFirst = index === 0 && sections[0]?.title === section.title;
           const filledBy = item.filledById ? userNames[item.filledById] : 'Desconocido';
           const signedBy = item.signedById ? userNames[item.signedById] : null;
           const color = statusColor[item.status] ?? '#666';
@@ -162,8 +214,12 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
 
           return (
             <TouchableOpacity
+              ref={isFirst ? dossierItem0Ref : undefined}
               style={[styles.card, { borderLeftColor: color }]}
-              onPress={() => onOpenProtocol(item.id)}
+              onPress={() => {
+                if (isFirst && tourActive && tourStep?.id === 'dossier_protocol_list') tourNextStep();
+                onOpenProtocol(item.id);
+              }}
               activeOpacity={0.8}
             >
               <View style={styles.cardTop}>
@@ -200,21 +256,13 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
           );
         }}
       />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 14, fontWeight: '700', color: Colors.white, textAlign: 'center', letterSpacing: 1 },
-  subtitle: { fontSize: 11, color: Colors.light, textAlign: 'center' },
   list: { padding: 16, paddingBottom: 40, gap: 8 },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -235,15 +283,16 @@ const styles = StyleSheet.create({
   signedBy: { fontSize: 12, color: Colors.success, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 6 },
   approveBtn: {
-    flex: 1, backgroundColor: Colors.success, borderRadius: Radius.md,
-    padding: 11, alignItems: 'center',
+    flex: 1, backgroundColor: '#eaf7ee', borderRadius: Radius.md,
+    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#1e8e3e',
   },
-  approveBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
+  approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3 },
   rejectBtn: {
-    flex: 1, backgroundColor: Colors.danger, borderRadius: Radius.md,
-    padding: 11, alignItems: 'center',
+    flex: 1, backgroundColor: '#fdf0ef', borderRadius: Radius.md,
+    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#d93025',
   },
-  rejectBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
+  rejectBtnText: { color: '#d93025', fontWeight: '700', fontSize: 12, letterSpacing: 0.3 },
+  exportBtn: { padding: 4 },
   emptyContainer: { alignItems: 'center', paddingTop: 60, gap: 10 },
   empty: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
   emptyHint: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: 32 },

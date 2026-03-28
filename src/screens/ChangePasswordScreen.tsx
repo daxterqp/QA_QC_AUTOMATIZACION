@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -11,7 +12,7 @@ import { useAuth } from '@context/AuthContext';
 type Props = NativeStackScreenProps<RootStackParamList, 'ChangePassword'>;
 
 export default function ChangePasswordScreen({ navigation }: Props) {
-  const { currentUser, changePassword } = useAuth();
+  const { currentUser, changePassword, isDemo } = useAuth();
   const [current, setCurrent] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -23,6 +24,10 @@ export default function ChangePasswordScreen({ navigation }: Props) {
 
   const handleSave = async () => {
     if (!currentUser) return;
+    if (isDemo) {
+      Alert.alert('No disponible', 'No puedes cambiar de clave en modo demo.');
+      return;
+    }
 
     // Verificar contraseña actual
     const storedPassword = currentUser.password ?? currentUser.name;
@@ -50,19 +55,14 @@ export default function ChangePasswordScreen({ navigation }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>CAMBIAR CONTRASENA</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader title="Cambiar Clave" onBack={() => navigation.goBack()} />
 
       <View style={styles.container}>
         <View style={styles.card}>
           <Text style={styles.userLabel}>
             {currentUser?.name} {currentUser?.apellido}
           </Text>
+          <Text style={styles.idLabel}>ID: {currentUser?.id}</Text>
 
           <Text style={styles.label}>Contraseña actual</Text>
           <View style={styles.row}>
@@ -124,20 +124,13 @@ export default function ChangePasswordScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 15, fontWeight: '700', color: Colors.white, letterSpacing: 1 },
   container: { padding: 20, gap: 16 },
   card: {
     backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, gap: 12,
     ...Shadow.card,
   },
-  userLabel: { fontSize: 15, fontWeight: '700', color: Colors.primary, marginBottom: 4 },
+  userLabel: { fontSize: 15, fontWeight: '700', color: Colors.primary, marginBottom: 2 },
+  idLabel: { fontSize: 10, color: Colors.textSecondary, fontFamily: 'monospace', marginBottom: 4 },
   label: { fontSize: 10, fontWeight: '700', color: Colors.textSecondary, letterSpacing: 1.5 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   input: {

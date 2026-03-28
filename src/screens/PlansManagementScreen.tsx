@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, ActivityIndicator,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -14,6 +15,7 @@ import { Q } from '@nozbe/watermelondb';
 import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { downloadPlansFromS3 } from '@services/S3SyncService';
+import { pushPlansToSupabase } from '@services/SupabaseSyncService';
 
 interface Props {
   projectId: string;
@@ -60,8 +62,9 @@ export default function PlansManagementScreen({ projectId, projectName, onBack, 
     const existingPlans = plans.filter((p) => p.name.toLowerCase() === planName.toLowerCase());
     const existingLocIds = new Set(existingPlans.map((p) => p.locationId).filter(Boolean));
 
-    // Todas las ubicaciones que referencian este plano
-    const matchingLocs = findMatchingLocations(planName, locations);
+    // Consulta fresca para evitar usar el state desactualizado al momento de subir
+    const freshLocs = await locationsCollection.query(Q.where('project_id', projectId)).fetch();
+    const matchingLocs = findMatchingLocations(planName, freshLocs);
 
     // Ubicaciones que aún no tienen registro para este plano
     const newLocs = matchingLocs.filter((loc) => !existingLocIds.has(loc.id));
@@ -179,6 +182,9 @@ export default function PlansManagementScreen({ projectId, projectName, onBack, 
     } finally {
       setRelinking(false);
     }
+    if (linked.length > 0) {
+      pushPlansToSupabase(projectId).catch(() => {});
+    }
     const lines: string[] = [];
     if (linked.length) lines.push(`Vinculados (${linked.length}): ${linked.join(', ')}`);
     if (noMatch.length) lines.push(`Sin coincidencia (${noMatch.length}): ${noMatch.join(', ')}`);
@@ -246,6 +252,11 @@ export default function PlansManagementScreen({ projectId, projectName, onBack, 
 
     setUploading(false);
 
+    // Pushear inmediatamente a Supabase para que el siguiente pull no elimine los registros locales
+    if (linked.length + unlinked.length > 0) {
+      pushPlansToSupabase(projectId).catch(() => {});
+    }
+
     if (linked.length + unlinked.length + skipped.length > 0) {
       const lines: string[] = [];
       if (linked.length) lines.push(`Vinculados (${linked.length}): ${linked.join(', ')}`);
@@ -279,16 +290,7 @@ export default function PlansManagementScreen({ projectId, projectName, onBack, 
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <View>
-          <Text style={styles.title}>PLANOS</Text>
-          <Text style={styles.subtitle}>{projectName}</Text>
-        </View>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader title="Planos" subtitle={projectName} onBack={onBack} />
 
       <View style={styles.uploadBar}>
         {canManage && (
@@ -383,15 +385,6 @@ export default function PlansManagementScreen({ projectId, projectName, onBack, 
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 14, fontWeight: '700', color: Colors.white, textAlign: 'center', letterSpacing: 1 },
-  subtitle: { fontSize: 11, color: Colors.light, textAlign: 'center' },
   uploadBar: {
     padding: 16, gap: 6, backgroundColor: Colors.white,
     borderBottomWidth: 1, borderBottomColor: Colors.divider,

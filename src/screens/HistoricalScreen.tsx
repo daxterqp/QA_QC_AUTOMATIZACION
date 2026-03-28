@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useTour } from '@context/TourContext';
+import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TouchableWithoutFeedback,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Modal, Dimensions,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -168,11 +172,11 @@ function AnalysisCard({ title, a, b, labelA, labelB, colorA, colorB, onLongPress
   const pctA = total > 0 ? Math.round((a / total) * 100) : 0;
   const pctB = 100 - pctA;
   return (
-    <TouchableWithoutFeedback onLongPress={onLongPress} delayLongPress={500}>
-      <View style={styles.chartCard}>
+    <TouchableOpacity onPress={onLongPress} activeOpacity={0.85} style={styles.chartCard}>
+      <View>
         <Text style={styles.chartTitle}>{title}</Text>
         {onLongPress && (
-          <Text style={styles.longPressHint}>Mantén para ver detalle</Text>
+          <Text style={styles.longPressHint}>Toca para ver detalle</Text>
         )}
         {total === 0 ? (
           <Text style={styles.noData}>Sin datos</Text>
@@ -199,7 +203,7 @@ function AnalysisCard({ title, a, b, labelA, labelB, colorA, colorB, onLongPress
           </>
         )}
       </View>
-    </TouchableWithoutFeedback>
+    </TouchableOpacity>
   );
 }
 
@@ -299,11 +303,10 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap }: {
               <TouchableOpacity
                 key={i}
                 style={{ width: BAR_W, alignItems: 'center', justifyContent: 'flex-end', height: CHART_H + 36 }}
-                onLongPress={() => setWeekModal({
+                onPress={() => setWeekModal({
                   label: `Semana ${i + 1}`,
                   items: weekProtocols[i],
                 })}
-                delayLongPress={500}
                 activeOpacity={0.85}
               >
                 <Text style={styles.weekCount}>{cnt > 0 ? cnt : ''}</Text>
@@ -429,8 +432,7 @@ function SpecialtyBarChart({ protocols, locations }: { protocols: Protocol[]; lo
           <TouchableOpacity
             key={name}
             style={styles.specRow}
-            onLongPress={() => setSpecModal({ name, items: specProtocols[name] ?? [] })}
-            delayLongPress={500}
+            onPress={() => setSpecModal({ name, items: specProtocols[name] ?? [] })}
             activeOpacity={0.85}
           >
             <Text style={styles.specName} numberOfLines={2}>{name}</Text>
@@ -501,6 +503,44 @@ function SpecialtyBarChart({ protocols, locations }: { protocols: Protocol[]; lo
 
 export default function HistoricalScreen({ navigation, route }: Props) {
   const { currentUser } = useAuth();
+  const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour, unregisterMeasure, registerMeasure } = useTour();
+  const mainScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
+
+  // Scroll al fondo para mostrar dashboard_specialty y dashboard_notes (noPreMeasure=true).
+  // Estos pasos NO se pre-miden como upcomingStep; se miden aquí DESPUÉS del scroll.
+  useEffect(() => {
+    if (!tourActive) return;
+    const eid = tourStep?.elementId;
+    if (eid !== 'dashboard_specialty' && eid !== 'dashboard_notes') return;
+
+    // 1. Scroll natural
+    setTimeout(() => mainScrollRef.current?.scrollToEnd({ animated: true }), 60);
+
+    // 2. Medir después de que el scroll animado haya terminado (~400 ms)
+    setTimeout(() => {
+      const ref = eid === 'dashboard_specialty' ? dashboardSpecialtyRef : dashboardNotesRef;
+      ref.current?.measureInWindow((x, y, w, h) => {
+        if (w > 0 && h > 0) registerMeasure(eid, { x, y, width: w, height: h });
+      });
+    }, 480);
+  }, [tourActive, tourStep?.elementId]);
+
+  // Tour refs
+  const dashboardProjectFilterRef = useTourStep('dashboard_project_filter');
+  const dashboardFirstProjectRef = useTourStep('dashboard_first_project');
+  const { ref: dashboardApprovedRejectedRef, onLayout: dashboardApprovedRejectedLayout } = useTourStepWithLayout('dashboard_approved_rejected');
+  const { ref: dashboardObsStatusRef, onLayout: dashboardObsStatusLayout } = useTourStepWithLayout('dashboard_obs_status');
+  const dashboardDateFiltersRef = useTourStep('dashboard_date_filters');
+  const { ref: dashboardWeeklyRef, onLayout: dashboardWeeklyLayout } = useTourStepWithLayout('dashboard_weekly');
+  const { ref: dashboardSpecialtyRef, onLayout: dashboardSpecialtyLayout } = useTourStepWithLayout('dashboard_specialty');
+  const { ref: dashboardNotesRef, onLayout: dashboardNotesLayout } = useTourStepWithLayout('dashboard_notes');
   const initialProjectId = route.params?.projectId ?? null;
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initialProjectId);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -615,27 +655,33 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Histórico</Text>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader
+        title="Dashboard"
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('dashboard_project_filter')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={mainScrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Filtro por proyecto */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+        <ScrollView ref={dashboardProjectFilterRef as any} horizontal showsHorizontalScrollIndicator={false}
           style={styles.projectScroll} contentContainerStyle={styles.projectContent}>
           <TouchableOpacity
             style={[styles.chip, selectedProjectId === null && styles.chipActive]}
             onPress={() => setSelectedProjectId(null)}>
             <Text style={[styles.chipTxt, selectedProjectId === null && styles.chipTxtActive]}>Todos</Text>
           </TouchableOpacity>
-          {projects.map(p => (
+          {projects.map((p, pIdx) => (
             <TouchableOpacity key={p.id}
+              ref={pIdx === 0 ? dashboardFirstProjectRef : undefined}
               style={[styles.chip, selectedProjectId === p.id && styles.chipActive]}
-              onPress={() => setSelectedProjectId(p.id)}>
+              onPress={() => {
+                if (pIdx === 0 && tourActive && tourStep?.id === 'dashboard_first_project') tourNextStep();
+                setSelectedProjectId(p.id);
+              }}>
               <Text style={[styles.chipTxt, selectedProjectId === p.id && styles.chipTxtActive]} numberOfLines={1}>
                 {p.name}
               </Text>
@@ -644,7 +690,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
         </ScrollView>
 
         {/* Filtros de fecha */}
-        <View style={styles.filterCard}>
+        <View ref={dashboardDateFiltersRef} style={styles.filterCard}>
           <Text style={styles.filterTitle}>Filtros por fecha</Text>
           <Text style={styles.filterNote}>Afectan: aprobados/rechazados y observaciones</Text>
           <View style={styles.filterRow}>
@@ -655,53 +701,61 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
         {/* Análisis */}
         <View style={styles.chartsRow}>
-          <AnalysisCard
-            title="Aprobados vs Rechazados"
-            a={approved} b={rejected}
-            labelA="Aprobados" labelB="Rechazados"
-            colorA={Colors.success} colorB={Colors.danger}
-            onLongPress={
-              selectedProjectId
-                ? () => navigation.navigate('Dossier', {
-                    projectId: selectedProjectId,
-                    projectName: selectedProjectName,
-                  })
-                : undefined
-            }
-          />
-          <AnalysisCard
-            title="Obs. Abiertas vs Resueltas"
-            a={obsOpen} b={obsClosed}
-            labelA="Abiertas" labelB="Resueltas"
-            colorA="#e37400" colorB={Colors.secondary}
-            onLongPress={
-              selectedProjectId
-                ? () => navigation.navigate('AnnotationComments', {
-                    projectId: selectedProjectId,
-                    projectName: selectedProjectName,
-                  })
-                : undefined
-            }
-          />
+          <View ref={dashboardApprovedRejectedRef} style={{ flex: 1 }} onLayout={dashboardApprovedRejectedLayout}>
+            <AnalysisCard
+              title="Aprobados vs Rechazados"
+              a={approved} b={rejected}
+              labelA="Aprobados" labelB="Rechazados"
+              colorA={Colors.success} colorB={Colors.danger}
+              onLongPress={
+                selectedProjectId
+                  ? () => navigation.navigate('Dossier', {
+                      projectId: selectedProjectId,
+                      projectName: selectedProjectName,
+                    })
+                  : undefined
+              }
+            />
+          </View>
+          <View ref={dashboardObsStatusRef} style={{ flex: 1 }} onLayout={dashboardObsStatusLayout}>
+            <AnalysisCard
+              title="Obs. Abiertas vs Resueltas"
+              a={obsOpen} b={obsClosed}
+              labelA="Abiertas" labelB="Resueltas"
+              colorA="#e37400" colorB={Colors.secondary}
+              onLongPress={
+                selectedProjectId
+                  ? () => navigation.navigate('AnnotationComments', {
+                      projectId: selectedProjectId,
+                      projectName: selectedProjectName,
+                    })
+                  : undefined
+              }
+            />
+          </View>
         </View>
 
         {/* Gráfico semanal */}
         {projectStart && selectedProjectId && (
-          <WeeklyBarChart
-            protocols={protocols}
-            projectStart={projectStart}
-            locations={locations}
-            locMap={locMap}
-          />
+          <View ref={dashboardWeeklyRef} onLayout={dashboardWeeklyLayout}>
+            <WeeklyBarChart
+              protocols={protocols}
+              projectStart={projectStart}
+              locations={locations}
+              locMap={locMap}
+            />
+          </View>
         )}
 
         {/* Gráfico por especialidad */}
         {selectedProjectId && (locations.length > 0 || protocols.length > 0) && (
-          <SpecialtyBarChart protocols={protocols} locations={locations} />
+          <View ref={dashboardSpecialtyRef} onLayout={dashboardSpecialtyLayout}>
+            <SpecialtyBarChart protocols={protocols} locations={locations} />
+          </View>
         )}
 
         {/* Anotaciones */}
-        <View style={styles.notesSection}>
+        <View ref={dashboardNotesRef} style={styles.notesSection} onLayout={dashboardNotesLayout}>
           <Text style={styles.sectionTitle}>Anotaciones</Text>
           <View style={styles.noteInputRow}>
             <TextInput
@@ -745,14 +799,6 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 14, fontWeight: '700', color: Colors.white, letterSpacing: 1 },
   scroll: { padding: 16, gap: 16, paddingBottom: 48 },
 
   projectScroll: { marginBottom: -4 },

@@ -18,6 +18,8 @@ export default class PlanAnnotation extends Model {
   @field('is_ok') isOk!: boolean;
   /** 'OPEN' | 'CLOSED' — para el tablero de trazabilidad */
   @field('status') status!: string;
+  /** Página del PDF (1-based). null = legacy sin página */
+  @field('page') page!: number | null;
   @field('created_by_id') createdById!: string;
 
   @readonly @date('created_at') createdAt!: Date;

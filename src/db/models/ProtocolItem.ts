@@ -21,6 +21,7 @@ export default class ProtocolItem extends Model {
   /** Agrupacion visual, ej: "Pisos". null/NA = sin sección */
   @field('section') section!: string | null;
   @field('is_compliant') isCompliant!: boolean;
+  @field('is_na') isNa!: boolean;
   @field('has_answer') hasAnswer!: boolean;
   @field('comments') comments!: string | null;
 

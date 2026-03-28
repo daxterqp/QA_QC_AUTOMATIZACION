@@ -74,6 +74,26 @@ export async function s3FileExists(s3Key: string): Promise<boolean> {
 }
 
 /**
+ * Crea los placeholders .keep para todas las subcarpetas estándar de un proyecto.
+ * Llámalo justo después de crear un proyecto nuevo.
+ */
+export async function initProjectFolders(projectName: string): Promise<void> {
+  const { s3ProjectPrefix } = require('@config/aws');
+  const prefix = s3ProjectPrefix(projectName);
+  const folders = ['activities', 'locations', 'photos', 'plans', 'plansdwg', 'signatures'];
+  await Promise.all(
+    folders.map(folder =>
+      s3.send(new PutObjectCommand({
+        Bucket: AWS_CONFIG.bucketName,
+        Key: `${prefix}/${folder}/.keep`,
+        Body: new Uint8Array(0),
+        ContentType: 'application/octet-stream',
+      }))
+    )
+  );
+}
+
+/**
  * Lista las claves de objetos bajo un prefijo S3.
  */
 export async function listS3Keys(prefix: string): Promise<string[]> {

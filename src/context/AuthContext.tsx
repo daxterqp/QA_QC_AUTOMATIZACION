@@ -9,27 +9,18 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database, usersCollection } from '@db/index';
 import type User from '@models/User';
-import type { UserRole } from '@models/User';
-import { syncAllUsers, pushUserToSupabase } from '@services/SupabaseSyncService';
+import { pushUserToSupabase } from '@services/SupabaseSyncService';
 import { supabase } from '@config/supabase';
 import { registerPushToken, unregisterPushToken } from '@services/NotificationService';
 
 const STORAGE_KEY = '@scua_current_user_id';
 
-// Usuarios iniciales del sistema
-const SEED_USERS: { name: string; apellido: string; role: UserRole }[] = [
-  { name: 'Joseph', apellido: 'Yauri', role: 'CREATOR' },
-  { name: 'Angel', apellido: 'Quispe', role: 'CREATOR' },
-  { name: 'Pedro', apellido: 'Mantilla', role: 'RESIDENT' },
-  { name: 'Pablo', apellido: 'Gutierrez', role: 'SUPERVISOR' },
-  { name: 'Ruben', apellido: 'Supervisor', role: 'SUPERVISOR' },
-];
-
 interface AuthContextValue {
   currentUser: User | null;
   isLoading: boolean;
-  /** Login por nombre + contraseña. Primera vez: contraseña = nombre */
+  isDemo: boolean;
   login: (name: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
+  loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
 }
@@ -39,33 +30,52 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
-  // Restaurar sesion y sembrar usuarios iniciales
   useEffect(() => {
     (async () => {
       try {
-        // Sembrar usuarios iniciales — agrega los que falten sin tocar los existentes
-        const existing = await usersCollection.query().fetch();
-        const missing = SEED_USERS.filter(
-          (s) => !existing.find((e) => e.name.toLowerCase() === s.name.toLowerCase())
-        );
-        if (missing.length > 0) {
-          await database.write(async () => {
-            for (const seed of missing) {
-              await usersCollection.create((u) => {
-                u.name = seed.name;
-                u.apellido = seed.apellido;
-                u.role = seed.role;
-                u.password = seed.name;
-                u.pin = null;
-                u.signatureUri = null;
-              });
-            }
-          });
-        }
+        // Sincronizar usuarios desde Supabase (fuente de verdad)
+        try {
+          const { data: remoteUsers } = await supabase.from('users').select('*').order('created_at', { ascending: true });
+          const remoteList = remoteUsers ?? [];
 
-        // Sincronizar usuarios con Supabase (push local + pull remoto)
-        try { await syncAllUsers(); } catch { /* sin internet, continuar offline */ }
+          // Deduplicar: si hay dos usuarios con mismo name+apellido, quedarse con el más antiguo
+          const seen = new Map<string, any>();
+          const duplicateIds: string[] = [];
+          for (const r of remoteList) {
+            const key = `${r.name?.toLowerCase()}|${r.apellido?.toLowerCase()}`;
+            if (seen.has(key)) {
+              duplicateIds.push(r.id);
+            } else {
+              seen.set(key, r);
+            }
+          }
+          // Borrar duplicados de Supabase
+          if (duplicateIds.length > 0) {
+            await supabase.from('users').delete().in('id', duplicateIds);
+          }
+          const dedupedList = remoteList.filter((r: any) => !duplicateIds.includes(r.id));
+          const remoteIds = new Set(dedupedList.map((r: any) => r.id));
+
+          const localUsers = await usersCollection.query().fetch();
+          const toCreate = dedupedList.filter((r: any) => !localUsers.find((e) => e.id === r.id));
+          const toDelete = localUsers.filter((e) => !remoteIds.has(e.id));
+
+          if (toCreate.length > 0 || toDelete.length > 0) {
+            await database.write(async () => {
+              for (const remote of toCreate) {
+                await usersCollection.create((u) => {
+                  (u as any)._raw.id = remote.id;
+                  Object.assign((u as any)._raw, remote);
+                });
+              }
+              for (const u of toDelete) {
+                await u.destroyPermanently();
+              }
+            });
+          }
+        } catch { /* sin internet, usar caché local */ }
 
         // Restaurar sesión guardada
         const userId = await AsyncStorage.getItem(STORAGE_KEY);
@@ -94,21 +104,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (u) => u.name.toLowerCase() === name.trim().toLowerCase()
     ) ?? null;
 
-    // 2. Si no existe localmente, buscar en Supabase
+    // 2. Si no existe localmente, buscar en Supabase (puede que aún no se haya sincronizado)
     if (!user) {
       try {
         const { data } = await supabase
           .from('users')
           .select('*')
-          .ilike('name', name.trim());
+          .ilike('name', name.trim())
+          .order('created_at', { ascending: true })
+          .limit(1);
 
         if (data && data.length > 0) {
           const remote = data[0];
-          // Verificar contraseña antes de crear localmente
           const remotePassword = remote.password ?? remote.name;
           if (remotePassword !== password) return 'wrong_password';
 
-          // Crear usuario en WatermelonDB local
           await database.write(async () => {
             await usersCollection.create((u) => {
               (u as any)._raw.id = remote.id;
@@ -121,16 +131,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           registerPushToken(user.id).catch(() => {});
           return 'ok';
         }
-      } catch { /* sin internet, seguir con not_found */ }
+      } catch { /* sin internet */ }
       return 'not_found';
     }
 
-    // 3. Usuario encontrado localmente — verificar contraseña
+    // 3. Verificar contraseña
     const storedPassword = user.password ?? user.name;
     if (storedPassword !== password) return 'wrong_password';
 
-    // 4. Subir usuario a Supabase (mantiene cambios de contraseña sincronizados)
-    try { await pushUserToSupabase(user.id); } catch { /* offline, ignorar */ }
+    // 4. Sincronizar cambios de contraseña a Supabase
+    try { await pushUserToSupabase(user.id); } catch { /* offline */ }
 
     await AsyncStorage.setItem(STORAGE_KEY, user.id);
     setCurrentUser(user);
@@ -138,12 +148,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return 'ok';
   }, []);
 
+  const loginDemo = useCallback(() => {
+    const demoUser = {
+      id: 'demo-user',
+      name: 'DemoFlow-QAQC',
+      apellido: '',
+      role: 'CREATOR',
+      password: '2026flow',
+    } as unknown as User;
+    setCurrentUser(demoUser);
+    setIsDemo(true);
+  }, []);
+
   const logout = useCallback(async () => {
+    if (isDemo) {
+      setCurrentUser(null);
+      setIsDemo(false);
+      return;
+    }
     const userId = await AsyncStorage.getItem(STORAGE_KEY);
     if (userId) unregisterPushToken(userId).catch(() => {});
     await AsyncStorage.removeItem(STORAGE_KEY);
     setCurrentUser(null);
-  }, []);
+  }, [isDemo]);
 
   const changePassword = useCallback(async (userId: string, newPassword: string) => {
     const user = await usersCollection.find(userId);
@@ -155,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, login, logout, changePassword }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword }}>
       {children}
     </AuthContext.Provider>
   );

@@ -2,10 +2,10 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 /**
  * Schema S-CUA MVP
- * v12: location_only + specialty en locations
+ * v14: is_na en protocol_items (respuesta N/A)
  */
 export const schema = appSchema({
-  version: 12,
+  version: 14,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -123,7 +123,8 @@ export const schema = appSchema({
         { name: 'validation_method', type: 'string', isOptional: true },
         { name: 'section', type: 'string', isOptional: true },  // Agrupacion visual en protocolo
         { name: 'is_compliant', type: 'boolean' },
-        { name: 'has_answer', type: 'boolean' },   // true = usuario respondió Si o No
+        { name: 'is_na', type: 'boolean' },        // true = usuario respondió N/A
+        { name: 'has_answer', type: 'boolean' },   // true = usuario respondió Si, No o N/A
         { name: 'comments', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
@@ -186,6 +187,7 @@ export const schema = appSchema({
         { name: 'sequence_number', type: 'number' },
         { name: 'is_ok', type: 'boolean' },
         { name: 'status', type: 'string' },             // 'OPEN' | 'CLOSED'
+        { name: 'page', type: 'number', isOptional: true }, // número de página del PDF (1-based)
         { name: 'created_by_id', type: 'string' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },

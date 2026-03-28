@@ -7,6 +7,7 @@ import {
 } from '@services/ExcelLocationsImporter';
 import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
+import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 
 export type LocationsImportState =
   | { status: 'idle' }
@@ -56,6 +57,9 @@ export function useLocationsImport(projectId: string, projectName: string) {
       });
 
       setImportState({ status: 'success', totalLocations: toInsert.length });
+
+      // Push a Supabase (no bloquea si falla)
+      pushProjectToSupabase(projectId).catch(() => {});
 
       // Subir a S3 (no bloquea si falla)
       try {

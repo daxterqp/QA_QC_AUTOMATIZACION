@@ -4,6 +4,8 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Alert, Image, Modal, Dimensions,
 } from 'react-native';
+import AppHeader from '@components/AppHeader';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import {
@@ -11,12 +13,15 @@ import {
   annotationCommentsCollection, annotationCommentPhotosCollection, usersCollection,
   protocolsCollection,
 } from '@db/index';
+import { useAuth } from '@context/AuthContext';
+import { useTour } from '@context/TourContext';
+import { useTourStep } from '@hooks/useTourStep';
 import { Q } from '@nozbe/watermelondb';
 import type Plan from '@models/Plan';
 import type PlanAnnotation from '@models/PlanAnnotation';
 import type AnnotationComment from '@models/AnnotationComment';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { pullProjectFromCloud, pushProjectToSupabase } from '@services/SupabaseSyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AnnotationComments'>;
 
@@ -33,6 +38,21 @@ interface AnnRow {
 
 export default function AnnotationCommentsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+  const { currentUser } = useAuth();
+  const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+  const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour } = useTour();
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
+
+  // Tour refs
+  const annotationRowRef = useTourStep('annotation_row');
+  const annotationStatusBadgeRef = useTourStep('annotation_status_badge');
+
   const [rows, setRows] = useState<AnnRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
@@ -61,7 +81,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
           const name = `${(u as any).name} ${(u as any).apellido ?? ''}`.trim();
           userCache[uid] = name;
           return name;
-        } catch { userCache[uid] = uid; return uid; }
+        } catch { userCache[uid] = 'Inspector'; return 'Inspector'; }
       };
 
       const result: AnnRow[] = [];
@@ -128,14 +148,18 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
 
   useEffect(() => { loadData(); }, [loadData]);
   useFocusEffect(useCallback(() => {
-    pullProjectFromCloud(projectId).catch(() => {});
     loadData();
+    pullProjectFromCloud(projectId)
+      .catch(() => {})
+      .finally(() => loadData());
   }, [loadData, projectId]));
 
   const handleOk = async (row: AnnRow) => {
     await database.write(async () => {
       await row.annotation.update((a) => { a.isOk = true; (a as any).status = 'CLOSED'; });
     });
+    // Push a Supabase para que el cambio persista en la nube
+    pushProjectToSupabase(projectId).catch(() => {});
     await loadData();
   };
 
@@ -177,17 +201,16 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={styles.title}>OBSERVACIONES</Text>
-          <Text style={styles.subtitle}>{projectName}</Text>
-        </View>
-        <View style={{ width: 60 }} />
-      </View>
+      <AppHeader
+        title="Observaciones"
+        subtitle={projectName}
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('annotation_row')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       {loading ? (
         <View style={styles.centered}>
@@ -199,20 +222,28 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
           keyExtractor={(r) => r.annotation.id}
           contentContainerStyle={styles.list}
           ListEmptyComponent={<Text style={styles.empty}>No hay observaciones en los planos de este proyecto.</Text>}
-          renderItem={({ item: row }) => {
+          renderItem={({ item: row, index }) => {
             const ann = row.annotation as any;
             const isClosed = ann.isOk || ann.status === 'CLOSED';
             return (
               <TouchableOpacity
+                ref={index === 0 ? annotationRowRef : undefined}
                 style={[styles.card, isClosed && styles.cardClosed]}
+                onPress={() => {
+                  if (index === 0 && tourActive && tourStep?.id === 'annotation_tap_row') tourNextStep();
+                  handleGo(row);
+                }}
                 onLongPress={() => handleDelete(row)}
                 delayLongPress={500}
                 activeOpacity={0.92}
               >
                 {/* Cabecera: número + plano */}
                 <View style={styles.cardTop}>
-                  <View style={[styles.numBadge, { backgroundColor: isClosed ? Colors.success : Colors.danger }]}>
-                    <Text style={styles.numBadgeText}>{isClosed ? 'OK' : String(ann.sequenceNumber)}</Text>
+                  <View
+                    ref={index === 0 ? annotationStatusBadgeRef : undefined}
+                    style={[styles.numBadge, { backgroundColor: isClosed ? Colors.success : Colors.danger }]}
+                  >
+                    <Text style={styles.numBadgeText}>{String(ann.sequenceNumber)}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     {row.protocolNumber ? (
@@ -265,19 +296,13 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
                   </View>
                 )}
 
-                {/* Acciones */}
-                <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.goBtn} onPress={() => handleGo(row)}>
-                    <Text style={styles.goBtnText}>Ir al plano →</Text>
-                  </TouchableOpacity>
-                  {!isClosed && (
+                {/* Acciones — solo jefe/creador */}
+                {!isClosed && isJefe && (
+                  <View style={styles.cardActions}>
                     <TouchableOpacity style={styles.okBtn} onPress={() => handleOk(row)}>
-                      <Text style={styles.okBtnText}>OK</Text>
+                      <Text style={styles.okBtnText}>Completado</Text>
                     </TouchableOpacity>
-                  )}
-                </View>
-                {!isClosed && (
-                  <Text style={styles.longPressHint}>Mantén presionado para eliminar</Text>
+                  </View>
                 )}
               </TouchableOpacity>
             );
@@ -299,15 +324,6 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 16,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { color: Colors.light, fontSize: 14, fontWeight: '600' },
-  title: { fontSize: 14, fontWeight: '700', color: Colors.white, textAlign: 'center', letterSpacing: 1 },
-  subtitle: { fontSize: 11, color: Colors.light, textAlign: 'center' },
   list: { padding: 16, gap: 12 },
   empty: { textAlign: 'center', color: Colors.textMuted, marginTop: 40, lineHeight: 24 },
   card: {
@@ -331,18 +347,12 @@ const styles = StyleSheet.create({
   lastReplyText: { fontSize: 11, color: Colors.textMuted },
   lastReplyContent: { fontSize: 12, color: Colors.textPrimary, marginTop: 4, width: '100%' },
   lastReplyPhoto: { width: '100%', height: 140, borderRadius: Radius.sm, marginTop: 6 },
-  cardActions: { flexDirection: 'row', gap: 10 },
-  goBtn: {
-    flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.md,
-    paddingVertical: 10, alignItems: 'center',
-  },
-  goBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
+  cardActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
   okBtn: {
     borderWidth: 1.5, borderColor: Colors.success, borderRadius: Radius.md,
     paddingVertical: 10, paddingHorizontal: 18, alignItems: 'center',
   },
   okBtnText: { color: Colors.success, fontWeight: '700', fontSize: 13 },
-  longPressHint: { fontSize: 9, color: Colors.textMuted, textAlign: 'right', fontStyle: 'italic', marginTop: -4 },
   photosRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, width: '100%', marginTop: 4 },
   photoThumb: { width: 72, height: 72, borderRadius: Radius.sm, backgroundColor: Colors.surface },
   photoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },

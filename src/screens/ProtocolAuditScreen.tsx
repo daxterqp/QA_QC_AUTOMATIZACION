@@ -1,9 +1,15 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal,
   Alert, ActivityIndicator, ScrollView, Image, TextInput,
-  Dimensions,
+  FlatList, useWindowDimensions,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { applyPhotoStamps } from '@services/PhotoStampService';
+import { getProjectSettings } from '@services/ProjectSettings';
+import { uploadExtraPhoto } from '@services/S3PhotoService';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import {
@@ -12,18 +18,30 @@ import {
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
+import { useTour } from '@context/TourContext';
+import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
 import type Protocol from '@models/Protocol';
 import type Location from '@models/Location';
 import type Evidence from '@models/Evidence';
 import type Plan from '@models/Plan';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { notifyProtocolApproved } from '@services/NotificationService';
+import AppHeader from '@components/AppHeader';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProtocolAudit'>;
 
 export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const { protocolId } = route.params;
   const { currentUser } = useAuth();
+
+  // Tour refs
+  const auditItemsListRef = useTourStep('audit_items_list');
+  const auditActionBtnsRef = useTourStep('audit_action_buttons');
+  const { ref: headerRef, onLayout: headerLayout } = useTourStepWithLayout('dossier_protocol_header');
+  const { ref: backBtnRef, onLayout: backBtnLayout } = useTourStepWithLayout('dossier_protocol_back_btn');
+  const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep } = useTour();
+
   const [protocol, setProtocol] = useState<Protocol | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [location, setLocation] = useState<Location | null>(null);
@@ -37,10 +55,60 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const [rejectReason, setRejectReason] = useState('');
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
-  const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const [fullscreenPhotos, setFullscreenPhotos] = useState<string[]>([]);
+  const [fullscreenInitIdx, setFullscreenInitIdx] = useState(0);
+  const [currentFullIdx, setCurrentFullIdx] = useState(0);
+  const fullscreenListRef = useRef<FlatList>(null);
+  const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
+  const [addingPhoto, setAddingPhoto] = useState(false);
+
+  const extraPhotosKey = `protocol_extra_photos_${protocolId}`;
+
+  // Cargar fotos extra al montar
+  useEffect(() => {
+    AsyncStorage.getItem(extraPhotosKey)
+      .then((val) => { if (val) setExtraPhotos(JSON.parse(val)); })
+      .catch(() => {});
+  }, [extraPhotosKey]);
+
+  const handleAddExtraPhoto = async () => {
+    if (!protocol) return;
+    setAddingPhoto(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/jpeg', 'image/png', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+
+      // Estampar fecha/hora/logo
+      const projectId = (protocol as any).projectId ?? '';
+      const settings = await getProjectSettings(projectId);
+      const destDir = `${FileSystem.documentDirectory}extra_photos/`;
+      await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
+      const destUri = `${destDir}${protocolId}_${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: asset.uri, to: destUri });
+
+      const stamped = await applyPhotoStamps(destUri, settings.stampEnabled ? settings.stampPhotoUri : null);
+
+      const updated = [...extraPhotos, stamped];
+      setExtraPhotos(updated);
+      await AsyncStorage.setItem(extraPhotosKey, JSON.stringify(updated));
+
+      // Subir a S3 en background
+      const position = updated.length;
+      uploadExtraPhoto(protocolId, stamped, position).catch(() => {});
+    } catch (e) {
+      Alert.alert('Error', `No se pudo adjuntar la foto.\n${String(e)}`);
+    } finally {
+      setAddingPhoto(false);
+    }
+  };
 
   useEffect(() => {
-    protocolsCollection.find(protocolId).then(setProtocol);
+    protocolsCollection.find(protocolId).then(setProtocol).catch(() => {});
     protocolItemsCollection
       .query(Q.where('protocol_id', protocolId))
       .fetch()
@@ -132,50 +200,63 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
 
   const p = protocol as any;
   const compliant = items.filter((i) => i.isCompliant).length;
-  const nonCompliant = items.filter((i) => i.isCompliant === false).length;
+  const nonCompliant = items.filter((i) => !i.isCompliant && (i as any).isNa !== true && i.hasAnswer).length;
+  // Puede aprobar solo si todos los ítems respondidos son Sí o N/A (ningún No)
+  const canApprove = items.length > 0 && items.every((i) => i.hasAnswer && (i.isCompliant || (i as any).isNa === true));
   const canEdit = isJefe && (p.status === 'DRAFT' || p.status === 'IN_PROGRESS' || (p.status === 'REJECTED' && p.correctionsAllowed));
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>Volver</Text>
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.protocolNum}>{p.protocolNumber}</Text>
-          <Text style={styles.locationText}>
-            {location ? `${location.name}` : 'Sin ubicacion'}
-          </Text>
-        </View>
-        <View style={styles.headerRight}>
-          {canEdit && (
+      <View ref={headerRef} onLayout={headerLayout}>
+      <AppHeader
+        title={p.protocolNumber}
+        subtitle={location ? location.name : 'Sin ubicacion'}
+        leftContent={
+          <View ref={backBtnRef} onLayout={backBtnLayout}>
             <TouchableOpacity
-              style={styles.editBtn}
-              onPress={() => navigation.replace('ProtocolFill', { protocolId })}
-            >
-              <Text style={styles.editBtnText}>Editar</Text>
-            </TouchableOpacity>
-          )}
-          {locationPlans.length > 0 && location && (
-            <TouchableOpacity
-              style={styles.planBtn}
               onPress={() => {
-                navigation.navigate('PlanViewer', {
-                  planId: locationPlans[0].id,
-                  planName: locationPlans[0].name,
-                  protocolId: protocolId,
-                  locationId: location.id,
-                });
+                if (tourActive && tourStep?.id === 'dossier_protocol_back_btn') tourNextStep();
+                navigation.goBack();
               }}
+              style={styles.backBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Text style={styles.planBtnText}>{'Ver\nPlanos'}</Text>
+              <Ionicons name="arrow-back" size={24} color={Colors.white} />
             </TouchableOpacity>
-          )}
-          <View style={[styles.statusBadge, { backgroundColor: statusColor(p.status) }]}>
-            <Text style={styles.statusText}>{statusLabel(p.status)}</Text>
           </View>
-        </View>
+        }
+        rightContent={
+          <View style={styles.headerRight}>
+            {canEdit && (
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => navigation.replace('ProtocolFill', { protocolId })}
+              >
+                <Text style={styles.editBtnText}>Editar</Text>
+              </TouchableOpacity>
+            )}
+            {locationPlans.length > 0 && location && (
+              <TouchableOpacity
+                style={styles.planBtn}
+                onPress={() => {
+                  navigation.navigate('PlanViewer', {
+                    planId: locationPlans[0].id,
+                    planName: locationPlans[0].name,
+                    protocolId: protocolId,
+                    locationId: location.id,
+                  });
+                }}
+              >
+                <Ionicons name="map-outline" size={14} color={Colors.white} />
+                <Text style={styles.planBtnText}>Planos</Text>
+              </TouchableOpacity>
+            )}
+            <View style={[styles.statusBadge, { backgroundColor: statusColor(p.status) }]}>
+              <Text style={styles.statusText}>{statusLabel(p.status)}</Text>
+            </View>
+          </View>
+        }
+      />
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
@@ -189,10 +270,12 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
             <Text style={[styles.summaryNum, { color: Colors.danger }]}>{nonCompliant}</Text>
             <Text style={styles.summaryLabel}>No Cumple</Text>
           </View>
-          <View style={[styles.summaryCard, { borderColor: Colors.textMuted }]}>
-            <Text style={[styles.summaryNum, { color: Colors.textMuted }]}>{items.length - compliant - nonCompliant}</Text>
-            <Text style={styles.summaryLabel}>Sin responder</Text>
-          </View>
+          {(items.length - compliant - nonCompliant) > 0 && (
+            <View style={[styles.summaryCard, { borderColor: Colors.textMuted }]}>
+              <Text style={[styles.summaryNum, { color: Colors.textMuted }]}>{items.length - compliant - nonCompliant}</Text>
+              <Text style={styles.summaryLabel}>Sin responder</Text>
+            </View>
+          )}
         </View>
 
         {/* Metadata */}
@@ -211,17 +294,18 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
 
         {/* Items */}
         {items.map((item, index) => (
-          <View key={item.id} style={styles.itemCard}>
+          <View key={item.id} ref={index === 0 ? auditItemsListRef : undefined} style={styles.itemCard}>
             <View style={styles.itemHeader}>
               <Text style={styles.itemNum}>{index + 1}</Text>
               <Text style={styles.itemDesc} numberOfLines={2}>{item.itemDescription}</Text>
               <View style={[
                 styles.resultBadge,
-                item.isCompliant === true && styles.resultBadgeYes,
-                item.isCompliant === false && styles.resultBadgeNo,
+                (item as any).isNa && styles.resultBadgeNa,
+                item.isCompliant === true && !(item as any).isNa && styles.resultBadgeYes,
+                item.isCompliant === false && !(item as any).isNa && styles.resultBadgeNo,
               ]}>
                 <Text style={styles.resultText}>
-                  {item.isCompliant === true ? 'Si' : item.isCompliant === false ? 'No' : '—'}
+                  {(item as any).isNa ? 'N/A' : item.isCompliant === true ? 'Sí' : item.isCompliant === false ? 'No' : '—'}
                 </Text>
               </View>
             </View>
@@ -234,7 +318,13 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
                 {(evidenceMap[item.id] ?? []).map((ev) => (
                   <TouchableOpacity
                     key={ev.id}
-                    onPress={() => setFullscreenPhoto(ev.localUri)}
+                    onPress={() => {
+                      const uris = (evidenceMap[item.id] ?? []).map(e => e.localUri);
+                      const idx = uris.indexOf(ev.localUri);
+                      setFullscreenPhotos(uris);
+                      setFullscreenInitIdx(Math.max(0, idx));
+                      setCurrentFullIdx(Math.max(0, idx));
+                    }}
                     onLongPress={() => {
                       if (!isJefe) return;
                       Alert.alert('Eliminar foto', '¿Eliminar esta foto del protocolo?', [
@@ -265,25 +355,70 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
           </View>
         ))}
 
-        {/* Acciones del Jefe — solo Rechazar y Aprobar y Firmar */}
+        {/* Adjuntar evidencia fotográfica extra — solo jefe */}
+        {isJefe && (
+          <View style={styles.extraPhotoSection}>
+            <TouchableOpacity
+              style={[styles.extraPhotoBtn, addingPhoto && styles.btnDisabled]}
+              onPress={handleAddExtraPhoto}
+              disabled={addingPhoto}
+            >
+              {addingPhoto
+                ? <ActivityIndicator color={Colors.primary} size="small" />
+                : <>
+                    <Ionicons name="camera-outline" size={16} color={Colors.primary} />
+                    <Text style={styles.extraPhotoBtnText}>Adjuntar evidencia fotográfica extra</Text>
+                  </>
+              }
+            </TouchableOpacity>
+            {extraPhotos.length > 0 && (
+              <View style={styles.photosRow}>
+                {extraPhotos.map((uri, idx) => (
+                  <TouchableOpacity key={uri} onPress={() => {
+                    setFullscreenPhotos(extraPhotos);
+                    setFullscreenInitIdx(idx);
+                    setCurrentFullIdx(idx);
+                  }}
+                    onLongPress={() => {
+                      Alert.alert('Eliminar foto', '¿Eliminar esta foto extra?', [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Eliminar', style: 'destructive', onPress: async () => {
+                          const updated = extraPhotos.filter(u => u !== uri);
+                          setExtraPhotos(updated);
+                          await AsyncStorage.setItem(extraPhotosKey, JSON.stringify(updated));
+                        }},
+                      ]);
+                    }}
+                  >
+                    <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Acciones del Jefe — Aprobar (solo si canApprove) y Rechazar */}
         {isJefe && p.status === 'SUBMITTED' && (
-          <View style={styles.actions}>
+          <View ref={auditActionBtnsRef} style={styles.actions}>
+            {canApprove && (
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.actionBtnApprove]}
+                onPress={approve}
+                disabled={saving}
+              >
+                {saving
+                  ? <ActivityIndicator color={Colors.success} />
+                  : <Text style={styles.actionBtnTextApprove}>Aprobar y Firmar</Text>
+                }
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.actionBtn, styles.actionBtnReject]}
               onPress={() => setShowRejectModal(true)}
               disabled={saving}
             >
-              <Text style={styles.actionBtnText}>Rechazar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnApprove]}
-              onPress={approve}
-              disabled={saving}
-            >
-              {saving
-                ? <ActivityIndicator color={Colors.white} />
-                : <Text style={styles.actionBtnText}>Aprobar y Firmar</Text>
-              }
+              <Text style={styles.actionBtnTextReject}>Rechazar</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -300,21 +435,34 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         )}
       </ScrollView>
 
-      {/* Modal foto fullscreen */}
-      <Modal visible={!!fullscreenPhoto} transparent animationType="fade" onRequestClose={() => setFullscreenPhoto(null)}>
-        <TouchableOpacity
-          style={styles.photoModalOverlay}
-          activeOpacity={1}
-          onPress={() => setFullscreenPhoto(null)}
-        >
-          {fullscreenPhoto && (
-            <Image
-              source={{ uri: fullscreenPhoto }}
-              style={styles.photoFullscreen}
-              resizeMode="contain"
-            />
+      {/* Modal foto fullscreen con swipe */}
+      <Modal visible={fullscreenPhotos.length > 0} transparent animationType="fade" onRequestClose={() => setFullscreenPhotos([])}>
+        <View style={styles.photoModalOverlay}>
+          <FlatList
+            ref={fullscreenListRef}
+            data={fullscreenPhotos}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            initialScrollIndex={fullscreenInitIdx}
+            getItemLayout={(_, index) => ({ length: screenWidth, offset: screenWidth * index, index })}
+            onMomentumScrollEnd={(e) => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+              setCurrentFullIdx(idx);
+            }}
+            keyExtractor={(uri, i) => `${uri}-${i}`}
+            renderItem={({ item: uri }) => (
+              <TouchableOpacity activeOpacity={1} onPress={() => setFullscreenPhotos([])} style={{ width: screenWidth, height: screenHeight, alignItems: 'center', justifyContent: 'center' }}>
+                <Image source={{ uri }} style={{ width: screenWidth, height: screenHeight * 0.85 }} resizeMode="contain" />
+              </TouchableOpacity>
+            )}
+          />
+          {fullscreenPhotos.length > 1 && (
+            <View style={styles.photoCounter}>
+              <Text style={styles.photoCounterText}>{currentFullIdx + 1} / {fullscreenPhotos.length}</Text>
+            </View>
           )}
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* Modal de rechazo con motivo */}
@@ -373,17 +521,7 @@ function statusLabel(status: string) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
-    backgroundColor: Colors.navy,
-  },
-  backBtn: { padding: 4, minWidth: 60 },
-  backText: { fontSize: 14, color: Colors.light, fontWeight: '600' },
-  headerInfo: { flex: 1 },
-  protocolNum: { fontSize: 14, fontWeight: '700', color: Colors.white },
-  locationText: { fontSize: 11, color: Colors.light, marginTop: 2 },
-  headerRight: { alignItems: 'flex-end', gap: 6 },
+  headerRight: { alignItems: 'flex-end', gap: 4 },
   planMenu: {
     position: 'absolute', top: '100%', right: 0, zIndex: 100,
     backgroundColor: Colors.white, borderRadius: Radius.md,
@@ -391,16 +529,19 @@ const styles = StyleSheet.create({
   },
   planMenuItem: { paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },
   planMenuItemText: { fontSize: 13, color: Colors.navy, fontWeight: '600' },
+  backBtn: { padding: 4 },
   editBtn: {
     backgroundColor: Colors.primary, borderRadius: Radius.md,
     paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center',
   },
   editBtnText: { color: Colors.white, fontSize: 12, fontWeight: '700' },
   planBtn: {
-    backgroundColor: Colors.secondary, borderRadius: Radius.md,
-    paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.navy, borderRadius: Radius.md,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
-  planBtnText: { color: Colors.navy, fontSize: 10, fontWeight: '800', textAlign: 'center', lineHeight: 14 },
+  planBtnText: { color: Colors.white, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   statusBadge: { borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { color: Colors.white, fontSize: 10, fontWeight: '700' },
   body: { padding: 16, gap: 12, paddingBottom: 60 },
@@ -416,8 +557,8 @@ const styles = StyleSheet.create({
   },
   metaText: { fontSize: 12, color: Colors.textSecondary },
   itemCard: {
-    backgroundColor: Colors.white, borderRadius: Radius.md, padding: 12,
-    gap: 6, ...Shadow.subtle,
+    backgroundColor: Colors.white, borderRadius: Radius.md, padding: 16,
+    gap: 8, ...Shadow.subtle,
   },
   itemHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemNum: {
@@ -430,31 +571,41 @@ const styles = StyleSheet.create({
   },
   resultBadgeYes: { backgroundColor: '#e8f5ee' },
   resultBadgeNo: { backgroundColor: '#fdecea' },
+  resultBadgeNa: { backgroundColor: '#fff3e0' },
   resultText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
   comment: { fontSize: 12, color: Colors.textMuted, paddingLeft: 30 },
   photosRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 30, paddingTop: 4 },
   photoThumb: { width: 72, height: 72, borderRadius: Radius.sm, backgroundColor: Colors.surface },
-  photoModalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center', justifyContent: 'center',
+  photoModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
+  photoCounter: {
+    position: 'absolute', bottom: 32, alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6,
   },
-  photoFullscreen: {
-    width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height * 0.85,
-  },
+  photoCounterText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   actions: { gap: 10, marginTop: 8, flexDirection: 'row' },
   actionBtn: {
-    flex: 1, padding: 14, borderRadius: Radius.lg, alignItems: 'center',
+    flex: 1, padding: 13, borderRadius: Radius.lg, alignItems: 'center', borderWidth: 1.5,
   },
-  actionBtnApprove: { backgroundColor: Colors.success },
-  actionBtnReject: { backgroundColor: Colors.danger },
-  actionBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
+  actionBtnApprove: { backgroundColor: '#eaf7ee', borderColor: Colors.success },
+  actionBtnReject: { backgroundColor: '#fdf0ef', borderColor: Colors.danger },
+  actionBtnTextApprove: { color: Colors.success, fontWeight: '700', fontSize: 13, letterSpacing: 0.3 },
+  actionBtnTextReject: { color: Colors.danger, fontWeight: '700', fontSize: 13, letterSpacing: 0.3 },
   signedBanner: {
     backgroundColor: '#e8f5ee', borderRadius: Radius.lg, padding: 16,
     alignItems: 'center', gap: 4,
   },
   signedText: { color: Colors.success, fontWeight: '700', fontSize: 13 },
   signedDate: { color: Colors.textSecondary, fontSize: 12 },
+
+  // Extra photos
+  extraPhotoSection: { gap: 10, marginTop: 4 },
+  extraPhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: Colors.primary, borderRadius: Radius.md,
+    paddingVertical: 12, paddingHorizontal: 16, justifyContent: 'center',
+  },
+  extraPhotoBtnText: { color: Colors.primary, fontWeight: '700', fontSize: 13 },
+  btnDisabled: { opacity: 0.5 },
 
   // Modal de rechazo
   modalOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.55)', justifyContent: 'flex-end' },
@@ -476,6 +627,5 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.danger, borderRadius: Radius.md,
     paddingHorizontal: 20, paddingVertical: 12,
   },
-  btnDisabled: { opacity: 0.4 },
   rejectConfirmBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
 });
