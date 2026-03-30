@@ -494,8 +494,11 @@ export default function ProjectListScreen({ navigation }: Props) {
                 </TouchableOpacity>
               )}
 
+            </View>
+            {/* Contactos — fila centrada independiente */}
+            <View style={styles.contactRow}>
               <TouchableOpacity
-                style={[styles.actionChip, styles.actionChipPhone]}
+                style={styles.actionChipPhone}
                 onPress={() => navigation.navigate('PhoneContacts', { projectId: item.id, projectName: item.name })}
               >
                 <Ionicons name="call-outline" size={13} color={Colors.white} style={{ marginRight: 4 }} />
@@ -759,7 +762,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionChipAccent: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  actionChipPhone: { backgroundColor: Colors.secondary ?? '#2E86AB', borderColor: Colors.secondary ?? '#2E86AB', flexDirection: 'row', alignItems: 'center' },
+  actionChipPhone: {
+    backgroundColor: Colors.secondary, borderColor: Colors.secondary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderRadius: Radius.sm, paddingHorizontal: 18, paddingVertical: 7,
+    borderWidth: 1,
+  },
+  contactRow: {
+    alignItems: 'center', paddingHorizontal: 12, paddingBottom: 12,
+  },
   actionChipSync: { borderColor: Colors.secondary, backgroundColor: Colors.white },
   actionChipDisabled: { opacity: 0.5 },
   actionChipText: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary },

@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Alert, Linking, Modal,
+  TextInput, Alert, Linking, Modal, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as XLSX from 'xlsx';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
@@ -29,6 +32,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
   const [editingContact, setEditingContact] = useState<PhoneContact | null>(null);
   const [form, setForm] = useState<ContactForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     const sub = phoneContactsCollection
@@ -105,6 +109,77 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
     });
   };
 
+  // ── Importar desde Excel ─────────────────────────────────────────────────
+  // Columnas esperadas:
+  //   A: Nombre y apellido
+  //   B: Rol / Cargo
+  //   C: Prefijo (ej: +51)
+  //   D: Número de celular
+
+  const handleImportExcel = async () => {
+    setImporting(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+               'application/vnd.ms-excel', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      const b64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const wb = XLSX.read(b64, { type: 'base64' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+      // Filtrar filas vacías y saltar encabezado si la primera celda no es un número/texto de nombre
+      const dataRows = rows.filter(r => r.length >= 1 && String(r[0] ?? '').trim() !== '');
+
+      if (dataRows.length === 0) {
+        Alert.alert('Sin datos', 'El archivo no contiene filas válidas.');
+        return;
+      }
+
+      let imported = 0;
+      let skipped = 0;
+
+      await database.write(async () => {
+        for (let i = 0; i < dataRows.length; i++) {
+          const row = dataRows[i];
+          const name = String(row[0] ?? '').trim();
+          const role = String(row[1] ?? '').trim();
+          const prefix = String(row[2] ?? '').trim();
+          const number = String(row[3] ?? '').trim();
+
+          if (!name || !number) { skipped++; continue; }
+
+          const phone = prefix ? `${prefix}${number}` : number;
+
+          await phoneContactsCollection.create(c => {
+            c.projectId = projectId;
+            c.name = name;
+            c.phone = phone;
+            c.role = role || null;
+            c.sortOrder = contacts.length + imported;
+          });
+          imported++;
+        }
+      });
+
+      Alert.alert(
+        'Importación completada',
+        `${imported} contacto${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''}.${skipped > 0 ? ` (${skipped} fila${skipped !== 1 ? 's' : ''} omitida${skipped !== 1 ? 's' : ''} por datos incompletos)` : ''}`,
+      );
+    } catch (err) {
+      Alert.alert('Error', `No se pudo importar el archivo.\n${String(err)}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <AppHeader
@@ -112,9 +187,21 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
-          <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={handleImportExcel}
+              disabled={importing}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              {importing
+                ? <ActivityIndicator size="small" color={Colors.white} />
+                : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
+              }
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -122,11 +209,20 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         data={contacts}
         keyExtractor={c => c.id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          contacts.length === 0 ? null : (
+            <Text style={styles.hint}>
+              Toca <Ionicons name="document-text-outline" size={12} /> para importar desde Excel · Columnas: Nombre | Rol | Prefijo | Teléfono
+            </Text>
+          )
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="call-outline" size={40} color={Colors.textMuted} />
             <Text style={styles.emptyText}>Sin contactos aún.</Text>
-            <Text style={styles.emptyHint}>Toca + para agregar un número importante.</Text>
+            <Text style={styles.emptyHint}>Toca + para agregar manualmente</Text>
+            <Text style={styles.emptyHint}>o 📄 para importar desde Excel.</Text>
+            <Text style={styles.excelFormat}>Formato Excel:{'\n'}Col A: Nombre y Apellido{'\n'}Col B: Rol / Cargo{'\n'}Col C: Prefijo (ej: +51){'\n'}Col D: Número de celular</Text>
           </View>
         }
         renderItem={({ item }) => (
@@ -167,12 +263,12 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
               placeholderTextColor={Colors.textMuted}
             />
 
-            <Text style={styles.fieldLabel}>Teléfono *</Text>
+            <Text style={styles.fieldLabel}>Teléfono * (con prefijo)</Text>
             <TextInput
               style={styles.input}
               value={form.phone}
               onChangeText={v => setForm(f => ({ ...f, phone: v }))}
-              placeholder="+56 9 XXXX XXXX"
+              placeholder="+51 9 XXXX XXXX"
               placeholderTextColor={Colors.textMuted}
               keyboardType="phone-pad"
             />
@@ -208,11 +304,20 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
 
+  headerActions: { flexDirection: 'row', gap: 14, alignItems: 'center' },
+
   list: { padding: 16, gap: 10, paddingBottom: 40 },
 
-  empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
+  hint: { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginBottom: 8 },
+
+  empty: { alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyText: { fontSize: 15, color: Colors.textMuted, fontWeight: '600' },
   emptyHint: { fontSize: 12, color: Colors.textMuted, textAlign: 'center' },
+  excelFormat: {
+    marginTop: 12, fontSize: 11, color: Colors.textMuted, textAlign: 'center',
+    backgroundColor: Colors.white, borderRadius: Radius.md, padding: 12,
+    lineHeight: 18, borderWidth: 1, borderColor: Colors.border,
+  },
 
   card: {
     flexDirection: 'row', alignItems: 'center',

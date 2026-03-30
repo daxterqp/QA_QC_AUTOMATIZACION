@@ -41,61 +41,54 @@ export async function applyPhotoStamps(
 ): Promise<string> {
   const timestamp = formatTimestamp(new Date());
 
-  // ── Paso 1: timestamp (texto negro, fondo blanco 50%) ────────────────────
-  // Color RGBA hex: #FFFFFF80 = blanco con 50% opacidad (la lib convierte a ARGB internamente)
-  const withTimestamp: string = await Marker.markText({
-    backgroundImage: { src: ensureFileUri(imageUri) },
-    watermarkTexts: [
-      {
-        text: timestamp,
-        positionOptions: { position: Position.topLeft },
-        style: {
-          color: '#000000',
-          fontSize: 30,
-          textBackgroundStyle: {
-            paddingX: 16,
-            paddingY: 10,
-            type: TextBackgroundType.none,  // ajusta al texto, no estira todo el ancho
-            color: '#FFFFFF80',  // RGBA: blanco 50% opacidad
-          },
+  // ── Paso 1: timestamp + comentario (mismo estilo, segunda fila) ──────────
+  // Se combinan en un único markText para que el comentario quede exactamente
+  // debajo del timestamp con el mismo fondo blanco semitransparente.
+  const watermarkTexts: any[] = [
+    {
+      text: timestamp,
+      positionOptions: { position: Position.topLeft },
+      style: {
+        color: '#000000',
+        fontSize: 30,
+        textBackgroundStyle: {
+          paddingX: 16,
+          paddingY: 10,
+          type: TextBackgroundType.none,
+          color: '#FFFFFF80',
         },
       },
-    ],
+    },
+  ];
+
+  if (comment?.trim()) {
+    watermarkTexts.push({
+      text: comment.trim(),
+      positionOptions: { position: Position.topLeft, Y: 70 }, // segunda fila debajo del timestamp
+      style: {
+        color: '#000000',
+        fontSize: 30,
+        textBackgroundStyle: {
+          paddingX: 16,
+          paddingY: 10,
+          type: TextBackgroundType.none,
+          color: '#FFFFFF80',
+        },
+      },
+    });
+  }
+
+  const withText: string = await Marker.markText({
+    backgroundImage: { src: ensureFileUri(imageUri) },
+    watermarkTexts,
     saveFormat: ImageFormat.jpg,
     quality: 88,
   });
-  // withTimestamp es ruta absoluta sin file://, necesitamos añadirlo para Coil
-
-  // ── Paso 1b: comentario (si existe) debajo del timestamp ─────────────────
-  let withComment = withTimestamp;
-  if (comment?.trim()) {
-    withComment = await Marker.markText({
-      backgroundImage: { src: ensureFileUri(withTimestamp) },
-      watermarkTexts: [
-        {
-          text: comment.trim(),
-          positionOptions: { position: Position.topLeft },
-          style: {
-            color: '#000000',
-            fontSize: 24,
-            textBackgroundStyle: {
-              paddingX: 16,
-              paddingY: 6,
-              type: TextBackgroundType.none,
-              color: '#FFFFFF80',
-            },
-          },
-        },
-      ],
-      saveFormat: ImageFormat.jpg,
-      quality: 88,
-    });
-  }
 
   // ── Paso 2: logo del proyecto (inferior derecha, 25% opacidad) ───────────
   if (logoUri) {
     const withLogo: string = await Marker.markImage({
-      backgroundImage: { src: ensureFileUri(withComment) },
+      backgroundImage: { src: ensureFileUri(withText) },
       watermarkImages: [
         {
           src: ensureFileUri(logoUri),
@@ -110,5 +103,5 @@ export async function applyPhotoStamps(
     return ensureFileUri(withLogo);
   }
 
-  return ensureFileUri(withComment);
+  return ensureFileUri(withText);
 }
