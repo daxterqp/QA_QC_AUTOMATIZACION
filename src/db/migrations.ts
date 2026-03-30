@@ -314,5 +314,29 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      // v14 → v15: phone_contacts + logo_s3_key en projects
+      toVersion: 15,
+      steps: [
+        addColumns({
+          table: 'projects',
+          columns: [
+            { name: 'logo_s3_key', type: 'string', isOptional: true },
+          ],
+        }),
+        createTable({
+          name: 'phone_contacts',
+          columns: [
+            { name: 'project_id', type: 'string', isIndexed: true },
+            { name: 'name', type: 'string' },
+            { name: 'phone', type: 'string' },
+            { name: 'role', type: 'string', isOptional: true },
+            { name: 'sort_order', type: 'number', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+      ],
+    },
   ],
 });

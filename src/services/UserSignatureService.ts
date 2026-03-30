@@ -35,3 +35,17 @@ export async function getUserSignatureUri(userId: string): Promise<string | null
     return null;
   }
 }
+
+const S3_KEY = (userId: string) => `user_signature_s3key_${userId}`;
+
+export async function saveUserSignatureS3Key(userId: string, s3Key: string): Promise<void> {
+  await AsyncStorage.setItem(S3_KEY(userId), s3Key);
+}
+
+export async function getUserSignatureS3Key(userId: string): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(S3_KEY(userId));
+  } catch {
+    return null;
+  }
+}

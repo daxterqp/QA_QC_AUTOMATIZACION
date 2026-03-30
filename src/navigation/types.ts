@@ -28,6 +28,8 @@ export type RootStackParamList = {
   // ── Creador ────────────────────────────────────────────────────────────────
   UserManagement: undefined;
 
+  PhoneContacts: { projectId: string; projectName: string };
+
   // ── PDF Preview ────────────────────────────────────────────────────────────
   DossierPreview: { pdfUri: string; projectName: string };
 };

@@ -36,6 +36,7 @@ import PlanViewerScreen from '@screens/PlanViewerScreen';
 import HistoricalScreen from '@screens/HistoricalScreen';
 import AnnotationCommentsScreen from '@screens/AnnotationCommentsScreen';
 import DossierPreviewScreen from '@screens/DossierPreviewScreen';
+import PhoneContactsScreen from '@screens/PhoneContactsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -104,6 +105,7 @@ export default function AppNavigator() {
               <Stack.Screen name="PlanViewer" component={PlanViewerScreen} />
               <Stack.Screen name="AnnotationComments" component={AnnotationCommentsScreen} />
               <Stack.Screen name="DossierPreview" component={DossierPreviewScreen} />
+              <Stack.Screen name="PhoneContacts" component={PhoneContactsScreen} />
               <Stack.Screen name="ExcelImport" component={ExcelImportScreenWrapper} />
               <Stack.Screen name="LocationsImport" component={LocationsImportScreenWrapper} />
               <Stack.Screen

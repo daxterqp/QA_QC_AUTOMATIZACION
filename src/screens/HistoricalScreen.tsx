@@ -3,7 +3,7 @@ import { useTour } from '@context/TourContext';
 import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Modal, Dimensions,
+  TextInput, Modal, Dimensions, Alert,
 } from 'react-native';
 import AppHeader from '@components/AppHeader';
 import { Ionicons } from '@expo/vector-icons';
@@ -551,6 +551,8 @@ export default function HistoricalScreen({ navigation, route }: Props) {
   const [users, setUsers] = useState<User[]>([]);
   const [notes, setNotes] = useState<DashboardNote[]>([]);
   const [noteText, setNoteText] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -636,6 +638,41 @@ export default function HistoricalScreen({ navigation, route }: Props) {
       });
     });
     setNoteText('');
+  };
+
+  const startEditNote = (note: DashboardNote) => {
+    setEditingNoteId(note.id);
+    setEditingText(note.content);
+  };
+
+  const cancelEditNote = () => {
+    setEditingNoteId(null);
+    setEditingText('');
+  };
+
+  const updateNote = async (note: DashboardNote) => {
+    if (!editingText.trim()) return;
+    await database.write(async () => {
+      await note.update(n => { n.content = editingText.trim(); });
+    });
+    setEditingNoteId(null);
+    setEditingText('');
+  };
+
+  const deleteNote = (note: DashboardNote) => {
+    Alert.alert(
+      'Eliminar anotación',
+      '¿Estás seguro de que deseas eliminar esta anotación?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar', style: 'destructive',
+          onPress: async () => {
+            await database.write(async () => { await note.destroyPermanently(); });
+          },
+        },
+      ],
+    );
   };
 
   const projectStart = useMemo(() => {
@@ -775,12 +812,51 @@ export default function HistoricalScreen({ navigation, route }: Props) {
             const nameMap: Record<string, string> = {};
             users.forEach(u => { nameMap[u.id] = u.fullName; });
             const t = getTs(note.createdAt);
+            const isOwner = currentUser?.id === note.createdById;
+            const isEditing = editingNoteId === note.id;
             return (
               <View key={note.id} style={styles.noteCard}>
-                <Text style={styles.noteContent}>{note.content}</Text>
-                <Text style={styles.noteMeta}>
-                  {nameMap[note.createdById] ?? '—'} · {new Date(t).toLocaleString('es-CL')}
-                </Text>
+                {isEditing ? (
+                  <>
+                    <TextInput
+                      style={styles.noteEditInput}
+                      value={editingText}
+                      onChangeText={setEditingText}
+                      multiline
+                      autoFocus
+                    />
+                    <View style={styles.noteEditActions}>
+                      <TouchableOpacity style={styles.noteActionBtn} onPress={cancelEditNote}>
+                        <Text style={styles.noteActionBtnText}>Cancelar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.noteActionBtn, styles.noteActionBtnPrimary, !editingText.trim() && styles.btnDisabled]}
+                        onPress={() => updateNote(note)}
+                        disabled={!editingText.trim()}>
+                        <Text style={[styles.noteActionBtnText, styles.noteActionBtnTextPrimary]}>Guardar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.noteContent}>{note.content}</Text>
+                    <View style={styles.noteFooter}>
+                      <Text style={styles.noteMeta}>
+                        {nameMap[note.createdById] ?? '—'} · {new Date(t).toLocaleString('es-CL')}
+                      </Text>
+                      {isOwner && (
+                        <View style={styles.noteActions}>
+                          <TouchableOpacity onPress={() => startEditNote(note)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Ionicons name="pencil-outline" size={15} color={Colors.primary} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => deleteNote(note)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Ionicons name="trash-outline" size={15} color={Colors.danger ?? '#E53E3E'} />
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  </>
+                )}
               </View>
             );
           })}
@@ -901,7 +977,15 @@ const styles = StyleSheet.create({
   noteSaveBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
   noteCard: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 14, borderLeftWidth: 3, borderLeftColor: Colors.primary, ...Shadow.subtle },
   noteContent: { fontSize: 13, color: Colors.textPrimary },
-  noteMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  noteMeta: { fontSize: 11, color: Colors.textMuted, flex: 1 },
+  noteActions: { flexDirection: 'row', gap: 12, marginLeft: 8 },
+  noteEditInput: { fontSize: 13, color: Colors.textPrimary, backgroundColor: Colors.surface, borderRadius: Radius.sm, padding: 10, borderWidth: 1, borderColor: Colors.border, minHeight: 60, textAlignVertical: 'top' },
+  noteEditActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8 },
+  noteActionBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.border },
+  noteActionBtnPrimary: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  noteActionBtnText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  noteActionBtnTextPrimary: { color: Colors.white },
   emptyNote: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 20, borderWidth: 1, borderColor: Colors.border, alignItems: 'center' },
   emptyNoteText: { color: Colors.textMuted, fontSize: 13 },
 });

@@ -17,6 +17,7 @@ export default class Project extends Model {
   @field('status') status!: ProjectStatus;
   @field('password') password!: string | null;
   @field('created_by_id') createdById!: string | null;
+  @field('logo_s3_key') logoS3Key!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

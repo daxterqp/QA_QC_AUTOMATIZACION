@@ -12,7 +12,7 @@ import { useTour } from '@context/TourContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
-import { exportDossierPdf } from '@services/DossierExportService';
+import { exportDossierPdf, exportSingleProtocolPdf } from '@services/DossierExportService';
 import { pushProtocolStatus } from '@services/SupabaseSyncService';
 
 interface Props {
@@ -49,6 +49,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const dossierExportBtnRef = useTourStep('dossier_export_btn');
   const dossierItem0Ref = useTourStep('dossier_item_0');
   const [exporting, setExporting] = useState(false);
+  const [exportingProtocolId, setExportingProtocolId] = useState<string | null>(null);
 
   const handleExportPdf = async () => {
     if (!currentUser) return;
@@ -63,6 +64,19 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
       Alert.alert('Error', `No se pudo generar el PDF.\n${String(e)}`);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleExportSingleProtocol = async (protocol: Protocol) => {
+    if (!currentUser) return;
+    setExportingProtocolId(protocol.id);
+    try {
+      const uri = await exportSingleProtocolPdf(protocol.id, projectId, projectName, currentUser.id);
+      if (onPreviewPdf) onPreviewPdf(uri);
+    } catch (e) {
+      Alert.alert('Error', `No se pudo generar el PDF.\n${String(e)}`);
+    } finally {
+      setExportingProtocolId(null);
     }
   };
 
@@ -224,6 +238,16 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
             >
               <View style={styles.cardTop}>
                 <Text style={styles.protocolNumber}>{item.protocolNumber}</Text>
+                <TouchableOpacity
+                  onPress={(e) => { e.stopPropagation?.(); handleExportSingleProtocol(item); }}
+                  disabled={exportingProtocolId === item.id}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {exportingProtocolId === item.id
+                    ? <ActivityIndicator size="small" color={Colors.primary} />
+                    : <Ionicons name="document-text-outline" size={18} color={Colors.primary} />
+                  }
+                </TouchableOpacity>
               </View>
 
               <Text style={styles.filledBy}>

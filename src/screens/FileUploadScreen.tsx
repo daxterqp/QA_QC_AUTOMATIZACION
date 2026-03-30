@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList,
-  Alert, ActivityIndicator, ScrollView, Switch, Image,
+  Alert, ActivityIndicator, ScrollView, Switch, Image, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
@@ -18,17 +18,17 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { database, plansCollection, protocolTemplatesCollection, locationsCollection } from '@db/index';
+import { database, plansCollection, protocolTemplatesCollection, locationsCollection, projectsCollection } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import type Plan from '@models/Plan';
 import type ProtocolTemplate from '@db/models/ProtocolTemplate';
 import type Location from '@db/models/Location';
-import { uploadToS3 } from '@services/S3Service';
+import { uploadToS3, downloadFromS3, s3FileExists } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { getProjectSettings, saveProjectSettings } from '@services/ProjectSettings';
-import { saveUserSignature } from '@services/UserSignatureService';
+import { saveUserSignature, saveUserSignatureS3Key } from '@services/UserSignatureService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
@@ -435,20 +435,39 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   const [stampLoading, setStampLoading] = useState(false);
   const [signatureUri, setSignatureUri] = useState<string | null>(null);
   const [signatureLoading, setSignatureLoading] = useState(false);
+  const [stampComment, setStampComment] = useState('');
+  const [stampCommentSaving, setStampCommentSaving] = useState(false);
+
+  // S3 key for global project logo
+  const LOGO_S3_KEY = `logos/project_${projectId}/logo.jpg`;
 
   useEffect(() => {
-    if (activeTab === 'personalizar') {
-      getProjectSettings(projectId).then((s) => {
-        setStampEnabled(s.stampEnabled);
-        setStampPhotoUri(s.stampPhotoUri);
-        setSignatureUri(s.signatureUri);
-      });
-    }
+    if (activeTab !== 'personalizar') return;
+    getProjectSettings(projectId).then((s) => {
+      setStampEnabled(s.stampEnabled);
+      setStampComment(s.stampComment ?? '');
+      setSignatureUri(s.signatureUri);
+    });
+    // Try to load global logo from S3 into a local cache
+    const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+    s3FileExists(LOGO_S3_KEY).then(exists => {
+      if (!exists) return;
+      downloadFromS3(LOGO_S3_KEY, localLogoUri)
+        .then(() => setStampPhotoUri(localLogoUri))
+        .catch(() => {});
+    }).catch(() => {});
   }, [activeTab, projectId]);
 
   const toggleStamp = async (val: boolean) => {
     setStampEnabled(val);
     await saveProjectSettings(projectId, { stampEnabled: val });
+  };
+
+  const saveStampComment = async () => {
+    setStampCommentSaving(true);
+    await saveProjectSettings(projectId, { stampComment: stampComment.trim() || null });
+    setStampCommentSaving(false);
+    Alert.alert('Guardado', 'El comentario se estampará en las fotos.');
   };
 
   const handlePickStampPhoto = async () => {
@@ -460,19 +479,29 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      const destUri = `${FileSystem.documentDirectory}project_logo_${projectId}.jpg`;
-      await FileSystem.copyAsync({ from: asset.uri, to: destUri });
-      setStampPhotoUri(destUri);
-      await saveProjectSettings(projectId, { stampPhotoUri: destUri });
-      Alert.alert('Foto guardada', 'La foto del proyecto se usará como stamp en las fotos.');
+      // Upload to S3 (global for all users)
+      await uploadToS3(asset.uri, LOGO_S3_KEY, 'image/jpeg');
+      // Update Project.logoS3Key in WatermelonDB
+      try {
+        const project = await projectsCollection.find(projectId);
+        await database.write(async () => {
+          await project.update(p => { (p as any).logoS3Key = LOGO_S3_KEY; });
+        });
+      } catch { /* project may not exist locally */ }
+      // Cache locally
+      const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+      await FileSystem.copyAsync({ from: asset.uri, to: localUri });
+      setStampPhotoUri(localUri);
+      Alert.alert('Logo guardado', 'El logo del proyecto está disponible para todos los usuarios.');
     } catch {
-      Alert.alert('Error', 'No se pudo cargar la foto.');
+      Alert.alert('Error', 'No se pudo cargar el logo.');
     } finally {
       setStampLoading(false);
     }
   };
 
   const handlePickSignature = async () => {
+    if (!currentUser?.id) return;
     setSignatureLoading(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -481,11 +510,14 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      const destUri = `${FileSystem.documentDirectory}project_signature_${projectId}.jpg`;
-      await FileSystem.copyAsync({ from: asset.uri, to: destUri });
+      // Save locally per user
+      const destUri = await saveUserSignature(currentUser.id, asset.uri);
       setSignatureUri(destUri);
       await saveProjectSettings(projectId, { signatureUri: destUri });
-      if (currentUser?.id) await saveUserSignature(currentUser.id, destUri);
+      // Upload to S3 per user (key: signatures/{userId}/signature.jpg)
+      const sigS3Key = `signatures/${currentUser.id}/signature.jpg`;
+      await uploadToS3(asset.uri, sigS3Key, 'image/jpeg');
+      await saveUserSignatureS3Key(currentUser.id, sigS3Key);
       Alert.alert('Firma guardada', 'La firma se incluirá en los reportes PDF exportados.');
     } catch {
       Alert.alert('Error', 'No se pudo cargar la firma.');
@@ -855,6 +887,32 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
           </View>
         )}
+
+        {stampEnabled && (
+          <View style={styles.stampCommentRow}>
+            <Text style={styles.stampCommentLabel}>Comentario en fotos</Text>
+            <Text style={styles.settingDesc}>Texto que aparece bajo el timestamp en cada foto.</Text>
+            <View style={styles.stampCommentInputRow}>
+              <TextInput
+                style={styles.stampCommentInput}
+                value={stampComment}
+                onChangeText={setStampComment}
+                placeholder="Ej: Proyecto Edificio Norte — Fase 2"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TouchableOpacity
+                style={[styles.stampPickBtn, stampCommentSaving && styles.btnDisabled]}
+                onPress={saveStampComment}
+                disabled={stampCommentSaving}
+              >
+                {stampCommentSaving
+                  ? <ActivityIndicator color={Colors.white} size="small" />
+                  : <Text style={styles.stampPickBtnText}>Guardar</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* ── Firma del Jefe de Calidad ─────────────────────────────────────── */}
@@ -1156,4 +1214,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, borderRadius: Radius.sm, padding: 8,
   },
   stampExampleText: { fontSize: 11, color: Colors.textMuted, flex: 1, lineHeight: 16 },
+  stampCommentRow: { marginTop: 12, gap: 6 },
+  stampCommentLabel: { fontSize: 13, fontWeight: '700', color: Colors.navy },
+  stampCommentInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  stampCommentInput: {
+    flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.sm,
+    paddingHorizontal: 12, paddingVertical: 8, fontSize: 13,
+    borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary,
+  },
 });

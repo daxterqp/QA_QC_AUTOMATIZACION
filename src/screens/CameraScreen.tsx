@@ -14,6 +14,8 @@ import { uploadAnnotationCommentPhoto, uploadEvidencePhoto } from '@services/S3P
 import { compressImage } from '@services/ImageCompressor';
 import { applyPhotoStamps } from '@services/PhotoStampService';
 import { getProjectSettings, type ProjectStampSettings } from '@services/ProjectSettings';
+import { downloadFromS3, s3FileExists } from '@services/S3Service';
+import * as FileSystem from 'expo-file-system';
 
 interface CameraScreenProps {
   protocolItemId?: string;
@@ -42,11 +44,27 @@ export default function CameraScreen({
     stampEnabled: false,
     stampPhotoUri: null,
     signatureUri: null,
+    stampComment: null,
   });
 
   useEffect(() => {
     if (!projectId) return;
-    getProjectSettings(projectId).then(setSettings).catch(() => {});
+    getProjectSettings(projectId).then(async (s) => {
+      // Si no hay logo local, intentar descargarlo desde S3 (logo global del proyecto)
+      let logoUri = s.stampPhotoUri;
+      if (!logoUri && s.stampEnabled) {
+        const s3Key = `logos/project_${projectId}/logo.jpg`;
+        const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+        try {
+          const exists = await s3FileExists(s3Key);
+          if (exists) {
+            await downloadFromS3(s3Key, localUri);
+            logoUri = localUri;
+          }
+        } catch { /* logo opcional */ }
+      }
+      setSettings({ ...s, stampPhotoUri: logoUri });
+    }).catch(() => {});
   }, [projectId]);
 
   // ── Captura ──────────────────────────────────────────────────────────────
@@ -84,7 +102,7 @@ export default function CameraScreen({
           try {
             const { uri: compressed } = await compressImage(rawUri);
             const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri)
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
               : compressed;
 
             await database.write(async () => {
@@ -118,7 +136,7 @@ export default function CameraScreen({
           try {
             const { uri: compressed } = await compressImage(rawUri);
             const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri)
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
               : compressed;
             await database.write(async () => {
               const r2 = await evidencesCollection.find(evidenceId);

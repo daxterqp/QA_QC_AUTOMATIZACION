@@ -18,6 +18,7 @@ import AnnotationComment from './models/AnnotationComment';
 import AnnotationCommentPhoto from './models/AnnotationCommentPhoto';
 import DashboardNote from './models/DashboardNote';
 import UserProjectAccess from './models/UserProjectAccess';
+import PhoneContact from './models/PhoneContact';
 
 const adapter = new SQLiteAdapter({
   schema,
@@ -36,7 +37,7 @@ export const database = new Database({
     ProtocolTemplate, ProtocolTemplateItem,
     Evidence, NonConformity, Plan, PlanAnnotation,
     AnnotationComment, AnnotationCommentPhoto,
-    DashboardNote, UserProjectAccess,
+    DashboardNote, UserProjectAccess, PhoneContact,
   ],
 });
 
@@ -55,3 +56,4 @@ export const annotationCommentsCollection = database.get<AnnotationComment>('ann
 export const annotationCommentPhotosCollection = database.get<AnnotationCommentPhoto>('annotation_comment_photos');
 export const dashboardNotesCollection = database.get<DashboardNote>('dashboard_notes');
 export const userProjectAccessCollection = database.get<UserProjectAccess>('user_project_access');
+export const phoneContactsCollection = database.get<PhoneContact>('phone_contacts');

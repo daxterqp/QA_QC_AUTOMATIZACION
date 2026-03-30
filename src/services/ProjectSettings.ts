@@ -12,6 +12,7 @@ export interface ProjectStampSettings {
   stampEnabled: boolean;
   stampPhotoUri: string | null;
   signatureUri: string | null;
+  stampComment: string | null;
 }
 
 const key = (projectId: string) => `project_settings_${projectId}`;
@@ -20,6 +21,7 @@ const defaults: ProjectStampSettings = {
   stampEnabled: true,
   stampPhotoUri: null,
   signatureUri: null,
+  stampComment: null,
 };
 
 export async function getProjectSettings(projectId: string): Promise<ProjectStampSettings> {

@@ -2,10 +2,10 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 /**
  * Schema S-CUA MVP
- * v14: is_na en protocol_items (respuesta N/A)
+ * v15: phone_contacts + logo_s3_key en projects
  */
 export const schema = appSchema({
-  version: 14,
+  version: 15,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -30,6 +30,7 @@ export const schema = appSchema({
         { name: 'status', type: 'string' },          // ACTIVE | CLOSED
         { name: 'password', type: 'string', isOptional: true },
         { name: 'created_by_id', type: 'string', isOptional: true },
+        { name: 'logo_s3_key', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -226,6 +227,20 @@ export const schema = appSchema({
         { name: 'project_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'content', type: 'string' },
         { name: 'created_by_id', type: 'string' },
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+      ],
+    }),
+
+    // ── phone_contacts ─────────────────────────────────────────────────────────
+    tableSchema({
+      name: 'phone_contacts',
+      columns: [
+        { name: 'project_id', type: 'string', isIndexed: true },
+        { name: 'name', type: 'string' },
+        { name: 'phone', type: 'string' },
+        { name: 'role', type: 'string', isOptional: true },
+        { name: 'sort_order', type: 'number', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

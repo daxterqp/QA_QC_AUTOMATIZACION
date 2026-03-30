@@ -946,3 +946,126 @@ ${protocolPages}
   await FileSystem.moveAsync({ from: uri, to: targetUri });
   return targetUri;
 }
+
+// ── Exportar un único protocolo como PDF ─────────────────────────────────────
+
+export async function exportSingleProtocolPdf(
+  protocolId: string,
+  projectId: string,
+  projectName: string,
+  currentUserId: string,
+): Promise<string> {
+  // Cargar datos necesarios
+  const [protocol, allUsers, locations, settings, allTemplates] = await Promise.all([
+    protocolsCollection.find(protocolId),
+    usersCollection.query().fetch(),
+    locationsCollection.query(Q.where('project_id', projectId)).fetch(),
+    getProjectSettings(projectId),
+    protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
+  ]);
+
+  const userMap = new Map<string, User>(allUsers.map(u => [u.id, u]));
+  const locationMap = new Map(locations.map(l => [l.id, l]));
+  const templateMap = new Map(allTemplates.map(t => [t.id, t]));
+  const currentUserRecord = userMap.get(currentUserId);
+  const signerName = currentUserRecord?.fullName ?? 'Jefe de Calidad';
+
+  // Imágenes base64
+  const [logoB64, defaultSignB64] = await Promise.all([
+    toBase64(settings.stampPhotoUri),
+    toBase64(settings.signatureUri),
+  ]);
+
+  // Items y evidencias del protocolo
+  const its = await protocolItemsCollection
+    .query(Q.where('protocol_id', protocolId))
+    .fetch() as ProtocolItem[];
+
+  const photoUris: string[] = [];
+  if (its.length > 0) {
+    const itemIds = its.map(i => i.id);
+    const evs = await evidencesCollection
+      .query(Q.where('protocol_item_id', Q.oneOf(itemIds)))
+      .fetch();
+    const evidUris = evs.map(ev => ev.localUri).filter(Boolean) as string[];
+    photoUris.push(...evidUris);
+  }
+  try {
+    const raw = await AsyncStorage.getItem(`protocol_extra_photos_${protocolId}`);
+    if (raw) {
+      const extras: string[] = JSON.parse(raw);
+      if (Array.isArray(extras)) photoUris.push(...extras);
+    }
+  } catch { /* ignore */ }
+
+  // Firma del aprobador
+  let signB64 = defaultSignB64;
+  let protoSignerName = signerName;
+  if (protocol.signedById) {
+    const jefeRecord = userMap.get(protocol.signedById);
+    if (jefeRecord) protoSignerName = jefeRecord.fullName;
+    try {
+      const jefeSignUri = await getUserSignatureUri(protocol.signedById);
+      if (jefeSignUri) signB64 = await toBase64(jefeSignUri);
+    } catch { /* use default */ }
+  }
+
+  const location = protocol.locationId ? locationMap.get(protocol.locationId) : undefined;
+  const specialty = location?.specialty ?? null;
+  const locationOnly = location?.locationOnly ?? null;
+  const template = protocol.templateId ? templateMap.get(protocol.templateId) : undefined;
+  const idProtocolo = template?.idProtocolo ?? null;
+
+  const itemPages = Math.max(1, Math.ceil(its.length / ROWS_PER_PAGE));
+  const photoPages = photoUris.length > 0 ? Math.ceil(photoUris.length / 8) : 0;
+  const totalPages = itemPages + photoPages;
+
+  const protocolHtml = buildProtocolPages(
+    protocol,
+    its,
+    userMap,
+    logoB64,
+    signB64,
+    protoSignerName,
+    1,
+    totalPages,
+    projectName,
+    specialty,
+    idProtocolo,
+    locationOnly,
+  );
+
+  const photoHtml = await buildPhotoPanel(
+    protocol.protocolNumber ?? protocol.id,
+    photoUris,
+    logoB64,
+    signB64,
+    protoSignerName,
+    itemPages + 1,
+    totalPages,
+  );
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Protocolo — ${escHtml(projectName)}</title>
+<style>${CSS}</style>
+</head>
+<body>
+${protocolHtml}${photoHtml}
+</body>
+</html>`;
+
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+
+  const now = new Date();
+  const safeName = (protocol.protocolNumber ?? protocolId)
+    .replace(/[^a-zA-Z0-9\-_]/g, '_');
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const targetUri = `${FileSystem.documentDirectory}PROTOCOLO-${safeName}-${dateStr}.pdf`;
+  try { await FileSystem.deleteAsync(targetUri, { idempotent: true }); } catch {}
+  await FileSystem.moveAsync({ from: uri, to: targetUri });
+  return targetUri;
+}

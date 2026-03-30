@@ -36,7 +36,8 @@ function ensureFileUri(uri: string): string {
 
 export async function applyPhotoStamps(
   imageUri: string,
-  logoUri: string | null
+  logoUri: string | null,
+  comment?: string | null
 ): Promise<string> {
   const timestamp = formatTimestamp(new Date());
 
@@ -65,10 +66,36 @@ export async function applyPhotoStamps(
   });
   // withTimestamp es ruta absoluta sin file://, necesitamos añadirlo para Coil
 
+  // ── Paso 1b: comentario (si existe) debajo del timestamp ─────────────────
+  let withComment = withTimestamp;
+  if (comment?.trim()) {
+    withComment = await Marker.markText({
+      backgroundImage: { src: ensureFileUri(withTimestamp) },
+      watermarkTexts: [
+        {
+          text: comment.trim(),
+          positionOptions: { position: Position.topLeft },
+          style: {
+            color: '#000000',
+            fontSize: 24,
+            textBackgroundStyle: {
+              paddingX: 16,
+              paddingY: 6,
+              type: TextBackgroundType.none,
+              color: '#FFFFFF80',
+            },
+          },
+        },
+      ],
+      saveFormat: ImageFormat.jpg,
+      quality: 88,
+    });
+  }
+
   // ── Paso 2: logo del proyecto (inferior derecha, 25% opacidad) ───────────
   if (logoUri) {
     const withLogo: string = await Marker.markImage({
-      backgroundImage: { src: ensureFileUri(withTimestamp) },
+      backgroundImage: { src: ensureFileUri(withComment) },
       watermarkImages: [
         {
           src: ensureFileUri(logoUri),
@@ -83,5 +110,5 @@ export async function applyPhotoStamps(
     return ensureFileUri(withLogo);
   }
 
-  return ensureFileUri(withTimestamp);
+  return ensureFileUri(withComment);
 }
