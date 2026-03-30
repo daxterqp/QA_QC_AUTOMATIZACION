@@ -41,46 +41,31 @@ export async function applyPhotoStamps(
 ): Promise<string> {
   const timestamp = formatTimestamp(new Date());
 
-  // ── Paso 1: timestamp + comentario (mismo estilo, segunda fila) ──────────
-  // Se combinan en un único markText para que el comentario quede exactamente
-  // debajo del timestamp con el mismo fondo blanco semitransparente.
-  const watermarkTexts: any[] = [
-    {
-      text: timestamp,
-      positionOptions: { position: Position.topLeft },
-      style: {
-        color: '#000000',
-        fontSize: 30,
-        textBackgroundStyle: {
-          paddingX: 16,
-          paddingY: 10,
-          type: TextBackgroundType.none,
-          color: '#FFFFFF80',
-        },
-      },
-    },
-  ];
-
-  if (comment?.trim()) {
-    watermarkTexts.push({
-      text: comment.trim(),
-      positionOptions: { position: Position.topLeft, Y: 70 }, // segunda fila debajo del timestamp
-      style: {
-        color: '#000000',
-        fontSize: 30,
-        textBackgroundStyle: {
-          paddingX: 16,
-          paddingY: 10,
-          type: TextBackgroundType.none,
-          color: '#FFFFFF80',
-        },
-      },
-    });
-  }
+  // ── Paso 1: timestamp (y comentario opcional en segunda línea) ───────────
+  // Se usa un único texto con \n para que la librería renderice el salto de
+  // línea de forma nativa, con el mismo fondo y estilo, sin superposición.
+  const labelText = comment?.trim()
+    ? `${timestamp}\n${comment.trim()}`
+    : timestamp;
 
   const withText: string = await Marker.markText({
     backgroundImage: { src: ensureFileUri(imageUri) },
-    watermarkTexts,
+    watermarkTexts: [
+      {
+        text: labelText,
+        positionOptions: { position: Position.topLeft },
+        style: {
+          color: '#000000',
+          fontSize: 30,
+          textBackgroundStyle: {
+            paddingX: 16,
+            paddingY: 10,
+            type: TextBackgroundType.none,
+            color: '#FFFFFF80',
+          },
+        },
+      },
+    ],
     saveFormat: ImageFormat.jpg,
     quality: 88,
   });
