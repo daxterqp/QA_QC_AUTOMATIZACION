@@ -471,7 +471,7 @@ export default function ProjectListScreen({ navigation }: Props) {
               {(isJefe || isSupervisor) && (
                 <TouchableOpacity
                   ref={index === 0 ? dosierChipRef : undefined}
-                  style={[styles.actionChip, styles.actionChipAccent]}
+                  style={[styles.actionChip, styles.actionChipAccent, styles.actionChipDossier]}
                   onPress={() => {
                   pullProjectFromCloud(item.id).catch(() => {});
                   navigation.navigate('Dossier', { projectId: item.id, projectName: item.name });
@@ -495,11 +495,10 @@ export default function ProjectListScreen({ navigation }: Props) {
               )}
 
               <TouchableOpacity
-                style={[styles.actionChip, styles.actionChipPhone]}
+                style={styles.actionChipPhone}
                 onPress={() => navigation.navigate('PhoneContacts', { projectId: item.id, projectName: item.name })}
               >
-                <Ionicons name="call-outline" size={13} color={Colors.white} style={{ marginRight: 4 }} />
-                <Text style={[styles.actionChipText, styles.actionChipTextLight]}>Contactos</Text>
+                <Ionicons name="call-outline" size={15} color={Colors.white} />
               </TouchableOpacity>
             </View>
           </View>
@@ -748,20 +747,24 @@ const styles = StyleSheet.create({
   statusChipText: { color: Colors.white, fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
 
   actionsRow: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+    flexDirection: 'row', flexWrap: 'nowrap', gap: 5,
     paddingHorizontal: 12, paddingBottom: 12,
     borderTopWidth: 1, borderTopColor: Colors.divider,
     paddingTop: 10,
   },
   actionChip: {
-    flex: 1, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 6,
+    flex: 1, borderRadius: Radius.sm, paddingHorizontal: 6, paddingVertical: 6,
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
     alignItems: 'center',
   },
+  actionChipDossier: { flex: 0.75 },
   actionChipAccent: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   actionChipPhone: {
+    flex: 0,
     backgroundColor: Colors.secondary, borderColor: Colors.secondary,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 9, paddingVertical: 6,
+    borderWidth: 1, borderRadius: Radius.sm,
   },
   actionChipSync: { borderColor: Colors.secondary, backgroundColor: Colors.white },
   actionChipDisabled: { opacity: 0.5 },

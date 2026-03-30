@@ -14,6 +14,8 @@ import { Colors, Radius, Shadow } from '../theme/colors';
 import { database, phoneContactsCollection } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import type PhoneContact from '@models/PhoneContact';
+import { useAuth } from '@context/AuthContext';
+import { pushPhoneContact, deletePhoneContactRemote, pullPhoneContacts } from '@services/SupabaseSyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhoneContacts'>;
 
@@ -27,6 +29,9 @@ const EMPTY_FORM: ContactForm = { name: '', phone: '', role: '' };
 
 export default function PhoneContactsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+  const { currentUser } = useAuth();
+  const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+
   const [contacts, setContacts] = useState<PhoneContact[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingContact, setEditingContact] = useState<PhoneContact | null>(null);
@@ -35,6 +40,9 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
+    // Bajar contactos desde Supabase al abrir
+    pullPhoneContacts(projectId).catch(() => {});
+
     const sub = phoneContactsCollection
       .query(Q.where('project_id', projectId), Q.sortBy('sort_order', Q.asc), Q.sortBy('created_at', Q.asc))
       .observe()
@@ -64,6 +72,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
     if (!form.name.trim() || !form.phone.trim()) return;
     setSaving(true);
     try {
+      let saved: PhoneContact | null = null;
       await database.write(async () => {
         if (editingContact) {
           await editingContact.update(c => {
@@ -71,8 +80,9 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
             c.phone = form.phone.trim();
             c.role = form.role.trim() || null;
           });
+          saved = editingContact;
         } else {
-          await phoneContactsCollection.create(c => {
+          saved = await phoneContactsCollection.create(c => {
             c.projectId = projectId;
             c.name = form.name.trim();
             c.phone = form.phone.trim();
@@ -81,6 +91,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
           });
         }
       });
+      if (saved) pushPhoneContact(saved).catch(() => {});
       closeModal();
     } finally {
       setSaving(false);
@@ -96,7 +107,9 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         {
           text: 'Eliminar', style: 'destructive',
           onPress: async () => {
+            const id = contact.id;
             await database.write(async () => { await contact.destroyPermanently(); });
+            deletePhoneContactRemote(id).catch(() => {});
           },
         },
       ],
@@ -146,6 +159,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       let imported = 0;
       let skipped = 0;
 
+      const created: PhoneContact[] = [];
       await database.write(async () => {
         for (let i = 0; i < dataRows.length; i++) {
           const row = dataRows[i];
@@ -158,16 +172,19 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
 
           const phone = prefix ? `${prefix}${number}` : number;
 
-          await phoneContactsCollection.create(c => {
-            c.projectId = projectId;
-            c.name = name;
-            c.phone = phone;
-            c.role = role || null;
-            c.sortOrder = contacts.length + imported;
+          const c = await phoneContactsCollection.create(ct => {
+            ct.projectId = projectId;
+            ct.name = name;
+            ct.phone = phone;
+            ct.role = role || null;
+            ct.sortOrder = contacts.length + imported;
           });
+          created.push(c);
           imported++;
         }
       });
+      // Subir a Supabase en background
+      for (const c of created) pushPhoneContact(c).catch(() => {});
 
       Alert.alert(
         'Importación completada',
@@ -187,21 +204,23 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              onPress={handleImportExcel}
-              disabled={importing}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              {importing
-                ? <ActivityIndicator size="small" color={Colors.white} />
-                : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
-              }
-            </TouchableOpacity>
-            <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
-            </TouchableOpacity>
-          </View>
+          isJefe ? (
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={handleImportExcel}
+                disabled={importing}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                {importing
+                  ? <ActivityIndicator size="small" color={Colors.white} />
+                  : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
+                }
+              </TouchableOpacity>
+              <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
+              </TouchableOpacity>
+            </View>
+          ) : undefined
         }
       />
 
@@ -227,10 +246,6 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <TouchableOpacity style={styles.callBtn} onPress={() => callContact(item.phone)}>
-              <Ionicons name="call" size={20} color={Colors.white} />
-            </TouchableOpacity>
-
             <View style={styles.cardBody}>
               <Text style={styles.cardName}>{item.name}</Text>
               {item.role ? <Text style={styles.cardRole}>{item.role}</Text> : null}
@@ -238,12 +253,19 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
             </View>
 
             <View style={styles.cardActions}>
-              <TouchableOpacity onPress={() => openEdit(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="pencil-outline" size={18} color={Colors.primary} />
+              <TouchableOpacity onPress={() => callContact(item.phone)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="call-outline" size={18} color={Colors.primary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => deleteContact(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-              </TouchableOpacity>
+              {isJefe && (
+                <>
+                  <TouchableOpacity onPress={() => openEdit(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="pencil-outline" size={18} color={Colors.textSecondary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => deleteContact(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         )}
@@ -323,11 +345,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.white, borderRadius: Radius.md,
     padding: 14, gap: 12, ...Shadow.subtle,
-  },
-  callBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center', alignItems: 'center',
   },
   cardBody: { flex: 1 },
   cardName: { fontSize: 14, fontWeight: '700', color: Colors.navy },

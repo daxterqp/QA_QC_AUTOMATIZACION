@@ -32,6 +32,7 @@ import {
   annotationCommentsCollection,
   annotationCommentPhotosCollection,
   dashboardNotesCollection,
+  phoneContactsCollection,
 } from '@db/index';
 
 export interface SyncResult {
@@ -121,6 +122,22 @@ async function pushTable(table: string, rows: any[]): Promise<void> {
  * Empuja inmediatamente el estado de un protocolo a Supabase.
  * Llamar después de aprobar/rechazar/enviar para que el sync remoto no revierta el cambio local.
  */
+export async function pushPhoneContact(contact: any): Promise<void> {
+  try { await pushTable('phone_contacts', [toRow(contact._raw)]); } catch { /* sin red */ }
+}
+
+export async function deletePhoneContactRemote(contactId: string): Promise<void> {
+  try { await supabase.from('phone_contacts').delete().eq('id', contactId); } catch { /* sin red */ }
+}
+
+export async function pullPhoneContacts(projectId: string): Promise<void> {
+  const { data, error } = await supabase.from('phone_contacts').select('*').eq('project_id', projectId);
+  if (error || !data) return;
+  const local = await phoneContactsCollection.query(Q.where('project_id', projectId)).fetch();
+  const prepares = prepareOverride(phoneContactsCollection, data, local);
+  if (prepares.length > 0) await database.write(async () => { await database.batch(prepares); });
+}
+
 export async function pushProtocolStatus(protocol: any): Promise<void> {
   try {
     await pushTable('protocols', [toRow(protocol._raw)]);
@@ -150,13 +167,14 @@ async function pushProject(projectId: string): Promise<number> {
   pushed++;
 
   // 2. Tablas directamente ligadas al proyecto
-  const [locations, templates, protocols, plans, notes, accessRows] = await Promise.all([
+  const [locations, templates, protocols, plans, notes, accessRows, phoneContacts] = await Promise.all([
     locationsCollection.query(Q.where('project_id', projectId)).fetch(),
     protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
     protocolsCollection.query(Q.where('project_id', projectId)).fetch(),
     plansCollection.query(Q.where('project_id', projectId)).fetch(),
     dashboardNotesCollection.query(Q.where('project_id', projectId)).fetch(),
     userProjectAccessCollection.query(Q.where('project_id', projectId)).fetch(),
+    phoneContactsCollection.query(Q.where('project_id', projectId)).fetch(),
   ]);
 
   await pushTable('locations', locations.map((r) => toRow(r._raw)));
@@ -165,8 +183,9 @@ async function pushProject(projectId: string): Promise<number> {
   await pushTable('plans', plans.map((r) => toRow(r._raw)));
   await pushTable('dashboard_notes', notes.map((r) => toRow(r._raw)));
   await pushTable('user_project_access', accessRows.map((r) => toRow(r._raw)));
+  await pushTable('phone_contacts', phoneContacts.map((r) => toRow(r._raw)));
   pushed += locations.length + templates.length + protocols.length +
-            plans.length + notes.length + accessRows.length;
+            plans.length + notes.length + accessRows.length + phoneContacts.length;
 
   // 3. Hijos de templates
   if (templates.length > 0) {
@@ -256,7 +275,7 @@ async function pullProject(projectId: string): Promise<number> {
     .from('projects').select('*').eq('id', projectId);
   if (projErr) throw new Error(`[pull:projects] ${projErr.message}`);
 
-  const [remoteLocations, remoteTemplates, remoteProtocols, remotePlans, remoteNotes, remoteAccess] =
+  const [remoteLocations, remoteTemplates, remoteProtocols, remotePlans, remoteNotes, remoteAccess, remotePhoneContacts] =
     await Promise.all([
       fetchAll('locations',            'project_id', projectId),
       fetchAll('protocol_templates',   'project_id', projectId),
@@ -264,6 +283,7 @@ async function pullProject(projectId: string): Promise<number> {
       fetchAll('plans',                'project_id', projectId),
       fetchAll('dashboard_notes',      'project_id', projectId),
       fetchAll('user_project_access',  'project_id', projectId),
+      fetchAll('phone_contacts',       'project_id', projectId),
     ]);
 
   const tIds    = remoteTemplates.map((t: any) => t.id);
@@ -291,7 +311,7 @@ async function pullProject(projectId: string): Promise<number> {
 
   return database.write(async () => {
     const [
-      localProject, localLocs, localTemplates, localProtocols, localPlans, localNotes, localAccess,
+      localProject, localLocs, localTemplates, localProtocols, localPlans, localNotes, localAccess, localPhoneContacts,
       localTemplateItems, localPItems, localNonConfs, localAnnotations,
       localEvidences, localComments, localCommentPhotos,
     ] = await Promise.all([
@@ -302,6 +322,7 @@ async function pullProject(projectId: string): Promise<number> {
       plansCollection.query(Q.where('project_id', projectId)).fetch(),
       dashboardNotesCollection.query(Q.where('project_id', projectId)).fetch(),
       userProjectAccessCollection.query(Q.where('project_id', projectId)).fetch(),
+      phoneContactsCollection.query(Q.where('project_id', projectId)).fetch(),
       tIds.length > 0
         ? protocolTemplateItemsCollection.query(Q.where('template_id', Q.oneOf(tIds))).fetch()
         : Promise.resolve([]),
@@ -333,6 +354,7 @@ async function pullProject(projectId: string): Promise<number> {
       ...preparePlansOverride(plansCollection,             remotePlans,          localPlans),
       ...prepareOverride(dashboardNotesCollection,        remoteNotes,          localNotes),
       ...prepareOverride(userProjectAccessCollection,     remoteAccess,         localAccess),
+      ...prepareOverride(phoneContactsCollection,         remotePhoneContacts,  localPhoneContacts),
       ...prepareOverride(protocolTemplateItemsCollection, remoteTemplateItems,  localTemplateItems),
       ...prepareOverride(protocolItemsCollection,         remotePItems,         localPItems),
       ...prepareOverride(nonConformitiesCollection,       remoteNonConfs,       localNonConfs),

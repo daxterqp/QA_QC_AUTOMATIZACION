@@ -209,9 +209,9 @@ function AnalysisCard({ title, a, b, labelA, labelB, colorA, colorB, onLongPress
 
 // ── Gráfico de barras semanal (vertical) ─────────────────────────────────────
 
-function WeeklyBarChart({ protocols, projectStart, locations, locMap }: {
+function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigateProtocol }: {
   protocols: Protocol[]; projectStart: Date; locations: Location[];
-  locMap: Record<string, Location>;
+  locMap: Record<string, Location>; onNavigateProtocol: (id: string) => void;
 }) {
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
   const [weekModal, setWeekModal] = useState<{ label: string; items: Protocol[] } | null>(null);
@@ -333,14 +333,20 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap }: {
                   const loc = p.locationId ? locMap[p.locationId] : null;
                   const ts = p.signedAt ?? getTs(p.updatedAt);
                   return (
-                    <View key={p.id} style={styles.weekDetailRow}>
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.weekDetailRow}
+                      onPress={() => { setWeekModal(null); onNavigateProtocol(p.id); }}
+                      activeOpacity={0.7}
+                    >
                       <Text style={styles.weekDetailNum}>{idx + 1}</Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.weekDetailProtocol}>{p.protocolNumber}</Text>
+                        <Text style={[styles.weekDetailProtocol, { color: Colors.primary }]}>{p.protocolNumber}</Text>
                         {loc && <Text style={styles.weekDetailLoc}>{loc.name}</Text>}
                         <Text style={styles.weekDetailDate}>{new Date(ts).toLocaleDateString('es-PE')}</Text>
                       </View>
-                    </View>
+                      <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+                    </TouchableOpacity>
                   );
                 })}
               </ScrollView>
@@ -357,7 +363,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap }: {
 
 // ── Gráfico horizontal por especialidad ──────────────────────────────────────
 
-function SpecialtyBarChart({ protocols, locations }: { protocols: Protocol[]; locations: Location[] }) {
+function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { protocols: Protocol[]; locations: Location[]; onNavigateProtocol: (id: string) => void; }) {
   const [specModal, setSpecModal] = useState<{ name: string; items: Protocol[] } | null>(null);
 
   const locSpecMap = useMemo(() => {
@@ -473,10 +479,15 @@ function SpecialtyBarChart({ protocols, locations }: { protocols: Protocol[]; lo
                     const isApproved = p.status === 'APPROVED';
                     const isRejected = p.status === 'REJECTED';
                     return (
-                      <View key={p.id} style={styles.weekDetailRow}>
+                      <TouchableOpacity
+                        key={p.id}
+                        style={styles.weekDetailRow}
+                        onPress={() => { setSpecModal(null); onNavigateProtocol(p.id); }}
+                        activeOpacity={0.7}
+                      >
                         <Text style={styles.weekDetailNum}>{idx + 1}</Text>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.weekDetailProtocol}>{p.protocolNumber}</Text>
+                          <Text style={[styles.weekDetailProtocol, { color: Colors.primary }]}>{p.protocolNumber}</Text>
                           {locName && <Text style={styles.weekDetailLoc}>{locName}</Text>}
                         </View>
                         {(isApproved || isRejected) && (
@@ -484,7 +495,8 @@ function SpecialtyBarChart({ protocols, locations }: { protocols: Protocol[]; lo
                             <Text style={styles.specStatusTxt}>{isApproved ? 'Aprobado' : 'Rechazado'}</Text>
                           </View>
                         )}
-                      </View>
+                        <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+                      </TouchableOpacity>
                     );
                   })}
               </ScrollView>
@@ -780,6 +792,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
               projectStart={projectStart}
               locations={locations}
               locMap={locMap}
+              onNavigateProtocol={(id) => navigation.navigate('ProtocolAudit', { protocolId: id })}
             />
           </View>
         )}
@@ -787,7 +800,11 @@ export default function HistoricalScreen({ navigation, route }: Props) {
         {/* Gráfico por especialidad */}
         {selectedProjectId && (locations.length > 0 || protocols.length > 0) && (
           <View ref={dashboardSpecialtyRef} onLayout={dashboardSpecialtyLayout}>
-            <SpecialtyBarChart protocols={protocols} locations={locations} />
+            <SpecialtyBarChart
+              protocols={protocols}
+              locations={locations}
+              onNavigateProtocol={(id) => navigation.navigate('ProtocolAudit', { protocolId: id })}
+            />
           </View>
         )}
 
