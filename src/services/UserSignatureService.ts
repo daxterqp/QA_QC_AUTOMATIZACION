@@ -7,6 +7,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import { downloadFromS3, s3FileExists } from './S3Service';
 
 const KEY = (userId: string) => `user_signature_uri_${userId}`;
 
@@ -45,6 +46,35 @@ export async function saveUserSignatureS3Key(userId: string, s3Key: string): Pro
 export async function getUserSignatureS3Key(userId: string): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(S3_KEY(userId));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Devuelve la URI local de la firma del usuario.
+ * Si no está en el dispositivo, intenta descargarla desde S3
+ * usando la clave `signatures/{userId}/signature.jpg`.
+ * Guarda en caché para usos futuros.
+ */
+export async function getOrDownloadSignatureUri(userId: string): Promise<string | null> {
+  // 1. Intentar local primero
+  const localUri = await getUserSignatureUri(userId);
+  if (localUri) return localUri;
+
+  // 2. Intentar descargar desde S3
+  const s3Key = `signatures/${userId}/signature.jpg`;
+  try {
+    const exists = await s3FileExists(s3Key);
+    if (!exists) return null;
+
+    const destUri = `${FileSystem.documentDirectory}user_sig_${userId}.jpg`;
+    await downloadFromS3(s3Key, destUri);
+
+    // Cachear en AsyncStorage para próximas veces
+    await AsyncStorage.setItem(KEY(userId), destUri);
+    await AsyncStorage.setItem(S3_KEY(userId), s3Key);
+    return destUri;
   } catch {
     return null;
   }

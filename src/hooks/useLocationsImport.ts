@@ -8,12 +8,14 @@ import {
 import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { pushProjectToSupabase } from '@services/SupabaseSyncService';
+import { Q } from '@nozbe/watermelondb';
+import type Location from '@db/models/Location';
 
 export type LocationsImportState =
   | { status: 'idle' }
   | { status: 'picking' }
   | { status: 'importing' }
-  | { status: 'success'; totalLocations: number }
+  | { status: 'success'; totalLocations: number; modifiedLocations: number }
   | { status: 'error'; message: string; missingColumns?: string[] };
 
 export function useLocationsImport(projectId: string, projectName: string) {
@@ -32,31 +34,62 @@ export function useLocationsImport(projectId: string, projectName: string) {
 
       setImportState({ status: 'importing' });
 
-      const existing = await locationsCollection.query().fetch();
-      const existingNames = new Set(
-        existing
-          .filter((l) => l.projectId === projectId)
-          .map((l) => l.name.toLowerCase())
+      // Cargar ubicaciones existentes del proyecto
+      const existingLocations = await locationsCollection
+        .query(Q.where('project_id', projectId))
+        .fetch() as Location[];
+
+      // Map de name.toLowerCase() → Location
+      const locationByName = new Map<string, Location>(
+        existingLocations.map((l) => [l.name.toLowerCase().trim(), l])
       );
 
-      const toInsert = result.locations.filter(
-        (loc) => !existingNames.has(loc.name.toLowerCase())
-      );
+      let addedLocations = 0;
+      let modifiedLocations = 0;
 
       await database.write(async () => {
-        for (const loc of toInsert) {
-          await locationsCollection.create((record) => {
-            record.projectId = projectId;
-            record.name = loc.name;
-            record.locationOnly = loc.locationOnly || null;
-            record.specialty = loc.specialty || null;
-            record.referencePlan = loc.referencePlan;
-            record.templateIds = loc.templateIds || null;
-          });
+        for (const loc of result.locations) {
+          const nameKey = loc.name.toLowerCase().trim();
+          const existing = locationByName.get(nameKey);
+
+          if (existing) {
+            // Actualizar si algún campo cambió
+            const needsUpdate =
+              existing.locationOnly !== (loc.locationOnly || null) ||
+              existing.specialty !== (loc.specialty || null) ||
+              existing.referencePlan !== loc.referencePlan ||
+              existing.templateIds !== (loc.templateIds || null);
+
+            if (needsUpdate) {
+              await existing.update((record) => {
+                record.locationOnly = loc.locationOnly || null;
+                record.specialty = loc.specialty || null;
+                record.referencePlan = loc.referencePlan;
+                record.templateIds = loc.templateIds || null;
+              });
+              modifiedLocations++;
+            }
+          } else {
+            // Insertar nueva ubicación
+            const newLoc = await locationsCollection.create((record) => {
+              record.projectId = projectId;
+              record.name = loc.name;
+              record.locationOnly = loc.locationOnly || null;
+              record.specialty = loc.specialty || null;
+              record.referencePlan = loc.referencePlan;
+              record.templateIds = loc.templateIds || null;
+            }) as Location;
+            locationByName.set(nameKey, newLoc);
+            addedLocations++;
+          }
         }
       });
 
-      setImportState({ status: 'success', totalLocations: toInsert.length });
+      setImportState({
+        status: 'success',
+        totalLocations: addedLocations,
+        modifiedLocations,
+      });
 
       // Push a Supabase (no bloquea si falla)
       pushProjectToSupabase(projectId).catch(() => {});

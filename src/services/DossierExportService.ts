@@ -27,7 +27,7 @@ import {
   protocolTemplatesCollection,
 } from '@db/index';
 import { getProjectSettings } from './ProjectSettings';
-import { getUserSignatureUri } from './UserSignatureService';
+import { getOrDownloadSignatureUri } from './UserSignatureService';
 import type Protocol from '@db/models/Protocol';
 import type ProtocolItem from '@db/models/ProtocolItem';
 import type Location from '@db/models/Location';
@@ -879,7 +879,7 @@ export async function exportDossierPdf(
       const jefeRecord = userMap.get(p.signedById);
       if (jefeRecord) protoSignerName = jefeRecord.fullName;
       try {
-        const jefeSignUri = await getUserSignatureUri(p.signedById);
+        const jefeSignUri = await getOrDownloadSignatureUri(p.signedById);
         if (jefeSignUri) protoSignB64 = await toBase64(jefeSignUri);
       } catch { /* use project default */ }
     }
@@ -1005,7 +1005,7 @@ export async function exportSingleProtocolPdf(
     const jefeRecord = userMap.get(protocol.signedById);
     if (jefeRecord) protoSignerName = jefeRecord.fullName;
     try {
-      const jefeSignUri = await getUserSignatureUri(protocol.signedById);
+      const jefeSignUri = await getOrDownloadSignatureUri(protocol.signedById);
       if (jefeSignUri) signB64 = await toBase64(jefeSignUri);
     } catch { /* use default */ }
   }

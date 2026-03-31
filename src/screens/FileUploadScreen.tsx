@@ -555,7 +555,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           <View style={styles.successBadge}>
             <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
             <Text style={styles.successText}>
-              {actState.totalProtocols} protocolo{actState.totalProtocols !== 1 ? 's' : ''} importado{actState.totalProtocols !== 1 ? 's' : ''}
+              {actState.totalProtocols > 0
+                ? `${actState.totalProtocols} protocolo${actState.totalProtocols !== 1 ? 's' : ''} importado${actState.totalProtocols !== 1 ? 's' : ''}${actState.modifiedProtocols > 0 ? ` · ${actState.modifiedProtocols} modificado${actState.modifiedProtocols !== 1 ? 's' : ''}` : ''}`
+                : actState.modifiedProtocols > 0
+                  ? `${actState.modifiedProtocols} protocolo${actState.modifiedProtocols !== 1 ? 's' : ''} modificado${actState.modifiedProtocols !== 1 ? 's' : ''}`
+                  : 'Sin cambios'}
             </Text>
           </View>
         )}
@@ -610,7 +614,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           <View style={styles.successBadge}>
             <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
             <Text style={styles.successText}>
-              {locState.totalLocations} ubicación{locState.totalLocations !== 1 ? 'es' : ''} importada{locState.totalLocations !== 1 ? 's' : ''}
+              {locState.totalLocations > 0
+                ? `${locState.totalLocations} ubicación${locState.totalLocations !== 1 ? 'es' : ''} importada${locState.totalLocations !== 1 ? 's' : ''}${locState.modifiedLocations > 0 ? ` · ${locState.modifiedLocations} modificada${locState.modifiedLocations !== 1 ? 's' : ''}` : ''}`
+                : locState.modifiedLocations > 0
+                  ? `${locState.modifiedLocations} ubicación${locState.modifiedLocations !== 1 ? 'es' : ''} modificada${locState.modifiedLocations !== 1 ? 's' : ''}`
+                  : 'Sin cambios'}
             </Text>
           </View>
         )}
