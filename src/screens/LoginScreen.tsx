@@ -35,15 +35,10 @@ export default function LoginScreen() {
     const result = await login(name.trim(), password);
     setLoading(false);
 
-    if (result === 'not_found') {
+    if (result !== 'ok') {
       Alert.alert(
-        'Usuario no encontrado',
-        'No existe un usuario con ese nombre. Contacte al administrador del sistema.'
-      );
-    } else if (result === 'wrong_password') {
-      Alert.alert(
-        'Contrasena incorrecta',
-        'La contrasena ingresada no es correcta. La primera vez, su contrasena es su nombre.'
+        'Error de acceso',
+        'Nombre o contraseña incorrectos. La primera vez, su contraseña es su nombre.'
       );
     }
   };
@@ -61,7 +56,7 @@ export default function LoginScreen() {
 
         <View style={styles.formCard}>
           <View style={styles.formTitleRow}>
-            <Text style={styles.formTitle}>INICIAR SESION</Text>
+            <Text style={styles.formTitle}>INICIAR SESIÓN</Text>
             <TouchableOpacity
               style={[styles.demoBadge, demoExpired && styles.demoBadgeExpired]}
               onPress={() => { if (!demoExpired) setShowDemoModal(true); }}
@@ -87,11 +82,11 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>CONTRASENA</Text>
+            <Text style={styles.label}>CONTRASEÑA</Text>
             <View style={styles.passwordRow}>
               <TextInput
                 style={[styles.input, styles.passwordInput]}
-                placeholder="Ingrese su contrasena"
+                placeholder="Ingrese su contraseña"
                 placeholderTextColor={Colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
@@ -111,7 +106,7 @@ export default function LoginScreen() {
           </View>
 
           <Text style={styles.hint}>
-            Primera vez: su contrasena es su nombre
+            Primera vez: su contraseña es su nombre
           </Text>
 
           <TouchableOpacity
@@ -129,6 +124,12 @@ export default function LoginScreen() {
         <Text style={styles.footer}>
           Para solicitar acceso, contacte al administrador del sistema.
         </Text>
+        <TouchableOpacity onPress={() => {
+          const { Linking } = require('react-native');
+          Linking.openURL('https://docs.google.com/document/d/e/2PACX-1vSFl7nP_Va4GvTQsMAdTaQ_85f_UEYZjQk7R7VrYskfprVCjUTHuKceMQTFyuuXcA/pub');
+        }}>
+          <Text style={styles.privacyLink}>Política de Privacidad</Text>
+        </TouchableOpacity>
 
       </ScrollView>
 
@@ -270,5 +271,9 @@ const styles = StyleSheet.create({
   },
   demoConfirmText: {
     color: Colors.white, fontWeight: '700', fontSize: 13,
+  },
+  privacyLink: {
+    textAlign: 'center', color: Colors.light, fontSize: 11,
+    textDecorationLine: 'underline', paddingBottom: 24,
   },
 });

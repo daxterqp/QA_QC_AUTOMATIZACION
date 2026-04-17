@@ -27,32 +27,39 @@ export function useLocations(projectId: string) {
 export function useLocationProgress(projectId: string) {
   return useQuery({
     queryKey: ['location-progress', projectId],
-    queryFn: async (): Promise<Map<string, { done: number; total: number }>> => {
-      const { data: protocols, error } = await supabase
-        .from('protocols')
-        .select('id, location_id, status')
-        .eq('project_id', projectId);
+    queryFn: async (): Promise<Map<string, { done: number; total: number; submitted: number }>> => {
+      // Cargar protocolos e instancias en paralelo
+      const [{ data: protocols, error }, { data: locations, error: locErr }] = await Promise.all([
+        supabase
+          .from('protocols')
+          .select('id, location_id, status')
+          .eq('project_id', projectId)
+          .in('status', ['DRAFT', 'IN_PROGRESS', 'SUBMITTED', 'APPROVED', 'REJECTED']),
+        supabase
+          .from('locations')
+          .select('id, template_ids')
+          .eq('project_id', projectId),
+      ]);
       if (error) throw error;
-
-      const { data: locations, error: locErr } = await supabase
-        .from('locations')
-        .select('id, template_ids')
-        .eq('project_id', projectId);
       if (locErr) throw locErr;
 
-      const map = new Map<string, { done: number; total: number }>();
+      const map = new Map<string, { done: number; total: number; submitted: number }>();
       for (const loc of (locations ?? [])) {
         const templateCount = loc.template_ids
           ? loc.template_ids.split(',').filter((s: string) => s.trim()).length
           : 0;
-        const locProtos = (protocols ?? []).filter((p: { location_id: string; status: string }) => p.location_id === loc.id);
-        const approved = locProtos.filter((p: { status: string }) => p.status === 'APPROVED').length;
-        map.set(loc.id, { done: approved, total: templateCount });
+        const locProtos = (protocols ?? []).filter(
+          (p: { location_id: string }) => p.location_id === loc.id
+        );
+        const approved  = locProtos.filter((p: { status: string }) => p.status === 'APPROVED').length;
+        const submitted = locProtos.filter((p: { status: string }) => p.status === 'SUBMITTED').length;
+        map.set(loc.id, { done: approved, total: templateCount, submitted });
       }
       return map;
     },
     enabled: !!projectId,
-    staleTime: 10 * 1000,
+    staleTime: 0,            // Siempre fresco al volver a la pantalla
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -81,32 +88,40 @@ export function useLocationProtocols(locationId: string, projectId: string) {
 
       if (templateIdList.length === 0) return [];
 
-      // 2. Plantillas del proyecto
-      const { data: allTemplates, error: tmplErr } = await supabase
-        .from('protocol_templates')
-        .select('*')
-        .eq('project_id', projectId);
+      // 2. Plantillas + instancias en paralelo (filtrar en Supabase, no en JS)
+      const [{ data: templates, error: tmplErr }, { data: instances, error: instErr }] =
+        await Promise.all([
+          supabase
+            .from('protocol_templates')
+            .select('*')
+            .eq('project_id', projectId)
+            .in('id_protocolo', templateIdList),   // Filtro en DB → mucho más rápido
+          supabase
+            .from('protocols')
+            .select('*')
+            .eq('location_id', locationId)
+            .eq('project_id', projectId),
+        ]);
+
       if (tmplErr) throw tmplErr;
-
-      const matching = (allTemplates ?? []).filter((t: ProtocolTemplate) =>
-        templateIdList.includes(t.id_protocolo)
-      );
-
-      // 3. Instancias existentes para esta ubicación
-      const { data: instances, error: instErr } = await supabase
-        .from('protocols')
-        .select('*')
-        .eq('location_id', locationId)
-        .eq('project_id', projectId);
       if (instErr) throw instErr;
 
-      // 4. Construir filas
-      return matching.map((tmpl: ProtocolTemplate) => ({
+      const matchingTemplates = (templates ?? []) as ProtocolTemplate[];
+      const existingInstances = (instances ?? []) as Protocol[];
+
+      // 3. Ordenar por el orden original de templateIdList para mantener el orden del Excel
+      const ordered = templateIdList
+        .map(idProt => matchingTemplates.find(t => t.id_protocolo === idProt))
+        .filter((t): t is ProtocolTemplate => !!t);
+
+      // 4. Emparejar cada template con su instancia
+      return ordered.map(tmpl => ({
         template: tmpl,
-        instance: (instances ?? []).find((p: Protocol) => p.template_id === tmpl.id) ?? null,
+        instance: existingInstances.find(p => p.template_id === tmpl.id) ?? null,
       }));
     },
     enabled: !!locationId && !!projectId,
+    staleTime: 0,
   });
 }
 
@@ -126,15 +141,19 @@ export function useCreateProtocolInstance(locationId: string, projectId: string)
       locationName: string;
     }): Promise<Protocol> => {
       // Crear protocolo
+      const now = Date.now();
       const { data: protocol, error: protoErr } = await supabase
         .from('protocols')
         .insert({
+          id: crypto.randomUUID(),
           project_id: projectId,
           location_id: locationId,
           template_id: templateId,
           protocol_number: templateName,
           location_reference: locationName,
-          status: 'PENDING',
+          status: 'DRAFT',
+          created_at: now,
+          updated_at: now,
         })
         .select()
         .single();
@@ -150,15 +169,19 @@ export function useCreateProtocolInstance(locationId: string, projectId: string)
 
       // Crear items del protocolo
       if (templateItems && templateItems.length > 0) {
-        const itemsToInsert = (templateItems as ProtocolTemplateItem[]).map((ti, idx) => ({
+        const itemsToInsert = (templateItems as ProtocolTemplateItem[]).map((ti) => ({
+          id: crypto.randomUUID(),
           protocol_id: protocol.id,
-          template_item_id: ti.id,
           partida_item: ti.partida_item,
           item_description: ti.item_description,
           validation_method: ti.validation_method,
           section: ti.section,
-          status: 'PENDING' as const,
-          sort_order: idx,
+          is_compliant: false,
+          is_na: false,
+          has_answer: false,
+          comments: null,
+          created_at: now,
+          updated_at: now,
         }));
 
         const { error: insertErr } = await supabase
@@ -172,6 +195,50 @@ export function useCreateProtocolInstance(locationId: string, projectId: string)
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['location-protocols', locationId, projectId] });
       qc.invalidateQueries({ queryKey: ['location-progress', projectId] });
+    },
+  });
+}
+
+// ── Eliminar ubicaciones (cascade) ──────────────────────────────────────────
+
+export function useDeleteLocations(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (locationIds: string[]) => {
+      const res = await fetch('/api/locations/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, locationIds }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['locations', projectId] });
+      qc.invalidateQueries({ queryKey: ['location-progress', projectId] });
+      qc.invalidateQueries({ queryKey: ['dossier-protocols', projectId] });
+    },
+  });
+}
+
+// ── Eliminar protocolos individuales (cascade) ──────────────────────────────
+
+export function useDeleteProtocols(locationId: string, projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (protocolIds: string[]) => {
+      const res = await fetch('/api/protocols/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ protocolIds }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['location-protocols', locationId, projectId] });
+      qc.invalidateQueries({ queryKey: ['location-progress', projectId] });
+      qc.invalidateQueries({ queryKey: ['dossier-protocols', projectId] });
     },
   });
 }

@@ -338,5 +338,31 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      // v15 → v16: s3_etag + s3_key en plans (detección de versiones nuevas)
+      toVersion: 16,
+      steps: [
+        addColumns({
+          table: 'plans',
+          columns: [
+            { name: 's3_key', type: 'string', isOptional: true },
+            { name: 's3_etag', type: 'string', isOptional: true },
+            { name: 'local_etag', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      // v16 → v17: stamp_comment en projects (compartido vía Supabase)
+      toVersion: 17,
+      steps: [
+        addColumns({
+          table: 'projects',
+          columns: [
+            { name: 'stamp_comment', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

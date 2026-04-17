@@ -42,7 +42,33 @@ export function useLocationsList(projectId: string) {
   });
 }
 
-// ── Plans list ────────────────────────────────────────────────────────────────
+// ── Local plans list (filesystem as source of truth) ─────────────────────────
+
+export interface LocalPlanFile {
+  filename:  string;
+  planName:  string;
+  localPath: string;
+  s3Key:     string | null;
+  locations: string[];
+}
+
+export function useLocalPlans(projectId: string, projectName: string, fileType: 'pdf' | 'dwg') {
+  return useQuery({
+    queryKey: ['local-plans', projectId, fileType],
+    queryFn: async (): Promise<LocalPlanFile[]> => {
+      if (!projectName) return [];
+      const params = new URLSearchParams({ projectName, projectId, type: fileType });
+      const res = await fetch(`/api/plans/local-list?${params}`);
+      if (!res.ok) return [];
+      const { files } = await res.json();
+      return files as LocalPlanFile[];
+    },
+    enabled: !!projectId && !!projectName,
+    staleTime: 0,
+  });
+}
+
+// ── Plans list (Supabase — used by plan viewer, not by file-upload tab) ───────
 
 export function usePlans(projectId: string) {
   return useQuery({
@@ -113,35 +139,38 @@ export async function importActivitiesToSupabase(
       // Insert new template
       const { data: newT, error } = await supabase
         .from('protocol_templates')
-        .insert({ project_id: projectId, id_protocolo: group.idProtocolo, name: group.protocolName })
+        .insert({ id: crypto.randomUUID(), project_id: projectId, id_protocolo: group.idProtocolo, name: group.protocolName, created_at: Date.now(), updated_at: Date.now() })
         .select().single();
       if (error) throw error;
       template = newT as ProtocolTemplate;
       added++;
     } else if (template.name !== group.protocolName && group.protocolName) {
       // Update template name if changed
-      await supabase
+      const { error: nameErr } = await supabase
         .from('protocol_templates')
-        .update({ name: group.protocolName, updated_at: new Date().toISOString() })
+        .update({ name: group.protocolName, updated_at: Date.now() })
         .eq('id', template.id);
+      if (nameErr) console.warn('[importActivities] template name update error:', nameErr);
     }
 
     // Upsert items
-    let sortOrder = 0;
     for (const act of group.activities) {
-      sortOrder++;
       const key     = itemKey(template!.id, act.partidaItem);
       const existing = existingItemMap.get(key);
 
       if (!existing) {
-        await supabase.from('protocol_template_items').insert({
+        const now = Date.now();
+        const { error: itemErr } = await supabase.from('protocol_template_items').insert({
+          id:                crypto.randomUUID(),
           template_id:       template!.id,
           partida_item:      act.partidaItem || null,
           item_description:  act.itemDescription,
           validation_method: act.validationMethod || null,
           section:           act.section,
-          sort_order:        sortOrder,
+          created_at:        now,
+          updated_at:        now,
         });
+        if (itemErr) throw new Error(`Error insertando item: ${itemErr.message}`);
         templateModified = true;
       } else {
         const needsUpdate =
@@ -149,14 +178,15 @@ export async function importActivitiesToSupabase(
           existing.validation_method !== (act.validationMethod || null) ||
           existing.section           !== act.section;
         if (needsUpdate) {
-          await supabase.from('protocol_template_items')
+          const { error: updErr } = await supabase.from('protocol_template_items')
             .update({
               item_description:  act.itemDescription,
               validation_method: act.validationMethod || null,
               section:           act.section,
-              updated_at:        new Date().toISOString(),
+              updated_at:        Date.now(),
             })
             .eq('id', existing.id);
+          if (updErr) throw new Error(`Error actualizando item: ${updErr.message}`);
           templateModified = true;
         }
       }
@@ -198,14 +228,19 @@ export async function importLocationsToSupabase(
     const existing = locationByName.get(nameKey);
 
     if (!existing) {
-      await supabase.from('locations').insert({
+      const now = Date.now();
+      const { error: locErr } = await supabase.from('locations').insert({
+        id:            crypto.randomUUID(),
         project_id:    projectId,
         name:          loc.name,
         location_only: loc.locationOnly || null,
         specialty:     loc.specialty    || null,
         reference_plan: loc.referencePlan,
         template_ids:  loc.templateIds  || null,
+        created_at:    now,
+        updated_at:    now,
       });
+      if (locErr) throw new Error(`Error insertando ubicación "${loc.name}": ${locErr.message}`);
       added++;
     } else {
       const needsUpdate =
@@ -214,13 +249,14 @@ export async function importLocationsToSupabase(
         existing.reference_plan  !== loc.referencePlan          ||
         existing.template_ids    !== (loc.templateIds   || null);
       if (needsUpdate) {
-        await supabase.from('locations').update({
+        const { error: updErr } = await supabase.from('locations').update({
           location_only:  loc.locationOnly  || null,
           specialty:      loc.specialty     || null,
           reference_plan: loc.referencePlan,
           template_ids:   loc.templateIds   || null,
-          updated_at:     new Date().toISOString(),
+          updated_at:     Date.now(),
         }).eq('id', existing.id);
+        if (updErr) throw new Error(`Error actualizando ubicación "${loc.name}": ${updErr.message}`);
         modified++;
       }
     }
@@ -268,7 +304,7 @@ export async function uploadProjectLogo(
   // Save s3_key on the project row
   await supabase
     .from('projects')
-    .update({ logo_s3_key: s3Key, updated_at: new Date().toISOString() })
+    .update({ logo_s3_key: s3Key, updated_at: Date.now() })
     .eq('id', projectId);
   return s3Key;
 }
@@ -282,5 +318,7 @@ export async function uploadUserSignature(
   const s3Key = `signatures/${userId}/signature.jpg`;
   const blob  = new Blob([await file.arrayBuffer()], { type: 'image/jpeg' });
   await uploadBlobToS3(blob, s3Key, 'image/jpeg');
+  // Note: signature is per-device. APK stores s3_key in AsyncStorage, not Supabase.
+  // The web stores it in S3 at a known path: signatures/{userId}/signature.jpg
   return s3Key;
 }

@@ -1,4 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
+import { Alert, Linking } from 'react-native';
 import {
   Camera,
   useCameraDevice,
@@ -25,24 +26,43 @@ export interface UseCameraReturn {
 /**
  * Hook que encapsula toda la logica de camara con vision-camera v4.
  *
- * Estrategia de "cero tiempos de carga":
- * - El componente <Camera> debe montarse al abrir el modulo de inspeccion,
- *   no solo al presionar el boton de camara.
- * - Usar `isActive={true}` en el componente para que el sensor quede en
- *   standby y la primera captura sea instantanea.
+ * Estrategia de permisos:
+ * - Al montar, verifica el estado actual del permiso.
+ * - Si nunca se pidió (not-determined), lo solicita directamente.
+ * - Si fue denegado permanentemente (denied), ofrece ir a Ajustes.
+ * - Si ya fue concedido, continúa sin demora.
  */
 export function useCamera(): UseCameraReturn {
   const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('back');
   const { hasPermission, requestPermission } = useCameraPermission();
-  // isLoading también cubre el tiempo en que los dispositivos aún no están enumerados
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!hasPermission) {
-        await requestPermission();
+        const status = Camera.getCameraPermissionStatus();
+
+        if (status === 'not-determined') {
+          // Primera vez: solicitar directamente
+          await requestPermission();
+        } else if (status === 'denied') {
+          // Denegado permanentemente: ofrecer ir a Ajustes
+          await new Promise<void>((resolve) => {
+            Alert.alert(
+              'Permiso de cámara requerido',
+              'Flow QA/QC necesita acceso a la cámara para capturar evidencias fotográficas. El permiso fue denegado anteriormente — habilítalo en Ajustes.',
+              [
+                { text: 'Cancelar', style: 'cancel', onPress: () => resolve() },
+                { text: 'Ir a Ajustes', onPress: () => { Linking.openSettings(); resolve(); } },
+              ],
+            );
+          });
+        } else {
+          // 'restricted' u otro: intentar solicitar por si acaso
+          await requestPermission();
+        }
       }
       if (!cancelled) setIsLoading(false);
     })();
@@ -56,7 +76,6 @@ export function useCamera(): UseCameraReturn {
       const photo = await cameraRef.current.takePhoto({
         flash: 'off',
         enableShutterSound: false,
-        // enableAutoRedEyeReduction: false, // No disponible en v4
       });
       return photo;
     } catch (error) {

@@ -6,9 +6,10 @@ import {
   FileText, Loader2, CheckCircle, XCircle, Clock, ChevronRight,
 } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
-import { useProjects } from '@hooks/useProjects';
+import { useProjects, useProject } from '@hooks/useProjects';
 import { useDossierProtocols, type DossierProtocol } from '@hooks/useDossier';
 import { useHistoricalLocations } from '@hooks/useHistorical';
+import { useProjectPreload } from '@hooks/useProjectPreload';
 import { useApproveProtocol, useRejectProtocol } from '@hooks/useProtocolAudit';
 import { useAuth } from '@lib/auth-context';
 import { cn } from '@lib/utils';
@@ -23,24 +24,28 @@ function formatDay(iso: string): string {
   });
 }
 
-function toDateKey(iso: string): string {
-  return iso.slice(0, 10);
+function toDateKey(val: unknown): string {
+  if (typeof val === 'number' && val > 0) return new Date(val).toISOString().slice(0, 10);
+  if (typeof val === 'string' && val.length >= 10) return val.slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
 }
 
 function statusConfig(status: string) {
-  if (status === 'APPROVED')   return { label: 'Aprobado',    cls: 'bg-success text-white',              icon: CheckCircle };
-  if (status === 'REJECTED')   return { label: 'Rechazado',   cls: 'bg-danger text-white',               icon: XCircle    };
-  if (status === 'IN_PROGRESS') return { label: 'En revisión', cls: 'bg-warning text-white',             icon: Clock      };
-  return                               { label: status,        cls: 'bg-gray-400 text-white',             icon: Clock      };
+  if (status === 'APPROVED')  return { label: 'Aprobado',    cls: 'bg-success text-white', icon: CheckCircle };
+  if (status === 'REJECTED')  return { label: 'Rechazado',   cls: 'bg-danger text-white',  icon: XCircle    };
+  if (status === 'SUBMITTED') return { label: 'En revisión', cls: 'bg-primary text-white', icon: Clock      };
+  return                              { label: status,        cls: 'bg-gray-400 text-white', icon: Clock      };
 }
 
 // ── Protocol card ─────────────────────────────────────────────────────────────
 
 function ProtocolCard({
-  protocol, projectId, locMap, userMap, isJefe, onAction,
+  protocol, projectId, projectName, logoS3Key, locMap, userMap, isJefe, onAction,
 }: {
   protocol: DossierProtocol;
   projectId: string;
+  projectName: string;
+  logoS3Key: string | null;
   locMap: Record<string, Location>;
   userMap: Record<string, string>;
   isJefe: boolean;
@@ -56,12 +61,12 @@ function ProtocolCard({
 
   const { currentUser } = useAuth();
   const cfg = statusConfig(protocol.status);
-  const isPending = protocol.status === 'IN_PROGRESS';
+  const isPending = protocol.status === 'SUBMITTED';
 
   const borderColor =
     protocol.status === 'APPROVED' ? 'border-l-success' :
     protocol.status === 'REJECTED' ? 'border-l-danger' :
-    'border-l-warning';
+    'border-l-primary';
 
   async function handleExportSingle() {
     if (!currentUser) return;
@@ -69,10 +74,10 @@ function ProtocolCard({
     try {
       await exportSingleProtocolPdf(
         protocol.id,
-        protocol.location?.name ?? '',
+        projectName,
         currentUser.name,
         currentUser.id,
-        null, // no global logo here for single export
+        logoS3Key,
         locMap,
         userMap,
       );
@@ -104,7 +109,11 @@ function ProtocolCard({
           'bg-white rounded-xl shadow-subtle border-l-4 px-4 py-3 flex flex-col gap-2 cursor-pointer hover:shadow-card transition-shadow',
           borderColor,
         )}
-        onClick={() => router.push(`/app/projects/${projectId}/protocols/${protocol.id}/audit`)}
+        onClick={() => router.push(
+          protocol.status === 'REJECTED'
+            ? `/app/projects/${projectId}/protocols/${protocol.id}/fill`
+            : `/app/projects/${projectId}/protocols/${protocol.id}/audit`
+        )}
       >
         {/* Top row */}
         <div className="flex items-center justify-between gap-2">
@@ -215,6 +224,7 @@ export default function DossierPage() {
   const { data: projects = [] } = useProjects();
   const { data: protocols = [], isLoading, refetch } = useDossierProtocols(projectId);
   const { data: locations = [] } = useHistoricalLocations(projectId);
+  const { data: preloaded } = useProjectPreload(projectId);
 
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState('');
@@ -232,17 +242,23 @@ export default function DossierPage() {
   const userMap = useMemo(() => {
     const m: Record<string, string> = {};
     protocols.forEach(p => {
-      if (p.filledByName && p.created_by_id) m[p.created_by_id] = p.filledByName;
+      if (p.filledByName && p.filled_by_id) m[p.filled_by_id] = p.filledByName;
       if (p.signedByName && p.signed_by_id)  m[p.signed_by_id]  = p.signedByName;
     });
     return m;
   }, [protocols]);
 
-  // Group protocols by day (desc)
+  // Group protocols by day (desc) — APPROVED uses signed_at, others use updated_at
   const sections = useMemo(() => {
     const grouped: Record<string, DossierProtocol[]> = {};
     for (const p of protocols) {
-      const day = toDateKey(p.updated_at);
+      const pa = p as any;
+      const dateField =
+        p.status === 'APPROVED' && pa.signed_at ? pa.signed_at :
+        p.status === 'SUBMITTED' && pa.submitted_at ? pa.submitted_at :
+        p.status === 'REJECTED' && pa.updated_at ? pa.updated_at :
+        pa.updated_at ?? pa.created_at;
+      const day = toDateKey(dateField);
       if (!grouped[day]) grouped[day] = [];
       grouped[day].push(p);
     }
@@ -259,11 +275,13 @@ export default function DossierPage() {
       await exportFullDossier({
         projectId,
         projectName: project.name,
+        projectCreatedAt: (project as any).created_at ?? null,
         signerName: `${currentUser.name} ${currentUser.apellido ?? ''}`.trim(),
         signerUserId: currentUser.id,
-        logoS3Key: (project as any).logo_s3_key ?? null,
+        logoS3Key: (project as any).logo_s3_key ?? `logos/project_${project.id}/logo.jpg`,
         protocols,
         locations,
+        preloaded: preloaded ?? null,
         onProgress: setExportProgress,
       });
     } catch (e) {
@@ -277,7 +295,7 @@ export default function DossierPage() {
   return (
     <div className="flex flex-col min-h-screen bg-surface">
       <PageHeader
-        title="Dossier de Protocolos"
+        title="Dosier de Protocolos"
         subtitle={project?.name}
         crumbs={[
           { label: 'Proyectos', href: '/app/projects' },
@@ -306,8 +324,19 @@ export default function DossierPage() {
       <div className="flex-1 max-w-2xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
 
         {isLoading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-7 h-7 text-primary animate-spin" />
+          <div className="flex flex-col gap-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-xl shadow-card p-4 flex flex-col gap-3 animate-pulse">
+                <div className="flex gap-3 items-start">
+                  <div className="w-2 h-16 rounded bg-gray-200" />
+                  <div className="flex-1 flex flex-col gap-2">
+                    <div className="h-4 bg-gray-200 rounded w-1/2" />
+                    <div className="h-3 bg-gray-100 rounded w-3/4" />
+                    <div className="h-3 bg-gray-100 rounded w-1/3" />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -337,6 +366,8 @@ export default function DossierPage() {
                 key={protocol.id}
                 protocol={protocol}
                 projectId={projectId}
+                projectName={project?.name ?? ''}
+                logoS3Key={(project as any)?.logo_s3_key ?? `logos/project_${projectId}/logo.jpg`}
                 locMap={locMap}
                 userMap={userMap}
                 isJefe={isJefe}

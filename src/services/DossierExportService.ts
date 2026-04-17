@@ -1,7 +1,7 @@
 /**
  * DossierExportService
  *
- * Genera un PDF profesional de Dossier de Calidad para un proyecto.
+ * Genera un PDF profesional de Dosier de Calidad para un proyecto.
  * Incluye:
  *   - Portada con logo, resumen estadístico
  *   - Página de estadísticas (gráfica vertical semanal + horizontal por especialidad, SVG inline)
@@ -251,7 +251,7 @@ function statusLabel(s: string): string {
 function statusColor(s: string): string {
   if (s === 'APPROVED') return '#1e8e3e';
   if (s === 'REJECTED') return '#d93025';
-  if (s === 'SUBMITTED') return '#e37400';
+  if (s === 'SUBMITTED') return '#1a4f7a';
   return '#666';
 }
 
@@ -303,7 +303,7 @@ table { width: 100%; border-collapse: collapse; font-size: 10px; }
 thead th { background: #0e213d; color: white; padding: 8px 10px; font-weight: 700; text-align: left; font-size: 9.5px; letter-spacing: 0.3px; }
 tbody tr:nth-child(even) { background: #f4f6f9; }
 tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: top; line-height: 1.4; }
-.status-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 8.5px; font-weight: 700; color: white; text-transform: uppercase; letter-spacing: 0.3px; }
+.status-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 8.5px; font-weight: 700; color: white; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
 .td-compliant { color: #1e8e3e; font-weight: 700; font-size: 12px; }
 .td-noncompliant { color: #d93025; font-weight: 700; font-size: 12px; }
 .td-noanswer { color: #aaa; }
@@ -385,7 +385,7 @@ function buildCoverPage(
       <span class="ornament-line"></span>
     </div>
     <div>
-      <div class="cover-title">Dossier de Calidad</div>
+      <div class="cover-title">Dosier de Calidad</div>
       <div class="cover-date">Generado el ${generatedAt}</div>
     </div>
     <div class="cover-ornament">
@@ -415,6 +415,58 @@ function buildCoverPage(
       <div class="cover-info-row" style="align-items:center;">
         <span class="cover-info-label">Firma</span>
         <span class="cover-info-value">${signatureHtml}</span>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+// ── Carátula de sección (por grupo location_only) ────────────────────────────
+
+function buildSectionCoverPage(
+  locationOnly: string,
+  logoB64: string | null,
+  projectName: string,
+  totalInGroup: number,
+  approvedInGroup: number,
+): string {
+  const logoHtml = logoB64
+    ? `<img src="${logoB64}" class="cover-logo" alt="Logo"/>`
+    : '';
+  return `
+<div class="page">
+  <div class="cover">
+    ${logoHtml}
+    <div class="cover-ornament">
+      <span class="ornament-line"></span>
+      <span class="ornament-dots">◆ ◇ ◆</span>
+      <span class="ornament-line"></span>
+    </div>
+    <div>
+      <div class="cover-title">Protocolos — ${escHtml(locationOnly)}</div>
+    </div>
+    <div class="cover-ornament">
+      <span class="ornament-line"></span>
+      <span class="ornament-dots">◆ ◇ ◆</span>
+      <span class="ornament-line"></span>
+    </div>
+    <div class="cover-divider"></div>
+    <div class="cover-info-list">
+      <div class="cover-info-row">
+        <span class="cover-info-label">Proyecto</span>
+        <span class="cover-info-value">${escHtml(projectName)}</span>
+      </div>
+      <div class="cover-info-row">
+        <span class="cover-info-label">Sector</span>
+        <span class="cover-info-value">${escHtml(locationOnly)}</span>
+      </div>
+      <div class="cover-info-row">
+        <span class="cover-info-label">Total protocolos</span>
+        <span class="cover-info-value">${totalInGroup}</span>
+      </div>
+      <div class="cover-info-row">
+        <span class="cover-info-label">Protocolos aprobados</span>
+        <span class="cover-info-value">${approvedInGroup}</span>
       </div>
     </div>
   </div>
@@ -462,21 +514,24 @@ function buildStatsPage(
 function buildSummaryTable(
   protocols: Protocol[],
   userMap: Map<string, User>,
+  pageMap: Map<string, number>,
 ): string {
   const rows = protocols.map(p => {
     const filledName = p.filledById ? (userMap.get(p.filledById)?.fullName ?? '—') : '—';
     const signedName = p.signedById ? (userMap.get(p.signedById)?.fullName ?? '—') : '—';
     const sc = statusColor(p.status);
     const sl = statusLabel(p.status);
+    const pg = pageMap.get(p.id) ?? '';
     return `
 <tr>
-  <td><strong>${escHtml(p.protocolNumber)}</strong></td>
+  <td><a href="#protocol-${p.id}" style="color:#1a4f7a;text-decoration:none;"><strong>${escHtml(p.protocolNumber)}</strong></a></td>
   <td>${escHtml(p.locationReference)}</td>
   <td><span class="status-badge" style="background:${sc}">${sl}</span></td>
   <td>${escHtml(filledName)}</td>
   <td>${fmtDate(p.filledAt)}</td>
   <td>${escHtml(signedName)}</td>
   <td>${fmtDate(p.signedAt)}</td>
+  <td style="text-align:center;color:#1a4f7a;font-weight:700;">${pg}</td>
 </tr>`;
   }).join('');
 
@@ -495,6 +550,7 @@ function buildSummaryTable(
         <th>Fecha realización</th>
         <th>Aprobado por</th>
         <th>Fecha aprobación</th>
+        <th style="width:40px;">Pág.</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -640,9 +696,9 @@ function buildProtocolPages(
     }
 
     const continuacion = pageIdx > 0 ? ' <span style="font-size:9px;color:#888;font-weight:400;">(continuación)</span>' : '';
-
+    const anchorId = pageIdx === 0 ? ` id="protocol-${protocol.id}"` : '';
     return `
-<div class="page">
+<div class="page"${anchorId}>
   ${headerHtml}
   ${pageIdx > 0 ? `<div style="font-size:9px;color:#888;margin-bottom:6px;">— Continuación de lista de ítems${continuacion} —</div>` : ''}
 
@@ -666,7 +722,7 @@ function buildProtocolPages(
       <div class="signature-role">Jefe de Calidad</div>
     </div>
     <div class="footer-right">
-      Dossier de Calidad<br/>
+      Dosier de Calidad<br/>
       Página ${globalPageStart + pageIdx} de ${totalDocPages}
     </div>
   </div>
@@ -678,6 +734,7 @@ function buildProtocolPages(
 
 async function buildPhotoPanel(
   protocolName: string,
+  locationName: string | null,
   evidenceUris: string[],
   logoB64: string | null,
   signB64: string | null,
@@ -741,7 +798,7 @@ async function buildPhotoPanel(
 <div class="page">
   <div class="photo-page-header">
     ${logoHtml}
-    <div class="photo-panel-title">Panel Fotográfico — ${escHtml(protocolName)}</div>
+    <div class="photo-panel-title">Panel Fotográfico — ${escHtml(protocolName)}${locationName ? `<div style="font-size:10px;font-weight:600;color:#555;margin-top:2px;">Ubicación: ${escHtml(locationName)}</div>` : ''}</div>
   </div>
   ${vertHtml}
   ${horizHtml}
@@ -752,7 +809,7 @@ async function buildPhotoPanel(
       <div class="signature-role">Jefe de Calidad</div>
     </div>
     <div class="footer-right">
-      Dossier de Calidad<br/>
+      Dosier de Calidad<br/>
       Página ${currentPage} de ${totalDocPages}
     </div>
   </div>
@@ -789,10 +846,23 @@ export async function exportDossierPdf(
   const signerName = currentUserRecord?.fullName ?? 'Jefe de Calidad';
 
   // ── 2. Imágenes base64 ───────────────────────────────────────────────────
-  const [logoB64, signB64] = await Promise.all([
-    toBase64(settings.stampPhotoUri),
-    toBase64(settings.signatureUri),
-  ]);
+  // Logo: try local cache first, then download from S3
+  let logoB64: string | null = null;
+  const logoS3Key = `logos/project_${projectId}/logo.jpg`;
+  const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+  const logoInfo = await FileSystem.getInfoAsync(localLogoUri);
+  if (logoInfo.exists) {
+    logoB64 = await toBase64(localLogoUri);
+  } else {
+    try {
+      const { downloadFromS3 } = require('./S3Service');
+      await downloadFromS3(logoS3Key, localLogoUri);
+      logoB64 = await toBase64(localLogoUri);
+    } catch { /* no logo available */ }
+  }
+  // Signature: try per-user download (S3) first, fall back to project settings
+  const currentSignUri = await getOrDownloadSignatureUri(currentUserId) ?? settings.signatureUri;
+  const signB64 = await toBase64(currentSignUri);
 
   // ── 3. Cargar ítems, evidencias y fotos extra por protocolo ─────────────────
   const itemsByProtocol = new Map<string, ProtocolItem[]>();
@@ -826,11 +896,55 @@ export async function exportDossierPdf(
     if (photoUris.length > 0) evidencesByProtocol.set(p.id, photoUris);
   }
 
+  // ── 3b. Ordenar protocolos por orden de template_ids de cada ubicación ──
+  // Sort locations by created_at (preserves Excel import order = first appearance of locationOnly)
+  const sortedLocations = [...locations].sort((a, b) => {
+    const tA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+    const tB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+    return tA - tB;
+  });
+  // Determine locationOnly group order by first appearance in Excel order
+  const locOnlyOrder = new Map<string, number>();
+  let gIdx = 0;
+  for (const loc of sortedLocations) {
+    const locOnly = loc.locationOnly ?? loc.name ?? '';
+    if (!locOnlyOrder.has(locOnly)) locOnlyOrder.set(locOnly, gIdx++);
+  }
+  // Sort locations: group order first, then creation order within group
+  const groupedLocations = [...sortedLocations].sort((a, b) => {
+    const gA = locOnlyOrder.get(a.locationOnly ?? a.name ?? '') ?? 99999;
+    const gB = locOnlyOrder.get(b.locationOnly ?? b.name ?? '') ?? 99999;
+    if (gA !== gB) return gA - gB;
+    const tA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+    const tB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+    return tA - tB;
+  });
+  const templateOrderMap = new Map<string, number>();
+  let tOrderIdx = 0;
+  for (const loc of groupedLocations) {
+    const tids = loc.templateIds ? loc.templateIds.split(',').map(s => s.trim()).filter(Boolean) : [];
+    for (const tid of tids) {
+      templateOrderMap.set(`${loc.id}__${tid}`, tOrderIdx++);
+    }
+  }
+  // Convert template UUID to id_protocolo for lookup (templateIds uses id_protocolo strings)
+  protocols.sort((a, b) => {
+    const idProtoA = a.templateId ? (templateMap.get(a.templateId)?.idProtocolo ?? a.templateId) : '';
+    const idProtoB = b.templateId ? (templateMap.get(b.templateId)?.idProtocolo ?? b.templateId) : '';
+    const orderA = templateOrderMap.get(`${a.locationId}__${idProtoA}`) ?? 99999;
+    const orderB = templateOrderMap.get(`${b.locationId}__${idProtoB}`) ?? 99999;
+    return orderA - orderB;
+  });
+
   // ── 4. Datos estadísticos ────────────────────────────────────────────────
   const approved = protocols.filter(p => p.status === 'APPROVED').length;
   const submitted = protocols.filter(p => p.status === 'SUBMITTED').length;
   const rejected = protocols.filter(p => p.status === 'REJECTED').length;
-  const total = allProtocols.length; // Total del proyecto completo (incluyendo DRAFT)
+  // Total = all template slots across all locations (same as project progress denominator)
+  const total = locations.reduce((sum, loc) => {
+    const tids = loc.templateIds ? loc.templateIds.split(',').map(s => s.trim()).filter(Boolean) : [];
+    return sum + tids.length;
+  }, 0);
 
   const projectRecord = projectArr[0];
   const getTs2 = (val: any) => {
@@ -847,21 +961,69 @@ export async function exportDossierPdf(
   // ── 5. Ensamblar HTML ────────────────────────────────────────────────────
   const coverPage = buildCoverPage(projectName, logoB64, approved, total, generatedAt, signerName, signB64);
   const statsPage = buildStatsPage(protocols, locations, projectStart);
-  const summaryPage = buildSummaryTable(protocols, userMap);
 
-  // Calcular total de páginas del documento (portada + estadísticas + resumen + páginas de protocolos)
+  // Group stats by location_only (for section cover pages)
+  const groupStats = new Map<string, { total: number; approved: number }>();
+  for (const loc of locations) {
+    const locOnly = loc.locationOnly ?? null;
+    if (!locOnly) continue;
+    const stats = groupStats.get(locOnly) ?? { total: 0, approved: 0 };
+    const tids = loc.templateIds ? loc.templateIds.split(',').map(s => s.trim()).filter(Boolean) : [];
+    stats.total += tids.length;
+    groupStats.set(locOnly, stats);
+  }
+  for (const p of protocols) {
+    const loc = p.locationId ? locationMap.get(p.locationId) : undefined;
+    const locOnly = loc?.locationOnly ?? null;
+    if (!locOnly) continue;
+    const stats = groupStats.get(locOnly);
+    if (stats && p.status === 'APPROVED') stats.approved++;
+  }
+
+  // Detect section cover count (unique adjacent location_only changes)
+  let sectionCoverCount = 0;
+  let _prevLocOnly: string | null = null;
+  for (const p of protocols) {
+    const loc = p.locationId ? locationMap.get(p.locationId) : undefined;
+    const locOnly = loc?.locationOnly ?? null;
+    if (locOnly && locOnly !== _prevLocOnly) {
+      sectionCoverCount++;
+      _prevLocOnly = locOnly;
+    }
+  }
+
+  // First pass: calculate total pages AND page map for each protocol
   const FIXED_PAGES = 3; // cover + stats + summary
-  const protocolPageCounts = protocols.map(p => {
+  let totalDocPages = FIXED_PAGES + sectionCoverCount;
+  const pageMap = new Map<string, number>();
+  let _calcPage = FIXED_PAGES + 1;
+  let _calcPrevLocOnly: string | null = null;
+  for (const p of protocols) {
+    const loc = p.locationId ? locationMap.get(p.locationId) : undefined;
+    const curLocOnly = loc?.locationOnly ?? null;
+    if (curLocOnly && curLocOnly !== _calcPrevLocOnly) {
+      _calcPage += 1; // section cover page
+      _calcPrevLocOnly = curLocOnly;
+    }
+    pageMap.set(p.id, _calcPage); // page where this protocol starts
     const its = itemsByProtocol.get(p.id) ?? [];
     const itemPages = Math.max(1, Math.ceil(its.length / ROWS_PER_PAGE));
+    totalDocPages += itemPages;
+    _calcPage += itemPages;
     const photoUrisCount = (evidencesByProtocol.get(p.id) ?? []).length;
-    const photoPages = photoUrisCount > 0 ? Math.ceil(photoUrisCount / 8) : 0;
-    return itemPages + photoPages;
-  });
-  const totalDocPages = FIXED_PAGES + protocolPageCounts.reduce((a, b) => a + b, 0);
+    if (photoUrisCount > 0) {
+      const photoPages = Math.ceil(photoUrisCount / 8);
+      totalDocPages += photoPages;
+      _calcPage += photoPages;
+    }
+  }
+
+  const summaryPage = buildSummaryTable(protocols, userMap, pageMap);
 
   let pageOffset = FIXED_PAGES + 1; // primera página de protocolos
   const protocolPagesHtml: string[] = [];
+  let prevLocationOnly: string | null = null;
+
   for (let i = 0; i < protocols.length; i++) {
     const p = protocols[i];
     const its = itemsByProtocol.get(p.id) ?? [];
@@ -871,6 +1033,14 @@ export async function exportDossierPdf(
     const locationOnly = location?.locationOnly ?? null;
     const template = p.templateId ? templateMap.get(p.templateId) : undefined;
     const idProtocolo = template?.idProtocolo ?? null;
+
+    // Insert section cover at group boundary
+    if (locationOnly && locationOnly !== prevLocationOnly) {
+      const stats = groupStats.get(locationOnly) ?? { total: 0, approved: 0 };
+      protocolPagesHtml.push(buildSectionCoverPage(locationOnly, logoB64, projectName, stats.total, stats.approved));
+      pageOffset += 1;
+      prevLocationOnly = locationOnly;
+    }
 
     // Per-jefe signature: use the specific approver's signature if available
     let protoSignB64 = signB64;
@@ -901,8 +1071,10 @@ export async function exportDossierPdf(
     pageOffset += its_itemPages;
     // Panel fotográfico (si hay fotos)
     const photoUris = evidencesByProtocol.get(p.id) ?? [];
+    const locRef = locationOnly && specialty ? `${locationOnly}-${specialty}` : (locationOnly ?? specialty ?? null);
     const photoHtml = await buildPhotoPanel(
       p.protocolNumber ?? p.id,
+      locRef,
       photoUris,
       logoB64,
       protoSignB64,
@@ -920,7 +1092,7 @@ export async function exportDossierPdf(
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Dossier de Calidad — ${escHtml(projectName)}</title>
+<title>Dosier de Calidad — ${escHtml(projectName)}</title>
 <style>${CSS}</style>
 </head>
 <body>
@@ -934,14 +1106,14 @@ ${protocolPages}
   // ── 6. Generar PDF ───────────────────────────────────────────────────────
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 
-  // Renombrar al formato DOSSIER-{proyecto}-{fecha}.pdf
+  // Renombrar al formato DOSIER-{proyecto}-{fecha}.pdf
   const now = new Date();
   const safeName = projectName
     .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s]/g, '')
     .trim()
     .replace(/\s+/g, '_');
   const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const targetUri = `${FileSystem.documentDirectory}DOSSIER-${safeName}-${dateStr}.pdf`;
+  const targetUri = `${FileSystem.documentDirectory}DOSIER-${safeName}-${dateStr}.pdf`;
   try { await FileSystem.deleteAsync(targetUri, { idempotent: true }); } catch {}
   await FileSystem.moveAsync({ from: uri, to: targetUri });
   return targetUri;
@@ -971,10 +1143,23 @@ export async function exportSingleProtocolPdf(
   const signerName = currentUserRecord?.fullName ?? 'Jefe de Calidad';
 
   // Imágenes base64
-  const [logoB64, defaultSignB64] = await Promise.all([
-    toBase64(settings.stampPhotoUri),
-    toBase64(settings.signatureUri),
-  ]);
+  // Logo: try local cache first, then download from S3
+  let logoB64: string | null = null;
+  const logoS3Key = `logos/project_${projectId}/logo.jpg`;
+  const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+  const logoInfo = await FileSystem.getInfoAsync(localLogoUri);
+  if (logoInfo.exists) {
+    logoB64 = await toBase64(localLogoUri);
+  } else {
+    try {
+      const { downloadFromS3 } = require('./S3Service');
+      await downloadFromS3(logoS3Key, localLogoUri);
+      logoB64 = await toBase64(localLogoUri);
+    } catch { /* no logo available */ }
+  }
+  // Signature: try per-user download (S3) first, fall back to project settings
+  const currentSignUri = await getOrDownloadSignatureUri(currentUserId) ?? settings.signatureUri;
+  const defaultSignB64 = await toBase64(currentSignUri);
 
   // Items y evidencias del protocolo
   const its = await protocolItemsCollection
@@ -1035,8 +1220,10 @@ export async function exportSingleProtocolPdf(
     locationOnly,
   );
 
+  const locRef = locationOnly && specialty ? `${locationOnly}-${specialty}` : (locationOnly ?? specialty ?? null);
   const photoHtml = await buildPhotoPanel(
     protocol.protocolNumber ?? protocol.id,
+    locRef,
     photoUris,
     logoB64,
     signB64,

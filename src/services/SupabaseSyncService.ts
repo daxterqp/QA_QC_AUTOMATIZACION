@@ -101,21 +101,28 @@ function preparePlansOverride(collection: any, remoteRows: any[], localRows: any
         Object.assign(rec._raw, row);
       }));
     } else {
+      // Preserve local_etag — it tracks which version we downloaded,
+      // not what's in Supabase. If we overwrite it, we'd re-download unnecessarily.
+      const preservedLocalEtag = local._raw.local_etag;
       prepares.push(local.prepareUpdate((rec: any) => {
         Object.assign(rec._raw, row);
+        if (preservedLocalEtag) rec._raw.local_etag = preservedLocalEtag;
       }));
     }
   }
   return prepares;
 }
 
-/** Upsert remoto: envía todos los raw rows a Supabase. Loguea errores pero no lanza. */
-async function pushTable(table: string, rows: any[]): Promise<void> {
-  if (rows.length === 0) return;
+/** Upsert remoto: envía todos los raw rows a Supabase. Retorna mensaje de error o null. */
+async function pushTable(table: string, rows: any[]): Promise<string | null> {
+  if (rows.length === 0) return null;
   const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
   if (error) {
-    console.warn(`[push:${table}] ${error.message}`);
+    const msg = `[push:${table}] ${error.message}`;
+    console.warn(msg);
+    return msg;
   }
+  return null;
 }
 
 /**
@@ -156,14 +163,20 @@ export async function pushProtocolItem(item: any): Promise<void> {
 
 // ─── push ───────────────────────────────────────────────────────────────────
 
-async function pushProject(projectId: string): Promise<number> {
+async function pushProject(projectId: string): Promise<{ pushed: number; errors: string[] }> {
   let pushed = 0;
+  const errors: string[] = [];
+
+  const collect = async (table: string, rows: any[]) => {
+    const err = await pushTable(table, rows);
+    if (err) errors.push(err);
+  };
 
   // 1. Proyecto — usar query para evitar excepción si aún no existe localmente
   const projRes = await projectsCollection.query(Q.where('id', projectId)).fetch();
-  if (projRes.length === 0) return 0; // no existe localmente, nada que empujar
+  if (projRes.length === 0) return { pushed: 0, errors };
   const project = projRes[0];
-  await pushTable('projects', [toRow(project._raw)]);
+  await collect('projects', [toRow(project._raw)]);
   pushed++;
 
   // 2. Tablas directamente ligadas al proyecto
@@ -177,14 +190,39 @@ async function pushProject(projectId: string): Promise<number> {
     phoneContactsCollection.query(Q.where('project_id', projectId)).fetch(),
   ]);
 
-  await pushTable('locations', locations.map((r) => toRow(r._raw)));
-  await pushTable('protocol_templates', templates.map((r) => toRow(r._raw)));
-  await pushTable('protocols', protocols.map((r) => toRow(r._raw)));
-  await pushTable('plans', plans.map((r) => toRow(r._raw)));
-  await pushTable('dashboard_notes', notes.map((r) => toRow(r._raw)));
-  await pushTable('user_project_access', accessRows.map((r) => toRow(r._raw)));
-  await pushTable('phone_contacts', phoneContacts.map((r) => toRow(r._raw)));
-  pushed += locations.length + templates.length + protocols.length +
+  // Locations: skip records deleted from desktop (don't re-push)
+  const { data: remoteLocData } = await supabase.from('locations').select('id').eq('project_id', projectId);
+  const remoteLocIds = new Set((remoteLocData ?? []).map((r: { id: string }) => r.id));
+  const locsToUpload = locations.filter((l: any) =>
+    remoteLocIds.has(l.id) || l._raw._status === 'created'
+  );
+  await collect('locations', locsToUpload.map((r) => toRow(r._raw)));
+  await collect('protocol_templates', templates.map((r) => toRow(r._raw)));
+
+  // For protocols: only push if local updated_at is newer than remote
+  // This prevents overwriting approvals/rejections made from desktop/web
+  // Also skip records deleted from desktop (not in remote and not created offline)
+  const { data: remoteProtocols } = await supabase
+    .from('protocols').select('id, updated_at').eq('project_id', projectId);
+  const remoteProtocolIdSet = new Set((remoteProtocols ?? []).map((rp: { id: string }) => rp.id));
+  const remoteUpdatedMap: Record<string, number> = {};
+  for (const rp of (remoteProtocols ?? []) as { id: string; updated_at: number | string }[]) {
+    remoteUpdatedMap[rp.id] = typeof rp.updated_at === 'number' ? rp.updated_at : new Date(rp.updated_at).getTime();
+  }
+  const protocolsToUpload = protocols.filter((p: any) => {
+    // Skip if deleted from desktop and not created offline
+    if (!remoteProtocolIdSet.has(p.id) && p._raw._status !== 'created') return false;
+    const localUpdated = typeof p._raw.updated_at === 'number' ? p._raw.updated_at : new Date(p._raw.updated_at).getTime();
+    const remoteUpdated = remoteUpdatedMap[p.id] ?? 0;
+    return localUpdated > remoteUpdated;
+  });
+  await collect('protocols', protocolsToUpload.map((r) => toRow(r._raw)));
+
+  await collect('plans', plans.map((r) => toRow(r._raw)));
+  await collect('dashboard_notes', notes.map((r) => toRow(r._raw)));
+  await collect('user_project_access', accessRows.map((r) => toRow(r._raw)));
+  await collect('phone_contacts', phoneContacts.map((r) => toRow(r._raw)));
+  pushed += locsToUpload.length + templates.length + protocolsToUpload.length +
             plans.length + notes.length + accessRows.length + phoneContacts.length;
 
   // 3. Hijos de templates
@@ -193,7 +231,7 @@ async function pushProject(projectId: string): Promise<number> {
     const templateItems = await protocolTemplateItemsCollection
       .query(Q.where('template_id', Q.oneOf(templateIds)))
       .fetch();
-    await pushTable('protocol_template_items', templateItems.map((r) => toRow(r._raw)));
+    await collect('protocol_template_items', templateItems.map((r) => toRow(r._raw)));
     pushed += templateItems.length;
   }
 
@@ -206,9 +244,26 @@ async function pushProject(projectId: string): Promise<number> {
       nonConformitiesCollection.query(Q.where('protocol_id', Q.oneOf(protocolIds))).fetch(),
     ]);
 
-    await pushTable('protocol_items', protocolItems.map((r) => toRow(r._raw)));
-    await pushTable('non_conformities', nonConformities.map((r) => toRow(r._raw)));
-    pushed += protocolItems.length + nonConformities.length;
+    // For protocol_items: only push if local updated_at is newer than remote
+    const piIds = protocolItems.map((i) => i.id);
+    const remotePIMap: Record<string, number> = {};
+    for (let c = 0; c < piIds.length; c += 50) {
+      const batch = piIds.slice(c, c + 50);
+      const { data: remotePIs } = await supabase.from('protocol_items').select('id, updated_at').in('id', batch);
+      for (const ri of (remotePIs ?? []) as { id: string; updated_at: number | string }[]) {
+        remotePIMap[ri.id] = typeof ri.updated_at === 'number' ? ri.updated_at : new Date(ri.updated_at).getTime();
+      }
+    }
+    const remotePIIdSet = new Set(Object.keys(remotePIMap));
+    const itemsToUpload = protocolItems.filter((i: any) => {
+      // Skip if deleted from desktop and not created offline
+      if (!remotePIIdSet.has(i.id) && i._raw._status !== 'created') return false;
+      const localU = typeof i._raw.updated_at === 'number' ? i._raw.updated_at : new Date(i._raw.updated_at).getTime();
+      return localU > (remotePIMap[i.id] ?? 0);
+    });
+    await collect('protocol_items', itemsToUpload.map((r) => toRow(r._raw)));
+    await collect('non_conformities', nonConformities.map((r) => toRow(r._raw)));
+    pushed += itemsToUpload.length + nonConformities.length;
 
     // 5. Evidencias (hijos de protocol_items)
     if (protocolItems.length > 0) {
@@ -216,7 +271,7 @@ async function pushProject(projectId: string): Promise<number> {
       const evidences = await evidencesCollection
         .query(Q.where('protocol_item_id', Q.oneOf(itemIds)))
         .fetch();
-      await pushTable('evidences', evidences.map((r) => toRow(r._raw)));
+      await collect('evidences', evidences.map((r) => toRow(r._raw)));
       pushed += evidences.length;
     }
   }
@@ -227,16 +282,30 @@ async function pushProject(projectId: string): Promise<number> {
     const annotations = await planAnnotationsCollection
       .query(Q.where('plan_id', Q.oneOf(planIds)))
       .fetch();
-    await pushTable('plan_annotations', annotations.map((r) => toRow(r._raw)));
-    pushed += annotations.length;
+    // For annotations: only push if local updated_at is newer than remote
+    const anIds = annotations.map((a) => a.id);
+    const remoteAnMap: Record<string, number> = {};
+    for (let c = 0; c < anIds.length; c += 50) {
+      const batch = anIds.slice(c, c + 50);
+      const { data: remoteAns } = await supabase.from('plan_annotations').select('id, updated_at').in('id', batch);
+      for (const ra of (remoteAns ?? []) as { id: string; updated_at: number | string }[]) {
+        remoteAnMap[ra.id] = typeof ra.updated_at === 'number' ? ra.updated_at : new Date(ra.updated_at).getTime();
+      }
+    }
+    const annotationsToUpload = annotations.filter((a: any) => {
+      const localU = typeof a._raw.updated_at === 'number' ? a._raw.updated_at : new Date(a._raw.updated_at).getTime();
+      return localU > (remoteAnMap[a.id] ?? 0);
+    });
+    await collect('plan_annotations', annotationsToUpload.map((r) => toRow(r._raw)));
+    pushed += annotationsToUpload.length;
 
     // 7. Comentarios de anotaciones
-    if (annotations.length > 0) {
-      const annotationIds = annotations.map((a) => a.id);
+    if (annotationsToUpload.length > 0) {
+      const annotationIds = annotationsToUpload.map((a) => a.id);
       const comments = await annotationCommentsCollection
         .query(Q.where('annotation_id', Q.oneOf(annotationIds)))
         .fetch();
-      await pushTable('annotation_comments', comments.map((r) => toRow(r._raw)));
+      await collect('annotation_comments', comments.map((r) => toRow(r._raw)));
       pushed += comments.length;
 
       // 8. Fotos de comentarios
@@ -245,13 +314,13 @@ async function pushProject(projectId: string): Promise<number> {
         const commentPhotos = await annotationCommentPhotosCollection
           .query(Q.where('annotation_comment_id', Q.oneOf(commentIds)))
           .fetch();
-        await pushTable('annotation_comment_photos', commentPhotos.map((r) => toRow(r._raw)));
+        await collect('annotation_comment_photos', commentPhotos.map((r) => toRow(r._raw)));
         pushed += commentPhotos.length;
       }
     }
   }
 
-  return pushed;
+  return { pushed, errors };
 }
 
 // ─── pull ───────────────────────────────────────────────────────────────────
@@ -365,6 +434,48 @@ async function pullProject(projectId: string): Promise<number> {
     ];
 
     if (allPrepares.length > 0) await database.batch(allPrepares);
+
+    // ── 3. Limpiar huérfanos: registros locales eliminados desde desktop ─────
+    const remoteProtocolIdSet = new Set(remoteProtocols.map((p: any) => p.id));
+    const remoteLocationIdSet = new Set(remoteLocations.map((l: any) => l.id));
+
+    // Protocolos huérfanos (existen local pero no en Supabase, y no son offline-created)
+    const orphanProtocols = localProtocols.filter(
+      (p: any) => !remoteProtocolIdSet.has(p.id) && p._raw._status !== 'created'
+    );
+
+    if (orphanProtocols.length > 0) {
+      const orphanPIds = orphanProtocols.map((p: any) => p.id);
+      const orphanItems = await protocolItemsCollection
+        .query(Q.where('protocol_id', Q.oneOf(orphanPIds))).fetch();
+      const orphanItemIds = orphanItems.map((i: any) => i.id);
+      const orphanEvidences = orphanItemIds.length > 0
+        ? await evidencesCollection.query(Q.where('protocol_item_id', Q.oneOf(orphanItemIds))).fetch()
+        : [];
+      const orphanNonConfs = await nonConformitiesCollection
+        .query(Q.where('protocol_id', Q.oneOf(orphanPIds))).fetch();
+
+      const orphanDeletes = [
+        ...orphanEvidences.map((e: any) => e.prepareDestroyPermanently()),
+        ...orphanNonConfs.map((n: any) => n.prepareDestroyPermanently()),
+        ...orphanItems.map((i: any) => i.prepareDestroyPermanently()),
+        ...orphanProtocols.map((p: any) => p.prepareDestroyPermanently()),
+      ];
+      if (orphanDeletes.length > 0) {
+        await database.batch(orphanDeletes);
+        console.log(`[pull] Eliminados ${orphanDeletes.length} registros huérfanos (${orphanProtocols.length} protocolos)`);
+      }
+    }
+
+    // Ubicaciones huérfanas
+    const orphanLocations = localLocs.filter(
+      (l: any) => !remoteLocationIdSet.has(l.id) && l._raw._status !== 'created'
+    );
+    if (orphanLocations.length > 0) {
+      await database.batch(orphanLocations.map((l: any) => l.prepareDestroyPermanently()));
+      console.log(`[pull] Eliminadas ${orphanLocations.length} ubicaciones huérfanas`);
+    }
+
     return allPrepares.length;
   });
 }
@@ -380,8 +491,13 @@ export async function syncProject(projectId: string): Promise<SyncResult> {
   let pushed = 0;
   let pulled = 0;
 
+  // Push local changes first, then pull remote (cloud wins on pull)
+  // pushProject now compares updated_at for protocols to avoid overwriting
+  // changes made from desktop/web
   try {
-    pushed = await pushProject(projectId);
+    const result = await pushProject(projectId);
+    pushed = result.pushed;
+    errors.push(...result.errors);
   } catch (e: any) {
     errors.push(`Push: ${e.message}`);
   }
@@ -403,7 +519,9 @@ export async function pushProjectToSupabase(projectId: string): Promise<SyncResu
   let pushed = 0;
 
   try {
-    pushed = await pushProject(projectId);
+    const result = await pushProject(projectId);
+    pushed = result.pushed;
+    errors.push(...result.errors);
   } catch (e: any) {
     errors.push(`Push: ${e.message}`);
   }
@@ -446,7 +564,15 @@ async function downloadMissingDwgsForProject(projectId: string): Promise<void> {
   } catch { /* sin conectividad */ }
 }
 
-/** Descarga en segundo plano los PDFs de planes que no existen en el filesystem del dispositivo */
+/**
+ * Descarga planes que faltan o cuyo ETag cambió (nueva versión).
+ *
+ * Anti-bucle:
+ *   s3_etag    = ETag que viene de Supabase (lo que está en S3)
+ *   local_etag = ETag del archivo que ya descargamos
+ *   Si s3_etag === local_etag → mismo archivo → skip (0 transferencias)
+ *   Si s3_etag !== local_etag → versión nueva → re-descargar → local_etag = s3_etag
+ */
 async function downloadMissingPlansForProject(projectId: string): Promise<void> {
   const projects = await projectsCollection.query(Q.where('id', projectId)).fetch();
   if (projects.length === 0) return;
@@ -462,10 +588,30 @@ async function downloadMissingPlansForProject(projectId: string): Promise<void> 
   for (const plan of plans) {
     const fileName = (plan as any).name + '.pdf';
     const localUri = `${destDir}${fileName}`;
+    const s3Etag    = (plan as any).s3Etag as string | null;
+    const localEtag = (plan as any).localEtag as string | null;
+
     try {
       const info = await FileSystem.getInfoAsync(localUri);
-      if (info.exists) continue;
-      await downloadFromS3(`${prefix}/plans/${fileName}`, localUri);
+
+      if (info.exists) {
+        // File exists — check if version changed via ETag
+        if (!s3Etag || s3Etag === localEtag) continue; // Same version or no ETag → skip
+        // s3_etag differs from local_etag → new version → re-download
+      }
+
+      // Download (missing file or updated version)
+      const s3Key = (plan as any).s3Key ?? `${prefix}/plans/${fileName}`;
+      await downloadFromS3(s3Key, localUri);
+
+      // Mark this version as downloaded so next sync skips it
+      if (s3Etag) {
+        await database.write(async () => {
+          await plan.update((rec: any) => {
+            rec.localEtag = s3Etag;
+          });
+        });
+      }
     } catch { /* sin S3 o sin conectividad, ignorar */ }
   }
 }
@@ -545,7 +691,7 @@ export async function syncAllUsers(): Promise<void> {
             Object.assign(u._raw, r);
           })
         );
-        await database.batch(...prepares);
+        await database.batch(prepares);
       });
     }
   }

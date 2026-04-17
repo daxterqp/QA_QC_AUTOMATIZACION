@@ -369,7 +369,7 @@ const TOUR_STEPS: TourStep[] = [
     id: 'dossier_preview_pdf',
     screen: 'DossierPreview',
     elementId: 'dossier_preview_pdf',
-    title: 'Vista Previa del Dossier',
+    title: 'Vista Previa del Dosier',
     message: 'El PDF generado incluye carátula del proyecto, índice y todos los protocolos aprobados con sus evidencias. Desliza hacia abajo para navegar entre páginas.',
     waitingHint: 'Toca el botón exportar para abrir la vista previa',
     waitingElementId: 'dossier_export_btn',

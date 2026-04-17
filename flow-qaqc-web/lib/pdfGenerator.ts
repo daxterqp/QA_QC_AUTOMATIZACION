@@ -11,6 +11,7 @@
 
 import { createClient } from '@lib/supabase/client';
 import type { DossierProtocolFull, DossierProtocol } from '@hooks/useDossier';
+import type { PreloadedProjectData } from '@hooks/useProjectPreload';
 import type { Protocol, Location, ProtocolItem } from '@/types';
 import { fetchDossierProtocolFull } from '@hooks/useDossier';
 
@@ -20,15 +21,21 @@ const supabase = createClient();
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
-function fmtDate(iso: string | null | undefined): string {
+function toPeruDate(iso: string | number | null | undefined): Date {
+  const d = new Date(iso as string | number);
+  // Convert to Peru timezone (UTC-5)
+  return new Date(d.toLocaleString('en-US', { timeZone: 'America/Lima' }));
+}
+
+function fmtDate(iso: string | number | null | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  const d = toPeruDate(iso);
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
-function fmtDateTime(iso: string | null | undefined): string {
+function fmtDateTime(iso: string | number | null | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  const d = toPeruDate(iso);
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -43,18 +50,49 @@ export function s3Url(key: string): string {
   return `https://${B}.s3.${R}.amazonaws.com/${key}`;
 }
 
-async function fetchToBase64(url: string): Promise<string | null> {
+async function fetchToBase64(url: string, s3Key?: string | null): Promise<string | null> {
+  // In Electron: try local file first
+  const electronAPI = (window as any).electronAPI;
+  if (electronAPI?.checkLocalFile && s3Key) {
+    try {
+      const localPath = await electronAPI.checkLocalFile(s3Key);
+      if (localPath) {
+        const res = await fetch(`file:///${localPath.replace(/\\/g, '/')}`);
+        if (res.ok) {
+          const buf = await res.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          bytes.forEach(b => { binary += String.fromCharCode(b); });
+          console.log(`[PDF] LOCAL OK: ${s3Key}`);
+          return `data:image/jpeg;base64,${btoa(binary)}`;
+        }
+        console.warn(`[PDF] LOCAL FAIL (fetch): ${localPath}`);
+      }
+    } catch (e) { console.warn(`[PDF] LOCAL ERROR: ${s3Key}`, e); }
+  }
+
+  // Fallback: download via API proxy (S3 direct access is forbidden)
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const proxyUrl = s3Key
+      ? `/api/s3-image?key=${encodeURIComponent(s3Key)}`
+      : url;
+    const res = await fetch(proxyUrl);
+    if (!res.ok) { console.warn(`[PDF] S3 FAIL (${res.status}): ${s3Key ?? url}`); return null; }
     const buf = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
     let binary = '';
     bytes.forEach(b => { binary += String.fromCharCode(b); });
     const b64 = btoa(binary);
     const ct = res.headers.get('content-type') ?? 'image/jpeg';
+
+    // In Electron: save to local disk for next time
+    if (electronAPI?.saveLocalFile && s3Key) {
+      electronAPI.saveLocalFile(s3Key, buf).catch(() => {});
+    }
+
+    console.log(`[PDF] S3 OK: ${s3Key ?? url}`);
     return `data:${ct};base64,${b64}`;
-  } catch { return null; }
+  } catch (e) { console.warn(`[PDF] S3 ERROR: ${s3Key ?? url}`, e); return null; }
 }
 
 // ── Week boundaries ───────────────────────────────────────────────────────────
@@ -169,16 +207,16 @@ ${appBarW > 0 ? `<rect x="${labelW}" y="${y + 6}" width="${appBarW}" height="18"
 // ── Status helpers ────────────────────────────────────────────────────────────
 
 function statusLabel(s: string): string {
-  if (s === 'APPROVED') return 'APROBADO';
-  if (s === 'REJECTED') return 'RECHAZADO';
-  if (s === 'IN_PROGRESS') return 'EN REVISIÓN';
-  if (s === 'IN_PROGRESS') return 'EN PROGRESO';
+  if (s === 'APPROVED')  return 'APROBADO';
+  if (s === 'REJECTED')  return 'RECHAZADO';
+  if (s === 'SUBMITTED') return 'EN REVISIÓN';
+  if (s === 'DRAFT')     return 'BORRADOR';
   return s;
 }
 function statusColor(s: string): string {
-  if (s === 'APPROVED') return '#1e8e3e';
-  if (s === 'REJECTED') return '#d93025';
-  if (s === 'IN_PROGRESS') return '#e37400';
+  if (s === 'APPROVED')  return '#1e8e3e';
+  if (s === 'REJECTED')  return '#d93025';
+  if (s === 'SUBMITTED') return '#1a4f7a';
   return '#666';
 }
 
@@ -187,13 +225,15 @@ function statusColor(s: string): string {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&display=swap');
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 10.5px; color: #1a1a2e; background: white; }
+@page { size: A4 portrait; margin: 0; }
+body { font-family: 'Montserrat', Helvetica, Arial, sans-serif; font-size: 10.5px; color: #1a1a2e; background: #e0e0e0; }
 h1 { font-size: 28px; font-weight: 900; letter-spacing: 1px; }
 h2 { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 10px; }
 h3 { font-size: 12px; font-weight: 700; letter-spacing: 0.4px; margin-bottom: 6px; }
-.page { page-break-before: always; padding: 32px 36px 150px 36px; min-height: 100vh; position: relative; }
-.page:first-child { page-break-before: avoid; padding-bottom: 36px; }
-.cover { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; gap: 14px; text-align: center; }
+.page { page-break-before: always; padding: 32px 36px 150px 36px; width: 210mm; min-height: 297mm; position: relative; background: white; margin: 0 auto 16px auto; box-shadow: 0 2px 10px rgba(0,0,0,0.12); }
+.page:first-child { page-break-before: avoid; }
+.page-cover { padding-bottom: 36px; }
+.cover { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: calc(297mm - 72px); gap: 14px; text-align: center; }
 .cover-logo { max-height: 240px; max-width: 520px; object-fit: contain; margin-bottom: 28px; }
 .cover-title { font-size: 34px; font-weight: 900; color: #0e213d; letter-spacing: 2px; text-transform: uppercase; }
 .cover-project { font-size: 18px; font-weight: 700; color: #1a4f7a; margin-top: 4px; }
@@ -218,7 +258,7 @@ table { width: 100%; border-collapse: collapse; font-size: 10px; }
 thead th { background: #0e213d; color: white; padding: 8px 10px; font-weight: 700; text-align: left; font-size: 9.5px; letter-spacing: 0.3px; }
 tbody tr:nth-child(even) { background: #f4f6f9; }
 tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: top; line-height: 1.4; }
-.status-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 8.5px; font-weight: 700; color: white; text-transform: uppercase; letter-spacing: 0.3px; }
+.status-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 8.5px; font-weight: 700; color: white; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
 .td-compliant { color: #1e8e3e; font-weight: 700; font-size: 12px; }
 .td-noncompliant { color: #d93025; font-weight: 700; font-size: 12px; }
 .td-noanswer { color: #aaa; }
@@ -241,6 +281,7 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .signature-name { font-size: 10px; font-weight: 700; color: #0e213d; }
 .signature-role { font-size: 9px; color: #666; }
 .footer-right { flex: 1; text-align: right; font-size: 9px; color: #aaa; line-height: 1.6; }
+a[href^="#proto-"]:hover { text-decoration: underline !important; }
 .photo-panel-title { flex: 1; font-size: 13px; font-weight: 900; color: #0e213d; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
 .photo-page-header { display: flex; flex-direction: row; align-items: center; gap: 12px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 2px solid #0e213d; }
 .photo-grid-v { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -250,7 +291,8 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .photo-cell-h { width: calc(33.33% - 6px); aspect-ratio: 4/3; overflow: hidden; border-radius: 4px; background: #f0f0f0; }
 .photo-cell-h img { width: 100%; height: 100%; object-fit: cover; }
 @media print {
-  .page { page-break-before: always; }
+  body { background: white; }
+  .page { page-break-before: always; margin: 0; box-shadow: none; width: 100%; }
   .page:first-child { page-break-before: avoid; }
 }
 `;
@@ -265,12 +307,12 @@ function buildCoverPage(
   const signatureHtml = signB64
     ? `<img src="${signB64}" class="cover-signature-img" alt="Firma"/>`
     : '<div style="width:120px;border-bottom:1px solid #333;height:1px;"></div>';
-  return `<div class="page">
+  return `<div class="page page-cover">
   <div class="cover">
     ${logoHtml}
     <div class="cover-ornament"><span class="ornament-line"></span><span class="ornament-dots">◆ ◇ ◆</span><span class="ornament-line"></span></div>
     <div>
-      <div class="cover-title">Dossier de Calidad</div>
+      <div class="cover-title">Dosier de Calidad</div>
       <div class="cover-date">Generado el ${generatedAt}</div>
     </div>
     <div class="cover-ornament"><span class="ornament-line"></span><span class="ornament-dots">◆ ◇ ◆</span><span class="ornament-line"></span></div>
@@ -281,6 +323,35 @@ function buildCoverPage(
       <div class="cover-info-row"><span class="cover-info-label">Protocolos aprobados</span><span class="cover-info-value">${approved}</span></div>
       <div class="cover-info-row"><span class="cover-info-label">Jefe de calidad</span><span class="cover-info-value">${escHtml(signerName)}</span></div>
       <div class="cover-info-row" style="align-items:center;"><span class="cover-info-label">Firma</span><span class="cover-info-value">${signatureHtml}</span></div>
+    </div>
+  </div>
+</div>`;
+}
+
+// ── Section cover page (per location_only group) ─────────────────────────────
+
+function buildSectionCoverPage(
+  locationOnly: string,
+  logoB64: string | null,
+  projectName: string,
+  totalInGroup: number,
+  approvedInGroup: number,
+): string {
+  const logoHtml = logoB64 ? `<img src="${logoB64}" class="cover-logo" alt="Logo"/>` : '';
+  return `<div class="page page-cover">
+  <div class="cover">
+    ${logoHtml}
+    <div class="cover-ornament"><span class="ornament-line"></span><span class="ornament-dots">◆ ◇ ◆</span><span class="ornament-line"></span></div>
+    <div>
+      <div class="cover-title">Protocolos — ${escHtml(locationOnly)}</div>
+    </div>
+    <div class="cover-ornament"><span class="ornament-line"></span><span class="ornament-dots">◆ ◇ ◆</span><span class="ornament-line"></span></div>
+    <div class="cover-divider"></div>
+    <div class="cover-info-list">
+      <div class="cover-info-row"><span class="cover-info-label">Proyecto</span><span class="cover-info-value">${escHtml(projectName)}</span></div>
+      <div class="cover-info-row"><span class="cover-info-label">Sector</span><span class="cover-info-value">${escHtml(locationOnly)}</span></div>
+      <div class="cover-info-row"><span class="cover-info-label">Total protocolos</span><span class="cover-info-value">${totalInGroup}</span></div>
+      <div class="cover-info-row"><span class="cover-info-label">Protocolos aprobados</span><span class="cover-info-value">${approvedInGroup}</span></div>
     </div>
   </div>
 </div>`;
@@ -311,17 +382,21 @@ function buildStatsPage(protocols: Protocol[], locations: Location[], projectSta
 
 // ── Summary table ─────────────────────────────────────────────────────────────
 
-function buildSummaryTable(protocols: DossierProtocol[]): string {
-  const rows = protocols.map(p => `
+function buildSummaryTable(protocols: DossierProtocol[], pageMap: Record<string, number>): string {
+  const rows = protocols.map(p => {
+    const pg = pageMap[p.id] ?? '';
+    return `
 <tr>
-  <td><strong>${escHtml(p.protocol_number)}</strong></td>
+  <td><a href="#proto-${p.id}" style="color:#1a4f7a;font-weight:700;text-decoration:none;" title="Ir al protocolo"><strong>${escHtml(p.protocol_number)}</strong></a></td>
   <td>${escHtml(p.location?.name ?? null)}</td>
   <td><span class="status-badge" style="background:${statusColor(p.status)}">${statusLabel(p.status)}</span></td>
   <td>${escHtml(p.filledByName)}</td>
   <td>${fmtDate(p.updated_at)}</td>
   <td>${escHtml(p.signedByName)}</td>
   <td>${fmtDate(p.signed_at)}</td>
-</tr>`).join('');
+  <td style="text-align:center;color:#1a4f7a;font-weight:700;">${pg}</td>
+</tr>`;
+  }).join('');
   return `<div class="page">
   <h2 style="color:#0e213d;border-bottom:2px solid #1a4f7a;padding-bottom:8px;margin-bottom:16px;">TABLA RESUMEN DE PROTOCOLOS</h2>
   <table>
@@ -330,6 +405,7 @@ function buildSummaryTable(protocols: DossierProtocol[]): string {
         <th>N° Protocolo</th><th>Ubicación</th><th>Estado</th>
         <th>Llenado por</th><th>Fecha realización</th>
         <th>Aprobado por</th><th>Fecha aprobación</th>
+        <th style="width:40px;">Pág.</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -381,7 +457,7 @@ function buildProtocolPages(
       <div class="proto-info-cell"><span class="proto-info-label">Ubicación</span><span class="proto-info-value">${escHtml(loc?.name ?? null)}</span></div>
       <div class="proto-info-cell"><span class="proto-info-label">Especialidad</span><span class="proto-info-value">${escHtml(loc?.specialty ?? null)}</span></div>
     </div>
-    ${p.observations ? `<div class="proto-info-row"><div class="proto-info-cell" style="background:#fce8e6;flex:1;"><span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span><span class="proto-info-value" style="color:#d93025;">${escHtml(p.observations)}</span></div></div>` : ''}
+    ${(p as any).rejection_reason ? `<div class="proto-info-row"><div class="proto-info-cell" style="background:#fce8e6;flex:1;"><span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span><span class="proto-info-value" style="color:#d93025;">${escHtml((p as any).rejection_reason)}</span></div></div>` : ''}
   </div>
   <hr class="proto-divider"/>`;
 
@@ -402,20 +478,21 @@ function buildProtocolPages(
         itemsHtml += `<tr><td colspan="5" style="padding:0;"><div class="section-group-header">${escHtml(sec)}</div></td></tr>`;
       }
       let conformeHtml: string;
-      if (item.status === 'PENDING') conformeHtml = `<span class="td-noanswer">—</span>`;
-      else if (item.status === 'OK') conformeHtml = `<span class="td-compliant">✓</span>`;
-      else if (item.status === 'NOK') conformeHtml = `<span class="td-noncompliant">✗</span>`;
-      else conformeHtml = `<span style="color:#e37400;font-weight:700;font-size:10px;">OBS</span>`;
+      if (!item.has_answer) conformeHtml = `<span class="td-noanswer">—</span>`;
+      else if (item.is_na) conformeHtml = `<span style="color:#888;font-weight:700;">N/A</span>`;
+      else if (item.is_compliant === true) conformeHtml = `<span class="td-compliant">✓</span>`;
+      else conformeHtml = `<span class="td-noncompliant">✗</span>`;
       itemsHtml += `<tr>
   <td style="width:36px;color:#1a4f7a;font-weight:700;text-align:center;">${rowNumber++}</td>
   <td>${escHtml(item.item_description)}</td>
   <td style="width:88px;color:#555;">${escHtml(item.validation_method)}</td>
   <td style="width:52px;text-align:center;">${conformeHtml}</td>
-  <td style="width:140px;color:#555;font-size:9px;">${escHtml(item.observations)}</td>
+  <td style="width:140px;color:#555;font-size:9px;">${escHtml(item.comments ?? null)}</td>
 </tr>`;
     }
     const continuacion = pageIdx > 0 ? ' <span style="font-size:9px;color:#888;font-weight:400;">(continuación)</span>' : '';
-    return `<div class="page">
+    const anchorId = pageIdx === 0 ? ` id="proto-${p.id}"` : '';
+    return `<div class="page"${anchorId}>
   ${headerHtml}
   ${pageIdx > 0 ? `<div style="font-size:9px;color:#888;margin-bottom:6px;">— Continuación de lista de ítems${continuacion} —</div>` : ''}
   <table>
@@ -430,7 +507,7 @@ function buildProtocolPages(
   </table>
   <div class="proto-footer">
     <div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signedName)}</div><div class="signature-role">Jefe de Calidad</div></div>
-    <div class="footer-right">Dossier de Calidad<br/>Página ${globalPageStart + pageIdx} de ${totalDocPages}</div>
+    <div class="footer-right">Dosier de Calidad<br/>Página ${globalPageStart + pageIdx} de ${totalDocPages}</div>
   </div>
 </div>`;
   }).join('');
@@ -438,58 +515,91 @@ function buildProtocolPages(
 
 // ── Photo panel ───────────────────────────────────────────────────────────────
 
+// Detect image orientation from base64 data URI
+function getImageOrientation(b64: string): Promise<'portrait' | 'landscape'> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img.naturalHeight >= img.naturalWidth ? 'portrait' : 'landscape');
+    img.onerror = () => resolve('portrait');
+    img.src = b64;
+  });
+}
+
 async function buildPhotoPanel(
-  protocolName: string, evidenceUrls: string[],
+  protocolName: string, locationName: string | null, evidenceEntries: { url: string; s3Key: string | null }[],
   logoB64: string | null, signB64: string | null, signerName: string,
   pageNumber: number, totalDocPages: number,
 ): Promise<string> {
-  if (evidenceUrls.length === 0) return '';
-  const b64s = await Promise.all(evidenceUrls.map(url => fetchToBase64(url)));
+  if (evidenceEntries.length === 0) return '';
+
+  // Download all photos
+  const b64s = await Promise.all(evidenceEntries.map(async (e, i) => {
+    const result = await fetchToBase64(e.url, e.s3Key);
+    if (!result) console.warn(`[PDF] Foto ${i + 1}/${evidenceEntries.length} FALLÓ: ${e.s3Key ?? e.url}`);
+    return result;
+  }));
   const valid = b64s.filter(Boolean) as string[];
+  console.log(`[PDF] Panel ${protocolName}: ${evidenceEntries.length} intentadas → ${valid.length} exitosas, ${evidenceEntries.length - valid.length} fallidas`);
   if (valid.length === 0) return '';
 
-  // All photos treated as landscape (4/3) in web version for simplicity
+  // Detect orientation for each photo and separate
+  const orientations = await Promise.all(valid.map(b64 => getImageOrientation(b64)));
+  const verticals: string[] = [];
+  const horizontals: string[] = [];
+  for (let i = 0; i < valid.length; i++) {
+    if (orientations[i] === 'portrait') verticals.push(valid[i]);
+    else horizontals.push(valid[i]);
+  }
+
+  // Paginate: 8 vertical per page (4-col × 2 rows), 9 horizontal per page (3-col × 3 rows)
+  const VERT_PER_PAGE = 8;
   const HORIZ_PER_PAGE = 9;
-  const chunks: string[][] = [];
-  for (let i = 0; i < valid.length; i += HORIZ_PER_PAGE) chunks.push(valid.slice(i, i + HORIZ_PER_PAGE));
+
+  const vertChunks: string[][] = [];
+  for (let i = 0; i < verticals.length; i += VERT_PER_PAGE) vertChunks.push(verticals.slice(i, i + VERT_PER_PAGE));
+  const horizChunks: string[][] = [];
+  for (let i = 0; i < horizontals.length; i += HORIZ_PER_PAGE) horizChunks.push(horizontals.slice(i, i + HORIZ_PER_PAGE));
+
+  // Combine chunks: each page can have vertical grid + horizontal grid
+  const allChunks: { verts: string[]; horizs: string[] }[] = [];
+  const maxLen = Math.max(vertChunks.length, horizChunks.length, 1);
+  for (let i = 0; i < maxLen; i++) {
+    allChunks.push({ verts: vertChunks[i] ?? [], horizs: horizChunks[i] ?? [] });
+  }
 
   const logoHtml = logoB64 ? `<img src="${logoB64}" class="proto-logo" alt="Logo"/>` : '<div style="min-width:80px;"></div>';
   const signatureHtml = signB64 ? `<img src="${signB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
 
-  return chunks.map((chunk, idx) => {
-    const horizHtml = `<div class="photo-grid-h">${chunk.map(b64 => `<div class="photo-cell-h"><img src="${b64}" /></div>`).join('')}</div>`;
+  return allChunks.map(({ verts, horizs }, idx) => {
+    const vertHtml = verts.length > 0
+      ? `<div class="photo-grid-v">${verts.map(b64 => `<div class="photo-cell-v"><img src="${b64}" /></div>`).join('')}</div>`
+      : '';
+    const horizHtml = horizs.length > 0
+      ? `<div class="photo-grid-h">${horizs.map(b64 => `<div class="photo-cell-h"><img src="${b64}" /></div>`).join('')}</div>`
+      : '';
     return `<div class="page">
-  <div class="photo-page-header">${logoHtml}<div class="photo-panel-title">Panel Fotográfico — ${escHtml(protocolName)}</div></div>
+  <div class="photo-page-header">${logoHtml}<div class="photo-panel-title">Panel Fotográfico — ${escHtml(protocolName)}${locationName ? `<div style="font-size:10px;font-weight:600;color:#555;margin-top:2px;">Ubicación: ${escHtml(locationName)}</div>` : ''}</div></div>
+  ${vertHtml}
   ${horizHtml}
   <div class="proto-footer">
     <div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signerName)}</div><div class="signature-role">Jefe de Calidad</div></div>
-    <div class="footer-right">Dossier de Calidad<br/>Página ${pageNumber + idx} de ${totalDocPages}</div>
+    <div class="footer-right">Dosier de Calidad<br/>Página ${pageNumber + idx} de ${totalDocPages}</div>
   </div>
 </div>`;
   }).join('');
 }
 
-// ── Open print window ─────────────────────────────────────────────────────────
+// ── Generate PDF and download ────────────────────────────────────────────────
 
-function openPrintWindow(html: string): void {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, '_blank');
-  if (win) {
-    win.addEventListener('load', () => {
-      setTimeout(() => {
-        win.print();
-        URL.revokeObjectURL(url);
-      }, 400);
-    });
-  } else {
-    // Fallback: download the HTML file
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'dossier.html';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+// Store for preview data (shared between generator and preview component)
+let _previewData: { html: string; filename: string } | null = null;
+
+export function getPreviewData() { return _previewData; }
+export function clearPreviewData() { _previewData = null; }
+
+async function generateAndDownloadPdf(html: string, filename: string): Promise<void> {
+  _previewData = { html, filename };
+  window.dispatchEvent(new CustomEvent('pdf-preview-ready'));
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -497,24 +607,36 @@ function openPrintWindow(html: string): void {
 export interface DossierExportOptions {
   projectId: string;
   projectName: string;
+  projectCreatedAt?: string | number | null;
   signerName: string;
   signerUserId: string;
   logoS3Key?: string | null;
   protocols: DossierProtocol[];
   locations: Location[];
+  preloaded?: PreloadedProjectData | null;
   onProgress?: (msg: string) => void;
 }
 
 export async function exportFullDossier(opts: DossierExportOptions): Promise<void> {
-  const { projectId, projectName, signerName, signerUserId, logoS3Key, protocols, locations, onProgress } = opts;
+  const { projectId, projectName, projectCreatedAt, signerName, signerUserId, logoS3Key, protocols, locations, preloaded, onProgress } = opts;
 
   onProgress?.('Cargando imágenes...');
 
-  // Load logo + signer signature
-  const [logoB64, signB64] = await Promise.all([
-    logoS3Key ? fetchToBase64(s3Url(logoS3Key)) : Promise.resolve(null),
-    fetchToBase64(s3Url(`signatures/${signerUserId}/signature.jpg`)),
-  ]);
+  // Load logo
+  const logoB64 = logoS3Key ? await fetchToBase64(s3Url(logoS3Key), logoS3Key) : null;
+
+  // Load signatures for all unique approvers (per-jefe, like mobile DossierExportService)
+  const approverIds = new Set<string>();
+  approverIds.add(signerUserId);
+  protocols.forEach(p => { if (p.signed_by_id) approverIds.add(p.signed_by_id); });
+  const signatureMap: Record<string, string | null> = {};
+  await Promise.all(
+    Array.from(approverIds).map(async (userId) => {
+      const key = `signatures/${userId}/signature.jpg`;
+      signatureMap[userId] = await fetchToBase64(s3Url(key), key);
+    })
+  );
+  const defaultSignB64 = signatureMap[signerUserId] ?? null;
 
   onProgress?.('Cargando datos de protocolos...');
 
@@ -522,7 +644,7 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
   const userMap: Record<string, string> = {};
   const locMap: Record<string, Location> = {};
   protocols.forEach(p => {
-    if (p.filledByName && p.created_by_id) userMap[p.created_by_id] = p.filledByName;
+    if (p.filledByName && p.filled_by_id) userMap[p.filled_by_id] = p.filledByName;
     if (p.signedByName && p.signed_by_id)  userMap[p.signed_by_id]  = p.signedByName;
     if (p.location && p.location_id) locMap[p.location_id] = p.location;
   });
@@ -531,53 +653,147 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
   const fullData: DossierProtocolFull[] = [];
   for (let i = 0; i < protocols.length; i++) {
     onProgress?.(`Cargando protocolo ${i + 1}/${protocols.length}...`);
-    const d = await fetchDossierProtocolFull(protocols[i].id, locMap, userMap);
+    const d = await fetchDossierProtocolFull(protocols[i].id, locMap, userMap, preloaded);
+    onProgress?.(`Proto ${i + 1}: ${d.items.length} items, ${d.evidences.length} evidencias`);
     fullData.push(d);
   }
 
   onProgress?.('Generando PDF...');
 
-  const project = await supabase.from('projects').select('created_at').eq('id', projectId).single();
-  const projectStart = project.data?.created_at ? new Date(project.data.created_at) : new Date();
+  // Use preloaded project date instead of querying Supabase
+  const projectStart = projectCreatedAt ? new Date(projectCreatedAt as string | number) : new Date();
 
   const generatedAt = fmtDateTime(new Date().toISOString());
   const approved = protocols.filter(p => p.status === 'APPROVED').length;
-  const total    = protocols.length;
+  // Total = all template slots across all locations (same as project progress denominator)
+  const total = locations.reduce((sum, loc) => {
+    const tids = loc.template_ids ? loc.template_ids.split(',').map(s => s.trim()).filter(Boolean) : [];
+    return sum + tids.length;
+  }, 0);
 
-  const coverHtml = buildCoverPage(projectName, logoB64, approved, total, generatedAt, signerName, signB64);
+  const coverHtml = buildCoverPage(projectName, logoB64, approved, total, generatedAt, signerName, defaultSignB64);
   const statsHtml = buildStatsPage(protocols, locations, projectStart);
-  const summaryHtml = buildSummaryTable(protocols);
 
-  // Estimate total pages for numbering
-  let globalPage = 4; // cover + stats + summary + buffer
-  const protocolHtmlParts: string[] = [];
-  const photoParts: string[] = [];
-
+  // Group stats by location_only (for section cover pages)
+  const groupStats: Record<string, { total: number; approved: number }> = {};
+  for (const loc of locations) {
+    const locOnly = loc.location_only ?? null;
+    if (!locOnly) continue;
+    if (!groupStats[locOnly]) groupStats[locOnly] = { total: 0, approved: 0 };
+    const tids = loc.template_ids ? loc.template_ids.split(',').map(s => s.trim()).filter(Boolean) : [];
+    groupStats[locOnly].total += tids.length;
+  }
   for (const full of fullData) {
-    const chunks = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
-    const pHtml = buildProtocolPages(full, logoB64, signB64, signerName, globalPage, 999, projectName);
-    protocolHtmlParts.push(pHtml);
-    globalPage += chunks;
+    const locOnly = full.protocol.location?.location_only ?? null;
+    if (!locOnly || !groupStats[locOnly]) continue;
+    if (full.protocol.status === 'APPROVED') groupStats[locOnly].approved++;
+  }
 
-    const evidenceUrls = full.evidences.map(ev => ev.s3_key ? s3Url(ev.s3_key) : null).filter(Boolean) as string[];
-    if (evidenceUrls.length > 0) {
-      onProgress?.(`Panel fotográfico ${full.protocol.protocol_number}...`);
-      const photoHtml = await buildPhotoPanel(
-        full.protocol.protocol_number ?? full.protocol.id,
-        evidenceUrls, logoB64, signB64, signerName, globalPage, 999,
-      );
-      photoParts.push(photoHtml);
-      globalPage += Math.ceil(evidenceUrls.length / 9) || 1;
+  // Detect section cover count (unique adjacent location_only changes)
+  let sectionCoverCount = 0;
+  let _prevLocOnly: string | null = null;
+  for (const full of fullData) {
+    const locOnly = full.protocol.location?.location_only ?? null;
+    if (locOnly && locOnly !== _prevLocOnly) {
+      sectionCoverCount++;
+      _prevLocOnly = locOnly;
     }
   }
 
-  const bodyHtml = [coverHtml, statsHtml, summaryHtml, ...protocolHtmlParts, ...photoParts].join('\n');
+  // First pass: calculate total pages AND page map for each protocol
+  let totalDocPages = 3 + sectionCoverCount; // cover + stats + summary + section covers
+  const evidenceEntriesByProto: { url: string; s3Key: string | null }[][] = [];
+  const pageMap: Record<string, number> = {};
+  let _calcPage = 4; // after cover + stats + summary
+  let _calcPrevLocOnly: string | null = null;
+  for (const full of fullData) {
+    const curLocOnly = full.protocol.location?.location_only ?? null;
+    if (curLocOnly && curLocOnly !== _calcPrevLocOnly) {
+      _calcPage += 1; // section cover page
+      _calcPrevLocOnly = curLocOnly;
+    }
+
+    pageMap[full.protocol.id] = _calcPage; // page where this protocol starts
+
+    const protoPages = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
+    totalDocPages += protoPages;
+    _calcPage += protoPages;
+
+    const entries = full.evidences.map(ev => {
+      const key = ev.s3_key ?? ev.s3_url_placeholder ?? (ev as any).file_name;
+      if (!key) return null;
+      const url = key.startsWith('http') ? key : s3Url(key);
+      const s3Key = key.startsWith('http') ? null : key;
+      return { url, s3Key };
+    }).filter(Boolean) as { url: string; s3Key: string | null }[];
+    evidenceEntriesByProto.push(entries);
+    if (entries.length > 0) {
+      const photoPages = Math.ceil(entries.length / 8);
+      totalDocPages += photoPages;
+      _calcPage += photoPages;
+    }
+  }
+
+  const summaryHtml = buildSummaryTable(protocols, pageMap);
+
+  // Second pass: build HTML with correct page numbers, panel right after its protocol
+  let globalPage = 4; // starts after cover + stats + summary
+  const contentParts: string[] = [];
+  let prevLocationOnly: string | null = null;
+
+  for (let i = 0; i < fullData.length; i++) {
+    const full = fullData[i];
+    const entries = evidenceEntriesByProto[i];
+    const curLocOnly = full.protocol.location?.location_only ?? null;
+
+    // Insert section cover at group boundary
+    if (curLocOnly && curLocOnly !== prevLocationOnly) {
+      const stats = groupStats[curLocOnly] ?? { total: 0, approved: 0 };
+      contentParts.push(buildSectionCoverPage(curLocOnly, logoB64, projectName, stats.total, stats.approved));
+      globalPage += 1;
+      prevLocationOnly = curLocOnly;
+    }
+
+    // Per-approver signature (same logic as mobile DossierExportService lines 1043-1053)
+    const protoSignB64 = full.protocol.signed_by_id
+      ? (signatureMap[full.protocol.signed_by_id] ?? defaultSignB64)
+      : defaultSignB64;
+    const protoSignerName = full.protocol.signedByName ?? signerName;
+
+    // Protocol pages
+    const protoPages = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
+    const pHtml = buildProtocolPages(full, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages, projectName);
+    contentParts.push(pHtml);
+    globalPage += protoPages;
+
+    // Photo panel right after its protocol
+    if (entries.length > 0) {
+      onProgress?.(`Descargando fotos ${full.protocol.protocol_number}...`);
+      const locName = full.protocol.location
+        ? `${full.protocol.location.location_only ?? ''}-${full.protocol.location.specialty ?? ''}`.replace(/^-|-$/g, '')
+        : null;
+      const photoHtml = await buildPhotoPanel(
+        full.protocol.protocol_number ?? full.protocol.id,
+        locName,
+        entries, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages,
+      );
+      if (photoHtml) {
+        contentParts.push(photoHtml);
+        globalPage += Math.ceil(entries.length / 8);
+      }
+    }
+  }
+
+  const bodyHtml = [coverHtml, statsHtml, summaryHtml, ...contentParts].join('\n');
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Dossier — ${escHtml(projectName)}</title>
+<title>Dosier — ${escHtml(projectName)}</title>
 <style>${CSS}</style>
 </head><body>${bodyHtml}</body></html>`;
 
-  openPrintWindow(html);
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const safeName = projectName.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s]/g, '').trim().replace(/\s+/g, '_');
+  await generateAndDownloadPdf(html, `DOSIER-${safeName}-${dateStr}.pdf`);
 }
 
 export async function exportSingleProtocolPdf(
@@ -589,20 +805,41 @@ export async function exportSingleProtocolPdf(
   locMap: Record<string, Location>,
   userMap: Record<string, string>,
 ): Promise<void> {
-  const [logoB64, signB64] = await Promise.all([
-    logoS3Key ? fetchToBase64(s3Url(logoS3Key)) : Promise.resolve(null),
-    fetchToBase64(s3Url(`signatures/${signerUserId}/signature.jpg`)),
+  const defaultSignKey = `signatures/${signerUserId}/signature.jpg`;
+  const [logoB64, defaultSignB64] = await Promise.all([
+    logoS3Key ? fetchToBase64(s3Url(logoS3Key), logoS3Key) : Promise.resolve(null),
+    fetchToBase64(s3Url(defaultSignKey), defaultSignKey),
   ]);
 
   const full = await fetchDossierProtocolFull(protocolId, locMap, userMap);
-  const evidenceUrls = full.evidences.map(ev => ev.s3_key ? s3Url(ev.s3_key) : null).filter(Boolean) as string[];
+
+  // Per-approver signature: use the specific approver's signature if available
+  let signB64 = defaultSignB64;
+  let actualSignerName = signerName;
+  if (full.protocol.signed_by_id && full.protocol.signed_by_id !== signerUserId) {
+    const approverKey = `signatures/${full.protocol.signed_by_id}/signature.jpg`;
+    const approverSign = await fetchToBase64(s3Url(approverKey), approverKey);
+    if (approverSign) signB64 = approverSign;
+  }
+  if (full.protocol.signedByName) actualSignerName = full.protocol.signedByName;
+
+  const evidenceEntries = full.evidences.map(ev => {
+      const key = ev.s3_key ?? ev.s3_url_placeholder ?? (ev as any).file_name;
+      if (!key) return null;
+      const url = key.startsWith('http') ? key : s3Url(key);
+      const s3Key = key.startsWith('http') ? null : key;
+      return { url, s3Key };
+    }).filter(Boolean) as { url: string; s3Key: string | null }[];
 
   const chunks = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
-  const totalDocPages = chunks + (evidenceUrls.length > 0 ? Math.ceil(evidenceUrls.length / 9) : 0);
+  const totalDocPages = chunks + (evidenceEntries.length > 0 ? Math.ceil(evidenceEntries.length / 8) : 0);
 
-  const protoHtml = buildProtocolPages(full, logoB64, signB64, signerName, 1, totalDocPages, projectName);
-  const photoHtml = evidenceUrls.length > 0
-    ? await buildPhotoPanel(full.protocol.protocol_number ?? protocolId, evidenceUrls, logoB64, signB64, signerName, chunks + 1, totalDocPages)
+  const protoHtml = buildProtocolPages(full, logoB64, signB64, actualSignerName, 1, totalDocPages, projectName);
+  const locName = full.protocol.location
+    ? `${full.protocol.location.location_only ?? ''}-${full.protocol.location.specialty ?? ''}`.replace(/^-|-$/g, '')
+    : null;
+  const photoHtml = evidenceEntries.length > 0
+    ? await buildPhotoPanel(full.protocol.protocol_number ?? protocolId, locName, evidenceEntries, logoB64, signB64, actualSignerName, chunks + 1, totalDocPages)
     : '';
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
@@ -610,5 +847,8 @@ export async function exportSingleProtocolPdf(
 <style>${CSS}</style>
 </head><body>${protoHtml}${photoHtml}</body></html>`;
 
-  openPrintWindow(html);
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const safeName = (full.protocol.protocol_number ?? protocolId).replace(/[^a-zA-Z0-9\-_]/g, '_');
+  await generateAndDownloadPdf(html, `PROTOCOLO-${safeName}-${dateStr}.pdf`);
 }

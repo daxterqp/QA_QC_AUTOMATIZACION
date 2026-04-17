@@ -15,7 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import {
   database, protocolsCollection, protocolItemsCollection,
-  locationsCollection, plansCollection, evidencesCollection,
+  locationsCollection, plansCollection, evidencesCollection, projectsCollection,
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
@@ -28,8 +28,10 @@ import type Plan from '@models/Plan';
 import type Evidence from '@models/Evidence';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { Ionicons } from '@expo/vector-icons';
-import { pushProjectToSupabase, pushProtocolStatus, pushProtocolItem } from '@services/SupabaseSyncService';
+import { pushProjectToSupabase, pushProtocolStatus, pushProtocolItem, pushPlansToSupabase } from '@services/SupabaseSyncService';
 import { supabase } from '@config/supabase';
+import { listS3Keys, downloadFromS3 } from '@services/S3Service';
+import { s3ProjectPrefix } from '@config/aws';
 import { notifyProtocolSubmitted } from '@services/NotificationService';
 import AppHeader from '@components/AppHeader';
 
@@ -70,6 +72,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   const [locationSearch, setLocationSearch] = useState('');
   const [allLocations, setAllLocations] = useState<Location[]>([]);
   const [locationPlans, setLocationPlans] = useState<Plan[]>([]);
+  const [planSearchDone, setPlanSearchDone] = useState(false); // true cuando ya se buscó en local + S3
 
   // Evidencias agrupadas por item
   const [evidenceMap, setEvidenceMap] = useState<Record<string, Evidence[]>>({});
@@ -193,18 +196,113 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   }, [protocolId]);
 
   useEffect(() => {
-    if (protocol?.locationId) {
-      locationsCollection.find(protocol.locationId).then((loc) => {
+    if (!protocol?.locationId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const loc = await locationsCollection.find(protocol.locationId!);
+        if (cancelled) return;
         setLocation(loc);
         setLocationSearch(loc.name);
-        // Cargar el plano asociado a esta ubicación
-        plansCollection
-          .query(Q.where('location_id', loc.id))
-          .fetch()
-          .then((plans) => setLocationPlans(plans as Plan[]))
-          .catch(() => {});
-      }).catch(() => null);
-    }
+
+        // 1. Buscar planos en local
+        const localPlans = await plansCollection.query(Q.where('location_id', loc.id)).fetch();
+        if (cancelled) return;
+
+        if (localPlans.length > 0) {
+          setLocationPlans(localPlans as Plan[]);
+          setPlanSearchDone(true);
+          return;
+        }
+
+        // 2. No hay planos locales — buscar en S3 por reference_plan de la ubicación
+        const referencePlan = (loc as any).referencePlan as string | undefined;
+        if (!referencePlan) {
+          setPlanSearchDone(true);
+          return;
+        }
+
+        // Obtener nombre del proyecto para construir la ruta S3
+        const projectId = protocol.projectId;
+        let projectName = '';
+        try {
+          const proj = await projectsCollection.find(projectId);
+          projectName = proj.name;
+        } catch { /* fallback */ }
+
+        if (!projectName || cancelled) {
+          setPlanSearchDone(true);
+          return;
+        }
+
+        const prefix = s3ProjectPrefix(projectName);
+        const refNames = referencePlan.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+        // Listar planos disponibles en S3
+        let planKeys: string[] = [];
+        try {
+          planKeys = await listS3Keys(`${prefix}/plans/`);
+        } catch {
+          setPlanSearchDone(true);
+          return;
+        }
+
+        if (cancelled) return;
+
+        // Buscar coincidencias por nombre
+        const matchingKeys = planKeys.filter((key) => {
+          const fileName = key.split('/').pop() ?? '';
+          const planName = fileName.replace(/\.pdf$/i, '').toLowerCase().trim();
+          return refNames.includes(planName);
+        });
+
+        if (matchingKeys.length === 0) {
+          setPlanSearchDone(true);
+          return;
+        }
+
+        // 3. Descargar y crear registros locales
+        const destDir = `${FileSystem.documentDirectory}plans/`;
+        await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
+
+        const newPlans: Plan[] = [];
+        for (const key of matchingKeys) {
+          const fileName = key.split('/').pop()!;
+          const planName = fileName.replace(/\.pdf$/i, '');
+          const localUri = `${destDir}${fileName}`;
+
+          try {
+            await downloadFromS3(key, localUri);
+            await database.write(async () => {
+              const created = await plansCollection.create((p) => {
+                p.projectId = projectId;
+                p.locationId = loc.id;
+                p.name = planName;
+                p.fileUri = localUri;
+                p.uploadedById = currentUser?.id ?? '';
+              });
+              newPlans.push(created as Plan);
+            });
+          } catch (e) {
+            console.warn('[Plans] Error descargando plano S3:', e);
+          }
+        }
+
+        if (cancelled) return;
+
+        if (newPlans.length > 0) {
+          setLocationPlans(newPlans);
+          // Sincronizar los nuevos planos a Supabase
+          pushPlansToSupabase(projectId).catch(() => {});
+        }
+        setPlanSearchDone(true);
+      } catch {
+        setPlanSearchDone(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [protocol]);
 
   // Cargar todas las ubicaciones del proyecto para el buscador
@@ -223,6 +321,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
     setLocationSearch(loc.name);
     setLocation(loc);
     setLocationPlans([]);
+    setPlanSearchDone(false);
     // Actualizar el locationId del protocolo
     await database.write(async () => {
       await (protocol as any)?.update((p: any) => {
@@ -230,9 +329,58 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
         p.locationReference = loc.name;
       });
     });
-    // Buscar planos asociados
+    // Buscar planos asociados en local
     const plans = await plansCollection.query(Q.where('location_id', loc.id)).fetch();
-    setLocationPlans(plans as Plan[]);
+    if (plans.length > 0) {
+      setLocationPlans(plans as Plan[]);
+      setPlanSearchDone(true);
+      return;
+    }
+    // No hay local — buscar en S3
+    const referencePlan = (loc as any).referencePlan as string | undefined;
+    if (!referencePlan || !protocol) { setPlanSearchDone(true); return; }
+    try {
+      let projectName = '';
+      try { projectName = (await projectsCollection.find(protocol.projectId)).name; } catch {}
+      if (!projectName) { setPlanSearchDone(true); return; }
+
+      const prefix = s3ProjectPrefix(projectName);
+      const refNames = referencePlan.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const planKeys = await listS3Keys(`${prefix}/plans/`);
+      const matchingKeys = planKeys.filter((key) => {
+        const fileName = key.split('/').pop() ?? '';
+        return refNames.includes(fileName.replace(/\.pdf$/i, '').toLowerCase().trim());
+      });
+
+      if (matchingKeys.length === 0) { setPlanSearchDone(true); return; }
+
+      const destDir = `${FileSystem.documentDirectory}plans/`;
+      await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
+      const newPlans: Plan[] = [];
+      for (const key of matchingKeys) {
+        const fileName = key.split('/').pop()!;
+        const planName = fileName.replace(/\.pdf$/i, '');
+        const localUri = `${destDir}${fileName}`;
+        try {
+          await downloadFromS3(key, localUri);
+          await database.write(async () => {
+            const created = await plansCollection.create((p) => {
+              p.projectId = protocol.projectId;
+              p.locationId = loc.id;
+              p.name = planName;
+              p.fileUri = localUri;
+              p.uploadedById = currentUser?.id ?? '';
+            });
+            newPlans.push(created as Plan);
+          });
+        } catch {}
+      }
+      if (newPlans.length > 0) {
+        setLocationPlans(newPlans);
+        pushPlansToSupabase(protocol.projectId).catch(() => {});
+      }
+    } catch {}
+    setPlanSearchDone(true);
   };
 
   const setAnswer = async (itemId: string, value: true | false | 'na') => {
@@ -349,9 +497,10 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       // Push completo del proyecto en background
       if (protocol?.projectId) {
         pushProjectToSupabase(protocol.projectId).catch(() => {});
-        const locRef = (protocol as any).locationReference ?? (protocol as any).protocolNumber ?? '';
-        const protNum = (protocol as any).protocolNumber ?? '';
-        notifyProtocolSubmitted(protocol.projectId, '', locRef, protNum);
+        const locOnly = (location as any)?.locationOnly ?? null;
+        const spec = (location as any)?.specialty ?? null;
+        const protName = (protocol as any).protocolNumber ?? '';
+        notifyProtocolSubmitted(protocol.projectId, '', locOnly, spec, protName, protocol.id);
       }
 
       Alert.alert(
@@ -421,17 +570,23 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
               />
             )}
           </View>
-          {locationPlans.length > 0 && location && (
+          {location && (
             <TouchableOpacity
               ref={protocolPlanosBtnRef}
-              style={styles.planBtn}
+              style={[styles.planBtn, locationPlans.length === 0 && planSearchDone && { opacity: 0.5 }]}
               onPress={() => {
-                navigation.navigate('PlanViewer', {
-                  planId: locationPlans[0].id,
-                  planName: locationPlans[0].name,
-                  protocolId: protocolId,
-                  locationId: location.id,
-                });
+                if (locationPlans.length > 0) {
+                  navigation.navigate('PlanViewer', {
+                    planId: locationPlans[0].id,
+                    planName: locationPlans[0].name,
+                    protocolId: protocolId,
+                    locationId: location.id,
+                  });
+                } else if (!planSearchDone) {
+                  Alert.alert('Buscando plano', 'Se está buscando el plano en la nube, espera un momento.');
+                } else {
+                  Alert.alert('Sin plano', 'No hay plano asociado a esta ubicación.');
+                }
               }}
             >
               <Ionicons name="map-outline" size={14} color={Colors.white} />
@@ -462,8 +617,8 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
           </ScrollView>
         )}
 
-        {locationPlans.length === 0 && location && (
-          <Text style={styles.noPlanHint}>Sin plano asociado a esta ubicacion.</Text>
+        {locationPlans.length === 0 && location && !planSearchDone && (
+          <Text style={styles.noPlanHint}>Buscando plano...</Text>
         )}
       </View>
 

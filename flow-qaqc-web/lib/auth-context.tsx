@@ -3,19 +3,33 @@
 import {
   createContext, useContext, useEffect, useState, type ReactNode,
 } from 'react';
-import type { Session } from '@supabase/supabase-js';
 import { createClient } from '@lib/supabase/client';
 import type { User } from '@/types';
 
+const COOKIE_KEY = 'scua_user_id';
+
+function getCookieUserId(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp('(?:^|; )' + COOKIE_KEY + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function setCookieUserId(userId: string) {
+  const maxAge = 60 * 60 * 24 * 30; // 30 días
+  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(userId)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+}
+
+function clearCookieUserId() {
+  document.cookie = `${COOKIE_KEY}=; path=/; max-age=0`;
+}
+
 interface AuthContextValue {
-  session: Session | null;
   currentUser: User | null;
   loading: boolean;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
-  session: null,
   currentUser: null,
   loading: true,
   signOut: async () => {},
@@ -23,46 +37,39 @@ const AuthContext = createContext<AuthContextValue>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
-  const [session, setSession] = useState<Session | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  async function loadUser(userId: string) {
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (data) setCurrentUser(data as User);
-  }
+  const [loading, setLoading]         = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) loadUser(session.user.id);
+    const userId = getCookieUserId();
+    if (!userId) {
       setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        if (session?.user) {
-          loadUser(session.user.id);
-        } else {
-          setCurrentUser(null);
-        }
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (data) setCurrentUser(data as User);
+        else clearCookieUserId();
+      } catch {
+        clearCookieUserId();
+      } finally {
+        setLoading(false);
       }
-    );
-
-    return () => subscription.unsubscribe();
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    clearCookieUserId();
+    setCurrentUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ session, currentUser, loading, signOut }}>
+    <AuthContext.Provider value={{ currentUser, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

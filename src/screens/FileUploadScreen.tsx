@@ -28,12 +28,12 @@ import { s3ProjectPrefix } from '@config/aws';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { getProjectSettings, saveProjectSettings } from '@services/ProjectSettings';
-import { saveUserSignature, saveUserSignatureS3Key } from '@services/UserSignatureService';
+import { saveUserSignature, saveUserSignatureS3Key, getOrDownloadSignatureUri } from '@services/UserSignatureService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { downloadPlansFromS3, downloadDwgFromS3 } from '@services/S3SyncService';
-import { pushPlansToSupabase } from '@services/SupabaseSyncService';
+import { pushPlansToSupabase, pushProjectToSupabase } from '@services/SupabaseSyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FileUpload'>;
 type Tab = 'actividades' | 'ubicaciones' | 'planos_pdf' | 'planos_dwg' | 'personalizar';
@@ -445,9 +445,20 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     if (activeTab !== 'personalizar') return;
     getProjectSettings(projectId).then((s) => {
       setStampEnabled(s.stampEnabled);
-      setStampComment(s.stampComment ?? '');
-      setSignatureUri(s.signatureUri);
     });
+    // Load user signature: try local first, then download from S3
+    if (currentUser?.id) {
+      getOrDownloadSignatureUri(currentUser.id).then((uri) => {
+        if (uri) {
+          setSignatureUri(uri);
+          saveProjectSettings(projectId, { signatureUri: uri });
+        }
+      }).catch(() => {});
+    }
+    // Read stamp_comment from synced project model (shared for all users)
+    database.get<any>('projects').find(projectId).then((proj: any) => {
+      if (proj?.stampComment) setStampComment(proj.stampComment);
+    }).catch(() => {});
     // Try to load global logo from S3 into a local cache
     const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
     s3FileExists(LOGO_S3_KEY).then(exists => {
@@ -465,9 +476,20 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
   const saveStampComment = async () => {
     setStampCommentSaving(true);
+    // Save to WatermelonDB model (syncs to Supabase → shared for all users)
+    try {
+      const proj = await database.get<any>('projects').find(projectId);
+      await database.write(async () => {
+        await proj.update((p: any) => {
+          p.stampComment = stampComment.trim() || null;
+        });
+      });
+      pushProjectToSupabase(projectId).catch(() => {});
+    } catch { /* fallback */ }
+    // Also keep in AsyncStorage as local backup
     await saveProjectSettings(projectId, { stampComment: stampComment.trim() || null });
     setStampCommentSaving(false);
-    Alert.alert('Guardado', 'El comentario se estampará en las fotos.');
+    Alert.alert('Guardado', 'El comentario se estampará en las fotos de todos los usuarios.');
   };
 
   const handlePickStampPhoto = async () => {

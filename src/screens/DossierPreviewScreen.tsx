@@ -33,7 +33,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
     try {
       await Sharing.shareAsync(pdfUri, {
         mimeType: 'application/pdf',
-        dialogTitle: 'Exportar Dossier PDF',
+        dialogTitle: 'Exportar Dosier PDF',
       });
     } catch (e) {
       Alert.alert('Error', `No se pudo compartir el PDF.\n${String(e)}`);
@@ -81,7 +81,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Vista previa del Dossier"
+        title="Vista previa del Dosier"
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={

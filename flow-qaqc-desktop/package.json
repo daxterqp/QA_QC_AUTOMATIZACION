@@ -1,0 +1,77 @@
+{
+  "name": "scua-desktop",
+  "version": "1.0.0",
+  "description": "S-CUA — Control de Calidad (App de Escritorio)",
+  "main": "main.js",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build": "npm run build:next && electron-builder",
+    "build:next": "cross-env ELECTRON_BUILD=1 npm --prefix ../flow-qaqc-web run build",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.vxp.scua",
+    "productName": "S-CUA",
+    "copyright": "Copyright © 2025 VxP",
+    "directories": {
+      "output": "../dist-desktop"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../flow-qaqc-web/.next/standalone",
+        "to": "nextjs",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../flow-qaqc-web/.next/static",
+        "to": "nextjs/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../flow-qaqc-web/public",
+        "to": "nextjs/public",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "S-CUA"
+    }
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}

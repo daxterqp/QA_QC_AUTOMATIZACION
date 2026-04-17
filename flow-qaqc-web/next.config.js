@@ -1,9 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Permite importar desde lib/ y hooks/ con alias absolutos
+  // output: 'standalone' solo cuando se hace build para Electron (reduce el bundle)
+  ...(process.env.ELECTRON_BUILD === '1' ? { output: 'standalone' } : {}),
+
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
+      canvas: false, // requerido por react-pdf / pdfjs-dist
     };
     return config;
   },

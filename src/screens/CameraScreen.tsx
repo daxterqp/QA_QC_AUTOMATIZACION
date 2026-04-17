@@ -50,6 +50,13 @@ export default function CameraScreen({
   useEffect(() => {
     if (!projectId) return;
     getProjectSettings(projectId).then(async (s) => {
+      // Read stamp_comment from synced project model (shared for all users)
+      let sharedComment = s.stampComment;
+      try {
+        const proj = await database.get<any>('projects').find(projectId);
+        if (proj?.stampComment) sharedComment = proj.stampComment;
+      } catch { /* fallback to local */ }
+
       // Si no hay logo local, intentar descargarlo desde S3 (logo global del proyecto)
       let logoUri = s.stampPhotoUri;
       if (!logoUri && s.stampEnabled) {
@@ -63,7 +70,7 @@ export default function CameraScreen({
           }
         } catch { /* logo opcional */ }
       }
-      setSettings({ ...s, stampPhotoUri: logoUri });
+      setSettings({ ...s, stampPhotoUri: logoUri, stampComment: sharedComment });
     }).catch(() => {});
   }, [projectId]);
 

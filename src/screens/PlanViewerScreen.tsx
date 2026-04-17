@@ -14,7 +14,7 @@ import Pdf from 'react-native-pdf';
 import {
   database, plansCollection, planAnnotationsCollection,
   annotationCommentsCollection, annotationCommentPhotosCollection,
-  usersCollection, protocolsCollection, projectsCollection,
+  usersCollection, protocolsCollection, projectsCollection, locationsCollection,
 } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { useTour } from '@context/TourContext';
@@ -34,14 +34,13 @@ import AppHeader from '@components/AppHeader';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const PDF_H_BASE = 440;
-const ZOOM_LEVELS = [1, 1.5, 2, 3] as const;
+const ZOOM_LEVELS = [1, 1.5, 2, 2.5] as const;
 type ZoomLevel = typeof ZOOM_LEVELS[number];
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PlanViewer'>;
 
 interface PendingRect { x: number; y: number; width: number; height: number; }
 interface PendingDot  { x: number; y: number; }
-interface UndoneData  { rectX: number; rectY: number; rectWidth: number; rectHeight: number; comment: string | null; sequenceNumber: number; }
 
 /** Datos de anotación pre-guardada (cuando usuario pide cámara antes de confirmar) */
 interface PreSavedAnn { annotationId: string; commentId: string; }
@@ -57,7 +56,6 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const drawToggleRef = useTourStep('plan_viewer_draw_toggle');
   const { ref: annotationListRef, onLayout: annotationListLayout } = useTourStepWithLayout('plan_viewer_annotation_list');
   const { ref: zoomBarRef, onLayout: zoomBarLayout } = useTourStepWithLayout('plan_zoom_options');
-  const { ref: undoBarRef, onLayout: undoBarLayout } = useTourStepWithLayout('plan_undo_redo');
   const dwgBtnRef = useTourStep('plan_dwg_btn');
   const planSelectorRef = useTourStep('plan_selector');
   const annotationExpandRef = useTourStep('plan_annotation_expand');
@@ -74,6 +72,8 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [projectName, setProjectName] = useState<string>('');
   const [protocolNumber, setProtocolNumber] = useState<string | null>(null);
   const [protocolLocation, setProtocolLocation] = useState<string | null>(null);
+  const [locationOnly, setLocationOnly] = useState<string | null>(null);
+  const [specialty, setSpecialty] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<PlanAnnotation[]>([]);
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -86,6 +86,9 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [comment, setComment] = useState('');
   const [showCommentModal, setShowCommentModal] = useState(false);
 
+  const hScrollRef = useRef(0); // scroll horizontal offset del PDF
+  const hScrollViewRef = useRef<ScrollView>(null); // ref al ScrollView horizontal
+
   // Fotos pendientes en el modal de creación (pre-guardadas antes de confirmar)
   const [preSavedAnn, setPreSavedAnn] = useState<PreSavedAnn | null>(null);
   const [pendingModalPhotos, setPendingModalPhotos] = useState<AnnotationCommentPhoto[]>([]);
@@ -93,7 +96,6 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
 
   const startPos = useRef({ x: 0, y: 0 });
-  const [undoneStack, setUndoneStack] = useState<UndoneData[]>([]);
   const [zoom, setZoom] = useState<ZoomLevel>(1);
   const [pageAspect, setPageAspect] = useState<number>(PDF_H_BASE / SCREEN_W);
   const [currentPage, setCurrentPage] = useState(1);
@@ -163,9 +165,16 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   // Cargar número y ubicación del protocolo para el header
   useEffect(() => {
     if (!protocolId) return;
-    protocolsCollection.find(protocolId).then((p: any) => {
+    protocolsCollection.find(protocolId).then(async (p: any) => {
       setProtocolNumber(p.protocolNumber ?? null);
       setProtocolLocation(p.locationReference ?? null);
+      if (p.locationId) {
+        try {
+          const loc = await locationsCollection.find(p.locationId) as any;
+          setLocationOnly(loc.locationOnly ?? null);
+          setSpecialty(loc.specialty ?? null);
+        } catch { /* sin ubicación */ }
+      }
     }).catch(() => {});
   }, [protocolId]);
 
@@ -285,6 +294,69 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   useEffect(() => { preSavedAnnRef.current = preSavedAnn; }, [preSavedAnn]);
   useEffect(() => { replyPreSavedRef.current = replyPreSaved; }, [replyPreSaved]);
 
+  // ── Pinch-to-zoom (salta entre niveles fijos) ─────────────────────────────
+  const zoomRef = useRef<ZoomLevel>(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const pinchBaseRef = useRef(0);
+  const pinchFiredRef = useRef(false);
+  const pinchCenterXRef = useRef(0); // centro X del pellizco relativo al PDF
+
+  const pinchResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_e, gs) => {
+        return gs.numberActiveTouches >= 2 && !isDrawingRef.current;
+      },
+      onPanResponderGrant: (e) => {
+        if (e.nativeEvent.touches.length >= 2) {
+          const t = e.nativeEvent.touches;
+          pinchBaseRef.current = Math.sqrt((t[1].pageX - t[0].pageX) ** 2 + (t[1].pageY - t[0].pageY) ** 2);
+          // Centro del pellizco en pantalla + scroll = posición en el PDF
+          pinchCenterXRef.current = ((t[0].locationX + t[1].locationX) / 2) + hScrollRef.current;
+          pinchFiredRef.current = false;
+        }
+      },
+      onPanResponderMove: (e) => {
+        if (pinchFiredRef.current || !e.nativeEvent.touches || e.nativeEvent.touches.length < 2) return;
+        const t = e.nativeEvent.touches;
+        const dist = Math.sqrt((t[1].pageX - t[0].pageX) ** 2 + (t[1].pageY - t[0].pageY) ** 2);
+        const ratio = dist / pinchBaseRef.current;
+        const threshold = 1.25;
+
+        let newZoomLevel: ZoomLevel | null = null;
+        const cur = zoomRef.current;
+        const idx = ZOOM_LEVELS.indexOf(cur);
+
+        if (ratio > threshold && idx < ZOOM_LEVELS.length - 1) {
+          newZoomLevel = ZOOM_LEVELS[idx + 1];
+        } else if (ratio < 1 / threshold && idx > 0) {
+          newZoomLevel = ZOOM_LEVELS[idx - 1];
+        }
+
+        if (newZoomLevel) {
+          pinchFiredRef.current = true;
+          // Calcular el % del PDF donde está el centro del pellizco
+          const oldPdfW = SCREEN_W * cur;
+          const pctX = pinchCenterXRef.current / oldPdfW;
+          // Nuevo ancho del PDF
+          const newPdfW = SCREEN_W * newZoomLevel;
+          // Posición del centro del pellizco en pantalla (sin scroll)
+          const screenX = pinchCenterXRef.current - hScrollRef.current;
+          // Nuevo scroll para que el mismo punto del PDF quede bajo el dedo
+          const newScrollX = Math.max(0, Math.min(pctX * newPdfW - screenX, newPdfW - SCREEN_W));
+
+          setZoom(newZoomLevel);
+          // Scroll después del re-render
+          setTimeout(() => {
+            hScrollViewRef.current?.scrollTo({ x: newScrollX, animated: false });
+            hScrollRef.current = newScrollX;
+          }, 50);
+        }
+      },
+      onPanResponderRelease: () => { pinchFiredRef.current = false; },
+    })
+  ).current;
+
   // ── PanResponder ─────────────────────────────────────────────────────────
   const isDrawingRef = useRef(false);
   useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
@@ -368,14 +440,12 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         });
       });
     }
-    setUndoneStack([]);
     setPendingRect(null); setPendingDot(null);
     setComment(''); setShowCommentModal(false);
     setPreSavedAnn(null); setPendingModalPhotos([]);
     if (plan?.projectId) {
       pushProjectToSupabase(plan.projectId).catch(() => {});
-      const locationRef = protocolLocation ?? protocolNumber ?? activePlanName;
-      notifyNewAnnotation(plan.projectId, projectName, locationRef, comment.trim() || null);
+      notifyNewAnnotation(plan.projectId, projectName, locationOnly, specialty, comment.trim() || null);
     }
   };
 
@@ -448,29 +518,6 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
     setShowCommentModal(false); setPendingRect(null); setPendingDot(null); setComment('');
   };
 
-  // ── Undo / Redo ───────────────────────────────────────────────────────────
-  const handleUndo = async () => {
-    if (annotations.length === 0) return;
-    const last = [...annotations].sort((a, b) => b.sequenceNumber - a.sequenceNumber)[0];
-    const saved: UndoneData = { rectX: last.rectX, rectY: last.rectY, rectWidth: last.rectWidth, rectHeight: last.rectHeight, comment: last.comment, sequenceNumber: last.sequenceNumber };
-    await database.write(async () => { await last.destroyPermanently(); });
-    setUndoneStack((p) => [...p, saved]);
-  };
-
-  const handleRedo = async () => {
-    if (undoneStack.length === 0 || !currentUser) return;
-    const data = undoneStack[undoneStack.length - 1];
-    await database.write(async () => {
-      await planAnnotationsCollection.create((a) => {
-        a.planId = activePlanId; a.protocolId = protocolId ?? null;
-        a.rectX = data.rectX; a.rectY = data.rectY;
-        a.rectWidth = data.rectWidth; a.rectHeight = data.rectHeight;
-        a.comment = data.comment; a.sequenceNumber = data.sequenceNumber;
-        a.isOk = false; (a as any).status = 'OPEN'; a.createdById = currentUser.id;
-      });
-    });
-    setUndoneStack((p) => p.slice(0, -1));
-  };
 
   const markOk = async (ann: PlanAnnotation) => {
     if (!isJefe) return;
@@ -626,8 +673,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
     setShowReplyForm(false); setReplyText(''); setReplyPreSaved(null); setReplyPrePhotos([]);
     if (plan?.projectId) {
       pushProjectToSupabase(plan.projectId).catch(() => {});
-      const locationRef = protocolLocation ?? protocolNumber ?? activePlanName;
-      notifyNewReply(plan.projectId, projectName, locationRef, replyText.trim() || null);
+      notifyNewReply(plan.projectId, projectName, locationOnly, specialty, replyText.trim() || null);
     }
   };
 
@@ -768,7 +814,6 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                       setThreadComments([]);
                       setThreadPhotos({});
                       setShowReplyForm(false);
-                      setUndoneStack([]);
                       setPendingRect(null);
                       setPendingDot(null);
                       setIsDrawing(false);
@@ -795,45 +840,35 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
       {canAnnotate && (
         <View style={styles.floatingToolbar}>
           <View style={styles.toolbarRow}>
-            <View ref={undoBarRef} onLayout={undoBarLayout} style={styles.undoBar}>
-              <TouchableOpacity style={[styles.undoBtn, annotations.length === 0 && styles.btnDisabled]} onPress={handleUndo} disabled={annotations.length === 0}>
-                <Text style={styles.undoBtnText}>Deshacer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.undoBtn, undoneStack.length === 0 && styles.btnDisabled]} onPress={handleRedo} disabled={undoneStack.length === 0}>
-                <Text style={styles.undoBtnText}>Rehacer</Text>
-              </TouchableOpacity>
+            <View ref={zoomBarRef} onLayout={zoomBarLayout} style={styles.zoomBtnGroup}>
+              {ZOOM_LEVELS.map((z) => (
+                <TouchableOpacity key={z} style={[styles.zoomBtn, zoom === z && styles.zoomBtnActive]} onPress={() => { setZoom(z); setIsDrawing(false); }}>
+                  <Text style={[styles.zoomBtnText, zoom === z && styles.zoomBtnTextActive]}>
+                    {`${z}x`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <View style={styles.zoomBar}>
-              <View ref={zoomBarRef} onLayout={zoomBarLayout} style={styles.zoomBtnGroup}>
-                {ZOOM_LEVELS.map((z) => (
-                  <TouchableOpacity key={z} style={[styles.zoomBtn, zoom === z && styles.zoomBtnActive]} onPress={() => { setZoom(z); setIsDrawing(false); }}>
-                    <Text style={[styles.zoomBtnText, zoom === z && styles.zoomBtnTextActive]}>
-                      {z === 1 ? '1x' : z === 1.5 ? '1.5x' : z === 2 ? '2x' : '3x'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+            <TouchableOpacity style={styles.measureBtn} onPress={() => navigation.navigate('Measurement', { planId: activePlanId, planName: activePlanName })}>
+              <Ionicons name="resize-outline" size={18} color={Colors.white} />
+            </TouchableOpacity>
+            <TouchableOpacity ref={drawToggleRef} style={[styles.drawBtn, isDrawing && styles.drawBtnActive, { flex: 1 }]} onPress={() => { setIsDrawing(!isDrawing); setPendingRect(null); setPendingDot(null); }}>
+              <Text style={styles.drawBtnText}>{isDrawing ? 'Dibujando — toca o arrastra' : '+ Anotar plano'}</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity ref={drawToggleRef} style={[styles.drawBtn, isDrawing && styles.drawBtnActive]} onPress={() => { setIsDrawing(!isDrawing); setPendingRect(null); setPendingDot(null); }}>
-            <Text style={styles.drawBtnText}>{isDrawing ? 'Dibujando — toca o arrastra' : '+ Anotar plano'}</Text>
-          </TouchableOpacity>
         </View>
       )}
 
       <ScrollView ref={mainScrollRef} showsVerticalScrollIndicator={false} scrollEnabled={!isDrawing}>
         {/* PDF */}
         <View style={styles.pdfSection}>
-          <Text style={styles.sectionLabel}>PLANO</Text>
-          <ScrollView horizontal scrollEnabled={!isDrawing && zoom > 1} showsHorizontalScrollIndicator={zoom > 1} style={{ borderRadius: Radius.md }}>
+          <ScrollView ref={hScrollViewRef} horizontal scrollEnabled={!isDrawing && zoom > 1} showsHorizontalScrollIndicator={zoom > 1} style={{ borderRadius: Radius.md }} onScroll={(e) => { hScrollRef.current = e.nativeEvent.contentOffset.x; }} scrollEventThrottle={16}>
             <View ref={pdfAreaRef} style={[styles.pdfContainer, { width: pdfW, height: pdfH }]}>
               {pdfSource ? (
-                // Un componente por página con key y page FIJOS — nunca cambian.
-                // La navegación se hace con opacity, no moviendo props nativos.
-                // El source sí puede cambiar (cambio de plano) sin causar crash.
+                // key incluye zoom para forzar re-render a la resolución correcta
                 Array.from({ length: Math.max(totalPages, 1) }, (_, i) => i + 1).map((pg) => (
                   <Pdf
-                    key={`p${pg}`}
+                    key={`p${pg}-z${zoom}`}
                     source={pdfSource}
                     page={pg}
                     style={[StyleSheet.absoluteFill, { opacity: pg === currentPage ? 1 : 0 }]}
@@ -875,6 +910,10 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                   <View style={[styles.dotMarker, { left: pendingDot.x - 9, top: pendingDot.y - 9, borderColor: Colors.primary, opacity: 0.7 }]} />
                 )}
               </View>
+              {/* Pinch-to-zoom overlay — solo activo cuando no se dibuja */}
+              {!isDrawing && (
+                <View style={[StyleSheet.absoluteFill, { zIndex: 1.5 }]} {...pinchResponder.panHandlers} />
+              )}
               {isDrawing && <View style={[StyleSheet.absoluteFill, { zIndex: 2 }]} {...panResponder.panHandlers} />}
               {pdfLoading && pdfSource && (
                 <View style={[StyleSheet.absoluteFill, styles.loadingOverlay, { zIndex: 3 }]}>
@@ -1141,10 +1180,8 @@ const styles = StyleSheet.create({
   floatingToolbar: { backgroundColor: Colors.white, paddingHorizontal: 14, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: Colors.border, ...Shadow.card },
   toolbarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   pdfSection: { margin: 16, gap: 8 },
-  undoBar: { flexDirection: 'row', gap: 6 },
-  undoBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: 10, paddingVertical: 6, alignItems: 'center', backgroundColor: Colors.white },
+  undoBar: { },
   btnDisabled: { opacity: 0.35 },
-  undoBtnText: { fontSize: 11, fontWeight: '700', color: Colors.navy },
   zoomBar: { flex: 1, alignItems: 'flex-end', justifyContent: 'center' },
   zoomBtnGroup: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   zoomBtn: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white },
@@ -1154,6 +1191,7 @@ const styles = StyleSheet.create({
   drawBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, padding: 13, alignItems: 'center' },
   drawBtnActive: { backgroundColor: Colors.warning },
   drawBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
+  measureBtn: { backgroundColor: Colors.navy, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 13, alignItems: 'center' },
   pdfContainer: { borderRadius: Radius.md, overflow: 'hidden', backgroundColor: '#f0f0f0', ...Shadow.card, borderWidth: 1, borderColor: Colors.border },
   pdfPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pdfPlaceholderText: { color: Colors.textMuted, fontSize: 13 },

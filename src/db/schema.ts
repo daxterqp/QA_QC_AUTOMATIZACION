@@ -2,10 +2,10 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 /**
  * Schema S-CUA MVP
- * v15: phone_contacts + logo_s3_key en projects
+ * v17: stamp_comment en projects + s3_etag/s3_key en plans
  */
 export const schema = appSchema({
-  version: 15,
+  version: 17,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -31,6 +31,7 @@ export const schema = appSchema({
         { name: 'password', type: 'string', isOptional: true },
         { name: 'created_by_id', type: 'string', isOptional: true },
         { name: 'logo_s3_key', type: 'string', isOptional: true },
+        { name: 'stamp_comment', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -168,6 +169,9 @@ export const schema = appSchema({
         { name: 'location_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'name', type: 'string' },
         { name: 'file_uri', type: 'string' },
+        { name: 's3_key', type: 'string', isOptional: true },
+        { name: 's3_etag', type: 'string', isOptional: true },
+        { name: 'local_etag', type: 'string', isOptional: true },
         { name: 'uploaded_by_id', type: 'string' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },

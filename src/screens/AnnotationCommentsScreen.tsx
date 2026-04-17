@@ -11,7 +11,7 @@ import type { RootStackParamList } from '@navigation/types';
 import {
   database, plansCollection, planAnnotationsCollection,
   annotationCommentsCollection, annotationCommentPhotosCollection, usersCollection,
-  protocolsCollection,
+  protocolsCollection, locationsCollection,
 } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { useTour } from '@context/TourContext';
@@ -22,6 +22,7 @@ import type PlanAnnotation from '@models/PlanAnnotation';
 import type AnnotationComment from '@models/AnnotationComment';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud, pushProjectToSupabase } from '@services/SupabaseSyncService';
+import { notifyAnnotationClosed } from '@services/NotificationService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AnnotationComments'>;
 
@@ -33,6 +34,8 @@ interface AnnRow {
   creatorName: string;
   protocolNumber: string | null;
   locationReference: string | null;
+  locationOnly: string | null;
+  specialty: string | null;
   lastReply: { authorName: string; date: Date; content: string | null; photoUris: string[] } | null;
 }
 
@@ -127,18 +130,27 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
           }
         }
 
-        // Protocolo asociado
+        // Protocolo asociado + ubicación
         let protocolNumber: string | null = null;
         let locationReference: string | null = null;
+        let locationOnly: string | null = null;
+        let specialty: string | null = null;
         if (annAny.protocolId) {
           try {
             const proto = await protocolsCollection.find(annAny.protocolId) as any;
             protocolNumber = proto.protocolNumber ?? null;
             locationReference = proto.locationReference ?? null;
+            if (proto.locationId) {
+              try {
+                const loc = await locationsCollection.find(proto.locationId) as any;
+                locationOnly = loc.locationOnly ?? null;
+                specialty = loc.specialty ?? null;
+              } catch { /* sin ubicación */ }
+            }
           } catch { /* sin protocolo */ }
         }
 
-        result.push({ annotation: ann as PlanAnnotation, plan, initialComment, initialPhotos, creatorName, protocolNumber, locationReference, lastReply });
+        result.push({ annotation: ann as PlanAnnotation, plan, initialComment, initialPhotos, creatorName, protocolNumber, locationReference, locationOnly, specialty, lastReply });
       }
       setRows(result);
     } finally {
@@ -160,6 +172,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
     });
     // Push a Supabase para que el cambio persista en la nube
     pushProjectToSupabase(projectId).catch(() => {});
+    notifyAnnotationClosed(projectId, projectName, row.locationOnly, row.specialty);
     await loadData();
   };
 
@@ -249,9 +262,22 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
                     {row.protocolNumber ? (
                       <Text style={styles.planNameBold} numberOfLines={1}>{row.protocolNumber}</Text>
                     ) : null}
-                    <Text style={styles.subPlanName} numberOfLines={1}>
-                      {[row.locationReference, row.plan.name, row.creatorName].filter(Boolean).join(' · ')}
-                    </Text>
+                    <View style={styles.subInfoRow}>
+                      {(row.locationOnly || row.specialty) ? (
+                        <View style={styles.subInfoItem}>
+                          <Ionicons name="location-outline" size={10} color={Colors.textMuted} />
+                          <Text style={styles.subInfoText} numberOfLines={1}>
+                            {[row.locationOnly, row.specialty].filter(Boolean).join(' · ')}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {row.creatorName ? (
+                        <View style={styles.subInfoItem}>
+                          <Ionicons name="person-outline" size={10} color={Colors.textMuted} />
+                          <Text style={styles.subInfoText} numberOfLines={1}>{row.creatorName}</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
                 </View>
 
@@ -337,6 +363,9 @@ const styles = StyleSheet.create({
   planName: { fontSize: 12, fontWeight: '400', color: Colors.textMuted },
   planNameBold: { fontSize: 13, fontWeight: '700', color: Colors.navy },
   subPlanName: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontStyle: 'italic' },
+  subInfoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 3 },
+  subInfoItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  subInfoText: { fontSize: 10, color: Colors.textMuted },
   creatorText: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
   statusBadgeText: { fontSize: 10, fontWeight: '700', color: Colors.white, letterSpacing: 0.5 },

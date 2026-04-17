@@ -43,3 +43,5 @@ yarn-error.log*
 src/config/aws.ts
 src/config/supabase.ts
 android/app/google-services.json
+flow-qaqc-web/public/VideoLogin.mp4
+*.mp4

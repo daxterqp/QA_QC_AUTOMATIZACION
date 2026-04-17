@@ -1,16 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   CheckCircle, XCircle, Loader2, ShieldCheck, ShieldX,
-  AlertTriangle, Camera, ZoomIn,
+  AlertTriangle, Camera, ZoomIn, Pencil, Plus, Trash2, Map,
 } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
 import { useProtocolFill } from '@hooks/useProtocolFill';
 import { useApproveProtocol, useRejectProtocol } from '@hooks/useProtocolAudit';
 import { useAuth } from '@lib/auth-context';
 import { cn } from '@lib/utils';
+import { applyStamp } from '@lib/stamp';
+import { uploadBlobToS3, sanitizeFilename, seq, s3ProjectPrefix } from '@lib/s3-upload';
+import { usePlansByReference } from '@hooks/usePlanViewer';
 import type { ProtocolItem, Evidence } from '@/types';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -21,13 +24,13 @@ function s3Url(key: string) {
 }
 
 function evidenceUrl(ev: Evidence): string | null {
-  if (ev.s3_key) return s3Url(ev.s3_key);
+  if (ev.s3_url_placeholder) return `/api/s3-image?key=${encodeURIComponent(ev.s3_url_placeholder)}`;
   return null;
 }
 
 function statusLabel(status: string) {
   const map: Record<string, string> = {
-    DRAFT: 'Pendiente', IN_PROGRESS: 'En revisión', SUBMITTED: 'En revisión',
+    DRAFT: 'Borrador', IN_PROGRESS: 'En progreso', SUBMITTED: 'En revisión',
     APPROVED: 'Aprobado', REJECTED: 'Rechazado',
   };
   return map[status] ?? status;
@@ -35,8 +38,8 @@ function statusLabel(status: string) {
 
 function statusClasses(status: string) {
   const map: Record<string, string> = {
-    DRAFT: 'bg-warning text-white',
-    IN_PROGRESS: 'bg-primary text-white',
+    DRAFT: 'bg-gray-400 text-white',
+    IN_PROGRESS: 'bg-warning text-white',
     SUBMITTED: 'bg-primary text-white',
     APPROVED: 'bg-success text-white',
     REJECTED: 'bg-danger text-white',
@@ -44,14 +47,11 @@ function statusClasses(status: string) {
   return map[status] ?? 'bg-gray-400 text-white';
 }
 
-function itemBadge(status: string) {
-  if (status === 'OK')
-    return { label: 'OK', cls: 'bg-green-100 text-green-700' };
-  if (status === 'NOK')
-    return { label: 'NO', cls: 'bg-red-100 text-red-700' };
-  if (status === 'OBSERVED')
-    return { label: 'OBS', cls: 'bg-yellow-100 text-yellow-700' };
-  return { label: '—', cls: 'bg-gray-100 text-gray-500' };
+function itemBadge(item: ProtocolItem) {
+  if (item.is_na) return { label: 'N/A', cls: 'bg-gray-100 text-gray-500' };
+  if (item.is_compliant === true)  return { label: 'Sí', cls: 'bg-green-100 text-green-700' };
+  if (item.is_compliant === false) return { label: 'No', cls: 'bg-red-100 text-red-700' };
+  return { label: '—', cls: 'bg-gray-100 text-gray-400' };
 }
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -68,6 +68,8 @@ export default function ProtocolAuditPage() {
   const { data: fillData, isLoading } = useProtocolFill(protocolId);
   const approveProtocol = useApproveProtocol(protocolId);
   const rejectProtocol = useRejectProtocol(protocolId);
+  const referencePlan = fillData?.location?.reference_plan;
+  const { data: locationPlans = [] } = usePlansByReference(projectId, referencePlan);
 
   const [lightbox, setLightbox] = useState<string | null>(null);
   // approve modal
@@ -77,8 +79,69 @@ export default function ProtocolAuditPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
+  const [uploadingExtra, setUploadingExtra] = useState(false);
+  const extraFileRef = useRef<HTMLInputElement>(null);
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+
+  // Load extra photos from S3
+  useEffect(() => {
+    if (!fillData) return;
+    const { protocol, location, project } = fillData;
+    if (!project) return;
+    const prefix = `${s3ProjectPrefix(project.name)}/photos/`;
+    const protoSeg = sanitizeFilename(protocol.protocol_number ?? protocol.id);
+    const locSeg = location ? sanitizeFilename(location.name) : 'SIN_UBICACION';
+    const extraPrefix = `${prefix}${protoSeg}-${locSeg}-extra-`;
+
+    fetch(`/api/s3-list?prefix=${encodeURIComponent(extraPrefix)}`)
+      .then(r => r.ok ? r.json() : { keys: [] })
+      .then(({ keys }) => setExtraPhotos(keys as string[]))
+      .catch(() => {});
+  }, [fillData]);
+
+  async function handleExtraPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !fillData) return;
+    e.target.value = '';
+    setUploadingExtra(true);
+    try {
+      const { protocol, location, project } = fillData;
+      const blobUrl = URL.createObjectURL(file);
+      const logoKey = project?.logo_s3_key ?? (project?.id ? `logos/project_${project.id}/logo.jpg` : null);
+      const logoUrl = logoKey ? `/api/s3-image-nocache?key=${encodeURIComponent(logoKey)}` : null;
+      const stampedBlob = await applyStamp({ imageUrl: blobUrl, logoUrl, comment: project?.stamp_comment ?? null });
+      URL.revokeObjectURL(blobUrl);
+
+      const projPrefix = s3ProjectPrefix(project?.name ?? projectId);
+      const locSeg = location ? sanitizeFilename(location.name) : 'SIN_UBICACION';
+      const protoSeg = sanitizeFilename(protocol.protocol_number ?? protocol.id);
+      const pos = extraPhotos.length + 1;
+      const s3Key = `${projPrefix}/photos/${protoSeg}-${locSeg}-extra-F${seq(pos)}.jpg`;
+
+      await uploadBlobToS3(stampedBlob, s3Key, 'image/jpeg');
+      setExtraPhotos(prev => [...prev, s3Key]);
+    } catch (err) {
+      console.error('Error subiendo foto extra:', err);
+    } finally {
+      setUploadingExtra(false);
+    }
+  }
+
+  async function handleDeleteExtra(s3Key: string) {
+    if (!confirm('¿Eliminar esta foto extra?')) return;
+    try {
+      await fetch('/api/s3-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: s3Key }),
+      });
+      setExtraPhotos(prev => prev.filter(k => k !== s3Key));
+    } catch (err) {
+      console.error('Error eliminando foto extra:', err);
+    }
+  }
 
   // ── guard: loading ───────────────────────────────────────────────────────
   if (isLoading || !fillData) {
@@ -94,15 +157,15 @@ export default function ProtocolAuditPage() {
   const status: string = p.status ?? 'DRAFT';
 
   // Summary counts
-  const okCount    = items.filter(i => i.status === 'OK').length;
-  const nokCount   = items.filter(i => i.status === 'NOK').length;
-  const obsCount   = items.filter(i => i.status === 'OBSERVED').length;
-  const pendCount  = items.filter(i => i.status === 'PENDING').length;
+  const okCount   = items.filter(i => !i.is_na && i.is_compliant === true).length;
+  const nokCount  = items.filter(i => !i.is_na && i.is_compliant === false).length;
+  const naCount   = items.filter(i => i.is_na).length;
+  const pendCount = items.filter(i => !i.has_answer).length;
 
-  // canApprove: all items answered and none are NOK
+  // canApprove: todos respondidos y ninguno es No
   const canApprove =
     items.length > 0 &&
-    items.every(i => i.status !== 'PENDING') &&
+    items.every(i => i.has_answer) &&
     nokCount === 0;
 
   // Build section-interleaved rows
@@ -125,7 +188,7 @@ export default function ProtocolAuditPage() {
     try {
       await approveProtocol.mutateAsync(currentUser.id);
       setShowApproveModal(false);
-      router.back();
+      router.push(`/app/projects/${projectId}/locations/${protocol.location_id}/protocols`);
     } catch (e: any) {
       setSaveError(e?.message ?? 'Error al aprobar');
     } finally {
@@ -141,7 +204,7 @@ export default function ProtocolAuditPage() {
       await rejectProtocol.mutateAsync(rejectReason.trim());
       setShowRejectModal(false);
       setRejectReason('');
-      router.back();
+      router.push(`/app/projects/${projectId}/locations/${protocol.location_id}/protocols`);
     } catch (e: any) {
       setSaveError(e?.message ?? 'Error al rechazar');
     } finally {
@@ -160,20 +223,39 @@ export default function ProtocolAuditPage() {
           { label: p.id_protocolo ?? 'Protocolo' },
         ]}
         rightContent={
-          <span className={cn('text-xs font-bold px-3 py-1 rounded-full', statusClasses(status))}>
-            {statusLabel(status)}
-          </span>
+          <div className="flex items-center gap-2">
+            {locationPlans.length > 0 && (
+              <button
+                onClick={() => router.push(`/app/projects/${projectId}/plans/${locationPlans[0].id}`)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 text-white border border-white/20 hover:bg-white/20 transition"
+              >
+                <Map size={12} />
+                Planos
+              </button>
+            )}
+            {['CREATOR', 'RESIDENT'].includes(currentUser?.role ?? '') && (status === 'SUBMITTED' || status === 'APPROVED') && (
+              <button
+                onClick={() => router.push(`/app/projects/${projectId}/protocols/${protocolId}/fill?edit=true`)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 text-white border border-white/20 hover:bg-white/20 transition"
+              >
+                <Pencil size={12} />
+                Editar
+              </button>
+            )}
+            <span className={cn('text-xs font-bold px-3 py-1 rounded-full', statusClasses(status))}>
+              {statusLabel(status)}
+            </span>
+          </div>
         }
       />
 
       <div className="flex-1 max-w-2xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
 
         {/* ── Summary cards ─────────────────────────────────────────────── */}
-        <div className="grid grid-cols-4 gap-3">
-          <SummaryCard value={okCount}   label="OK"          color="text-success" border="border-success" />
-          <SummaryCard value={nokCount}  label="No cumple"   color="text-danger"  border="border-danger"  />
-          <SummaryCard value={obsCount}  label="Observado"   color="text-warning" border="border-warning"  />
-          <SummaryCard value={pendCount} label="Pendiente"   color="text-gray-400" border="border-gray-300" />
+        <div className="flex justify-center gap-3">
+          <SummaryCard value={okCount}   label="Cumple"     color="text-success"  border="border-success" />
+          <SummaryCard value={nokCount}  label="No cumple"  color="text-danger"   border="border-danger"  />
+          <SummaryCard value={naCount}   label="N/A"        color="text-gray-400" border="border-gray-300" />
         </div>
 
         {/* ── Metadata ──────────────────────────────────────────────────── */}
@@ -189,12 +271,12 @@ export default function ProtocolAuditPage() {
         )}
 
         {/* ── Rejection banner ──────────────────────────────────────────── */}
-        {status === 'REJECTED' && p.observations && (
+        {status === 'REJECTED' && p.rejection_reason && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex gap-3 items-start">
             <AlertTriangle className="w-4 h-4 text-danger mt-0.5 shrink-0" />
             <div>
               <p className="text-xs font-bold text-danger mb-1">Protocolo rechazado</p>
-              <p className="text-xs text-red-700 leading-relaxed">{p.observations}</p>
+              <p className="text-xs text-red-700 leading-relaxed">{p.rejection_reason}</p>
             </div>
           </div>
         )}
@@ -211,7 +293,7 @@ export default function ProtocolAuditPage() {
           }
           const { item, idx } = row;
           const evs: Evidence[] = evidenceMap[item.id] ?? [];
-          const badge = itemBadge(item.status ?? 'PENDING');
+          const badge = itemBadge(item);
 
           return (
             <div key={item.id} className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-2">
@@ -230,9 +312,9 @@ export default function ProtocolAuditPage() {
               </div>
 
               {/* observations */}
-              {item.observations && (
+              {item.comments && (
                 <p className="text-xs text-gray-500 pl-9 leading-relaxed">
-                  Obs: {item.observations}
+                  Comentario: {item.comments}
                 </p>
               )}
 
@@ -262,6 +344,51 @@ export default function ProtocolAuditPage() {
             </div>
           );
         })}
+
+        {/* ── Extra photos ──────────────────────────────────────────────── */}
+        {isJefe && (
+          <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-gray-700">Evidencia fotográfica extra</p>
+              <button
+                onClick={() => extraFileRef.current?.click()}
+                disabled={uploadingExtra}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold
+                           border border-primary/30 text-primary hover:bg-primary/5 transition disabled:opacity-50"
+              >
+                {uploadingExtra ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                Agregar foto
+              </button>
+            </div>
+            {extraPhotos.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {extraPhotos.map(key => {
+                  const url = `/api/s3-image?key=${encodeURIComponent(key)}`;
+                  return (
+                    <div key={key} className="relative group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt="extra"
+                        className="w-20 h-20 object-cover rounded-lg border border-border cursor-pointer hover:opacity-90 transition"
+                        onClick={() => setLightbox(url)}
+                      />
+                      <button
+                        onClick={() => handleDeleteExtra(key)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger text-white rounded-full
+                                   flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">Sin fotos extra adjuntas.</p>
+            )}
+          </div>
+        )}
 
         {/* ── Signed banner ─────────────────────────────────────────────── */}
         {status === 'APPROVED' && (
@@ -310,6 +437,15 @@ export default function ProtocolAuditPage() {
           </div>
         )}
       </div>
+
+      {/* Hidden file input for extra photos */}
+      <input
+        ref={extraFileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleExtraPhoto}
+      />
 
       {/* ── Lightbox ──────────────────────────────────────────────────────── */}
       {lightbox && (
@@ -420,7 +556,7 @@ function SummaryCard({
   value, label, color, border,
 }: { value: number; label: string; color: string; border: string }) {
   return (
-    <div className={cn('bg-white rounded-xl shadow-subtle border-2 p-3 flex flex-col items-center gap-1', border)}>
+    <div className={cn('bg-white rounded-xl shadow-subtle border-2 p-3 flex flex-col items-center gap-1 w-28', border)}>
       <span className={cn('text-2xl font-black', color)}>{value}</span>
       <span className="text-[10px] text-gray-400 font-medium text-center leading-tight">{label}</span>
     </div>

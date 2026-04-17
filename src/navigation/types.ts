@@ -23,6 +23,7 @@ export type RootStackParamList = {
   PlansManagement: { projectId: string; projectName: string };
   FileUpload: { projectId: string; projectName: string };
   PlanViewer: { planId: string; planName: string; protocolId?: string; annotationId?: string; locationId?: string };
+  Measurement: { planId: string; planName: string };
   AnnotationComments: { projectId: string; projectName: string };
 
   // ── Creador ────────────────────────────────────────────────────────────────

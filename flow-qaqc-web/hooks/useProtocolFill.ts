@@ -26,12 +26,12 @@ export function useProtocolFill(protocolId: string) {
         .single();
       if (protoErr) throw protoErr;
 
-      // 2. Items (ordenados)
+      // 2. Items (ordenados por created_at como hace el APK)
       const { data: items, error: itemsErr } = await supabase
         .from('protocol_items')
         .select('*')
         .eq('protocol_id', protocolId)
-        .order('sort_order', { ascending: true });
+        .order('created_at', { ascending: true });
       if (itemsErr) throw itemsErr;
 
       // 3. Evidencias de todos los items
@@ -90,16 +90,25 @@ export function useSaveItemAnswer(protocolId: string) {
   return useMutation({
     mutationFn: async ({
       itemId,
-      status,
-      observations,
+      isCompliant,
+      isNa,
+      comments,
     }: {
       itemId: string;
-      status: 'PENDING' | 'OK' | 'OBSERVED' | 'NOK';
-      observations?: string | null;
+      isCompliant: boolean | null;
+      isNa: boolean;
+      comments?: string | null;
     }) => {
+      const hasAnswer = isNa || isCompliant !== null;
       const { error } = await supabase
         .from('protocol_items')
-        .update({ status, observations: observations ?? null, updated_at: new Date().toISOString() })
+        .update({
+          is_compliant: isNa ? false : (isCompliant ?? false),
+          is_na: isNa,
+          has_answer: hasAnswer,
+          ...(comments !== undefined ? { comments: comments ?? null } : {}),
+          updated_at: Date.now(),
+        })
         .eq('id', itemId);
       if (error) throw error;
     },
@@ -107,12 +116,12 @@ export function useSaveItemAnswer(protocolId: string) {
   });
 }
 
-// ── Guardar observación (debounced desde el componente) ───────────────────────
+// ── Guardar comentario (debounced desde el componente) ────────────────────────
 
-export async function saveItemObservation(itemId: string, text: string): Promise<void> {
+export async function saveItemComment(itemId: string, text: string): Promise<void> {
   await supabase
     .from('protocol_items')
-    .update({ observations: text.trim() || null, updated_at: new Date().toISOString() })
+    .update({ comments: text.trim() || null, updated_at: Date.now() })
     .eq('id', itemId);
 }
 
@@ -128,12 +137,17 @@ export function useSaveEvidence(protocolId: string) {
       itemId: string;
       s3Key: string;
     }): Promise<Evidence> => {
+      const now = Date.now();
       const { data, error } = await supabase
         .from('evidences')
         .insert({
+          id: crypto.randomUUID(),
           protocol_item_id: itemId,
-          s3_key: s3Key,
-          file_name: s3Key.split('/').pop() ?? 'photo.jpg',
+          s3_url_placeholder: s3Key,
+          local_uri: '',
+          upload_status: 'SYNCED',
+          created_at: now,
+          updated_at: now,
         })
         .select()
         .single();
@@ -157,6 +171,30 @@ export function useDeleteEvidence(protocolId: string) {
   });
 }
 
+// ── Re-enviar protocolo a revisión (tras edición del jefe) ───────────────────
+
+export function useResubmitProtocol(protocolId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from('protocols')
+        .update({
+          status: 'SUBMITTED',
+          submitted_at: Date.now(),
+          updated_at: Date.now(),
+        })
+        .eq('id', protocolId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['protocol-fill', protocolId] });
+      qc.invalidateQueries({ queryKey: ['location-protocols'] });
+      qc.invalidateQueries({ queryKey: ['location-progress'] });
+    },
+  });
+}
+
 // ── Enviar protocolo para aprobación ─────────────────────────────────────────
 
 export function useSubmitProtocol(protocolId: string) {
@@ -166,9 +204,11 @@ export function useSubmitProtocol(protocolId: string) {
       const { error } = await supabase
         .from('protocols')
         .update({
-          status: 'IN_PROGRESS',
-          created_by_id: filledById,
-          updated_at: new Date().toISOString(),
+          status: 'SUBMITTED',
+          filled_by_id: filledById,
+          filled_at: Date.now(),
+          submitted_at: Date.now(),
+          updated_at: Date.now(),
         })
         .eq('id', protocolId);
       if (error) throw error;

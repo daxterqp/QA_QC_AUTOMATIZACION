@@ -8,7 +8,8 @@
  * una política CORS en el bucket S3 (el usuario lo hace en AWS Console).
  */
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const REGION = process.env.NEXT_PUBLIC_AWS_REGION!;
 const BUCKET = process.env.NEXT_PUBLIC_AWS_BUCKET!;
@@ -50,15 +51,37 @@ export async function uploadBlobToS3(
   return s3Key;
 }
 
+/**
+ * Genera una URL firmada (presigned) para leer un objeto S3 privado.
+ * Expira en 1 hora por defecto.
+ */
+export async function getS3PresignedUrl(s3Key: string, expiresInSeconds = 3600): Promise<string> {
+  const client = getS3Client();
+  const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: s3Key });
+  return getSignedUrl(client, cmd, { expiresIn: expiresInSeconds });
+}
+
 /** Sanitiza un texto para uso seguro en nombre de archivo S3 */
 export function sanitizeSegment(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 60);
+}
+
+/** Sanitiza preservando mayúsculas (para nombres de archivo como fotos) */
+export function sanitizeFilename(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '')
-    .slice(0, 60);
+    .slice(0, 80);
 }
 
 export function seq(n: number): string {

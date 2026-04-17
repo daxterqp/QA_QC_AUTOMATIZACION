@@ -12,7 +12,7 @@ import { useAuth } from '@context/AuthContext';
 type Props = NativeStackScreenProps<RootStackParamList, 'ChangePassword'>;
 
 export default function ChangePasswordScreen({ navigation }: Props) {
-  const { currentUser, changePassword, isDemo } = useAuth();
+  const { currentUser, changePassword, deleteAccount, isDemo } = useAuth();
   const [current, setCurrent] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -113,8 +113,36 @@ export default function ChangePasswordScreen({ navigation }: Props) {
             disabled={!canSave || loading}
           >
             <Text style={styles.btnText}>
-              {loading ? 'Guardando...' : 'GUARDAR CONTRASENA'}
+              {loading ? 'Guardando...' : 'GUARDAR CONTRASEÑA'}
             </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Eliminar cuenta */}
+        <View style={styles.dangerCard}>
+          <Text style={styles.dangerTitle}>Eliminar mi cuenta</Text>
+          <Text style={styles.dangerDesc}>
+            Se eliminará tu cuenta, firma, accesos a proyectos y token de notificaciones. Esta acción no se puede deshacer.
+          </Text>
+          <TouchableOpacity
+            style={styles.dangerBtn}
+            onPress={() => {
+              Alert.alert(
+                'Eliminar cuenta',
+                '¿Estás seguro? Se eliminarán todos tus datos personales. Los protocolos y observaciones que creaste se mantendrán como registro del proyecto.',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Eliminar', style: 'destructive',
+                    onPress: async () => {
+                      await deleteAccount();
+                    },
+                  },
+                ],
+              );
+            }}
+          >
+            <Text style={styles.dangerBtnText}>ELIMINAR MI CUENTA</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -150,4 +178,16 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { backgroundColor: Colors.light },
   btnText: { color: Colors.white, fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
+  dangerCard: {
+    backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, gap: 10,
+    borderWidth: 1, borderColor: '#fecaca',
+    ...Shadow.card,
+  },
+  dangerTitle: { fontSize: 13, fontWeight: '700', color: Colors.danger },
+  dangerDesc: { fontSize: 11, color: Colors.textSecondary, lineHeight: 16 },
+  dangerBtn: {
+    backgroundColor: Colors.danger, borderRadius: Radius.md,
+    padding: 14, alignItems: 'center', marginTop: 4,
+  },
+  dangerBtnText: { color: Colors.white, fontSize: 12, fontWeight: '700', letterSpacing: 1.5 },
 });

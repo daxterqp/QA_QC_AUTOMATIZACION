@@ -10,7 +10,7 @@
  *   - Protocolo aprobado       → todos los usuarios del proyecto
  */
 
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import { supabase } from '@config/supabase';
 
 // Carga segura — módulo nativo puede no estar disponible en builds anteriores
@@ -60,15 +60,26 @@ export async function registerPushToken(userId: string): Promise<void> {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
     if (existing !== 'granted') {
+      // Show rationale before requesting (required by Android 13+ / Play Store)
+      if (Platform.OS === 'android') {
+        await new Promise<void>((resolve) => {
+          Alert.alert(
+            'Notificaciones',
+            'Flow QA/QC envía notificaciones cuando se crean observaciones, se envían protocolos o se aprueban/rechazan. ¿Deseas activarlas?',
+            [
+              { text: 'No, gracias', onPress: () => resolve() },
+              { text: 'Activar', onPress: () => resolve() },
+            ],
+          );
+        });
+      }
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
     if (finalStatus !== 'granted') return;
 
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: 'scua-qaqc',
-    });
-    const token = tokenData.data;
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    const token = tokenData.data as string;
 
     await supabase.from('push_tokens').upsert(
       { user_id: userId, token, platform: Platform.OS, updated_at: new Date().toISOString() },
@@ -84,8 +95,8 @@ export async function unregisterPushToken(userId: string): Promise<void> {
   if (!Notifications || !Device) return;
   try {
     if (!Device.isDevice) return;
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId: 'scua-qaqc' });
-    await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', tokenData.data);
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', tokenData.data as string);
   } catch { /* sin token registrado */ }
 }
 
@@ -96,6 +107,7 @@ interface NotifPayload {
   body: string;
   data: Record<string, unknown>;
   recipientFilter: 'all' | 'jefe' | string[];
+  collapseKey?: string; // Same key = newer notification replaces older on device
 }
 
 async function sendNotification(payload: NotifPayload): Promise<void> {
@@ -117,11 +129,13 @@ async function sendNotification(payload: NotifPayload): Promise<void> {
 export function notifyNewAnnotation(
   projectId: string,
   projectName: string,
-  locationRef: string,
+  locationOnly: string | null,
+  specialty: string | null,
   comment: string | null
 ): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
   sendNotification({
-    title: `Nueva observación · ${locationRef}`,
+    title: `Obs · ${loc || 'Nueva observación'}`,
     body: comment ? comment.substring(0, 120) : 'Se agregó una nueva viñeta.',
     data: { screen: 'AnnotationComments', projectId, projectName },
     recipientFilter: 'all',
@@ -134,11 +148,13 @@ export function notifyNewAnnotation(
 export function notifyNewReply(
   projectId: string,
   projectName: string,
-  locationRef: string,
+  locationOnly: string | null,
+  specialty: string | null,
   content: string | null
 ): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
   sendNotification({
-    title: `Respuesta · ${locationRef}`,
+    title: `Respuesta · ${loc || 'Observación'}`,
     body: content ? content.substring(0, 120) : 'Se agregó una respuesta.',
     data: { screen: 'AnnotationComments', projectId, projectName },
     recipientFilter: 'all',
@@ -146,35 +162,85 @@ export function notifyNewReply(
 }
 
 /**
- * Protocolo enviado para revisión (notifica a jefeS y creadores).
+ * Observación cerrada/levantada.
+ */
+export function notifyAnnotationClosed(
+  projectId: string,
+  projectName: string,
+  locationOnly: string | null,
+  specialty: string | null,
+): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
+  sendNotification({
+    title: `Obs levantada · ${loc || 'Observación'}`,
+    body: 'La observación fue marcada como completada.',
+    data: { screen: 'AnnotationComments', projectId, projectName },
+    recipientFilter: 'all',
+  }).catch(() => {});
+}
+
+/**
+ * Protocolo enviado para revisión (notifica a jefes y creadores).
+ * collapseKey = protocolId → la notificación más nueva reemplaza la anterior.
  */
 export function notifyProtocolSubmitted(
   projectId: string,
   projectName: string,
-  locationRef: string,
-  protocolNumber: string
+  locationOnly: string | null,
+  specialty: string | null,
+  protocolName: string,
+  protocolId?: string,
 ): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
   sendNotification({
-    title: `Protocolo enviado · ${protocolNumber}`,
-    body: `${locationRef} — listo para revisión.`,
+    title: protocolName,
+    body: loc ? `${loc} · Listo para revisión` : 'Listo para revisión',
     data: { screen: 'Dossier', projectId, projectName },
     recipientFilter: 'jefe',
+    collapseKey: protocolId ? `proto_${protocolId}` : undefined,
   }).catch(() => {});
 }
 
 /**
  * Protocolo aprobado (notifica a todos).
+ * collapseKey = protocolId → reemplaza notificación previa del mismo protocolo.
  */
 export function notifyProtocolApproved(
   projectId: string,
   projectName: string,
-  locationRef: string,
-  protocolNumber: string
+  locationOnly: string | null,
+  specialty: string | null,
+  protocolName: string,
+  protocolId?: string,
 ): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
   sendNotification({
-    title: `Protocolo aprobado · ${protocolNumber}`,
-    body: `${locationRef} fue aprobado y firmado.`,
+    title: protocolName,
+    body: loc ? `${loc} · Aprobado y firmado` : 'Aprobado y firmado',
     data: { screen: 'Dossier', projectId, projectName },
     recipientFilter: 'all',
+    collapseKey: protocolId ? `proto_${protocolId}` : undefined,
+  }).catch(() => {});
+}
+
+/**
+ * Protocolo rechazado (notifica a todos).
+ * collapseKey = protocolId → reemplaza notificación previa del mismo protocolo.
+ */
+export function notifyProtocolRejected(
+  projectId: string,
+  projectName: string,
+  locationOnly: string | null,
+  specialty: string | null,
+  protocolName: string,
+  protocolId?: string,
+): void {
+  const loc = [locationOnly, specialty].filter(Boolean).join(' · ');
+  sendNotification({
+    title: protocolName,
+    body: loc ? `${loc} · Rechazado` : 'Rechazado',
+    data: { screen: 'Dossier', projectId, projectName },
+    recipientFilter: 'all',
+    collapseKey: protocolId ? `proto_${protocolId}` : undefined,
   }).catch(() => {});
 }

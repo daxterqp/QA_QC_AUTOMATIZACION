@@ -688,7 +688,7 @@ export default function InfografiaPage() {
         <div class="func-icon">📋</div>
         <div class="func-num">06</div>
       </div>
-      <div class="func-title">Dossier de Calidad Automatizado</div>
+      <div class="func-title">Dosier de Calidad Automatizado</div>
       <div class="func-desc">Generación automática del expediente de cierre. Toda la documentación QA/QC consolidada, <strong>lista para valorización</strong>, sin retrabajos administrativos al final de obra.</div>
       <div class="func-tag">Cierre Documental</div>
     </div>

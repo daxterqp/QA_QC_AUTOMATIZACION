@@ -105,7 +105,7 @@ export function useUpdateDashboardNote(projectId: string) {
     mutationFn: async ({ noteId, text }: { noteId: string; text: string }) => {
       const { error } = await supabase
         .from('dashboard_notes')
-        .update({ text: text.trim(), updated_at: new Date().toISOString() })
+        .update({ text: text.trim(), updated_at: Date.now() })
         .eq('id', noteId);
       if (error) throw error;
     },
@@ -130,9 +130,11 @@ export function useUsersMap() {
   return useQuery({
     queryKey: ['users-map'],
     queryFn: async (): Promise<Record<string, string>> => {
-      const { data } = await supabase.from('users').select('id, full_name');
+      const { data } = await supabase.from('users').select('id, name, apellido');
       const map: Record<string, string> = {};
-      for (const u of data ?? []) map[u.id] = u.full_name;
+      for (const u of (data ?? []) as { id: string; name: string; apellido?: string | null }[]) {
+        map[u.id] = [u.name, u.apellido].filter(Boolean).join(' ');
+      }
       return map;
     },
     staleTime: 5 * 60 * 1000,

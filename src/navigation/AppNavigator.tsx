@@ -37,6 +37,7 @@ import HistoricalScreen from '@screens/HistoricalScreen';
 import AnnotationCommentsScreen from '@screens/AnnotationCommentsScreen';
 import DossierPreviewScreen from '@screens/DossierPreviewScreen';
 import PhoneContactsScreen from '@screens/PhoneContactsScreen';
+import MeasurementScreen from '@screens/MeasurementScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -103,6 +104,7 @@ export default function AppNavigator() {
               <Stack.Screen name="PlansManagement" component={PlansManagementScreenWrapper} />
               <Stack.Screen name="FileUpload" component={FileUploadScreen} />
               <Stack.Screen name="PlanViewer" component={PlanViewerScreen} />
+              <Stack.Screen name="Measurement" component={MeasurementScreen} />
               <Stack.Screen name="AnnotationComments" component={AnnotationCommentsScreen} />
               <Stack.Screen name="DossierPreview" component={DossierPreviewScreen} />
               <Stack.Screen name="PhoneContacts" component={PhoneContactsScreen} />
@@ -182,7 +184,10 @@ function DossierScreenWrapper({
       projectId={route.params.projectId}
       projectName={route.params.projectName}
       onBack={() => navigation.goBack()}
-      onOpenProtocol={(protocolId) => navigation.navigate('ProtocolAudit', { protocolId })}
+      onOpenProtocol={(protocolId, status) => navigation.navigate(
+        status === 'REJECTED' ? 'ProtocolFill' : 'ProtocolAudit',
+        { protocolId }
+      )}
       onPreviewPdf={(pdfUri) => navigation.navigate('DossierPreview', { pdfUri, projectName: route.params.projectName })}
     />
   );

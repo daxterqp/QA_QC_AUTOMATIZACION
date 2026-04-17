@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(adb disconnect 192.168.100.6:41847)",
+      "Bash(adb disconnect)",
+      "Bash(adb connect 192.168.100.6:41847)"
+    ]
+  }
+}

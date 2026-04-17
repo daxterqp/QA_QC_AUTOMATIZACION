@@ -23,6 +23,7 @@ interface AuthContextValue {
   loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -181,8 +182,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    if (!currentUser || isDemo) return;
+    const userId = currentUser.id;
+    // 1. Remove push token
+    unregisterPushToken(userId).catch(() => {});
+    // 2. Delete from Supabase: user_project_access, push_tokens, user record
+    await supabase.from('push_tokens').delete().eq('user_id', userId);
+    await supabase.from('user_project_access').delete().eq('user_id', userId);
+    await supabase.from('users').delete().eq('id', userId);
+    // 3. Delete local user record
+    try {
+      const user = await usersCollection.find(userId);
+      await database.write(async () => { await user.destroyPermanently(); });
+    } catch { /* already gone */ }
+    // 4. Clear session
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    setCurrentUser(null);
+  }, [currentUser, isDemo]);
+
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

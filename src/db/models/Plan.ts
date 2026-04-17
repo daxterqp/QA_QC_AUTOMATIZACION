@@ -12,6 +12,9 @@ export default class Plan extends Model {
   @field('location_id') locationId!: string | null;
   @field('name') name!: string;
   @field('file_uri') fileUri!: string;
+  @field('s3_key') s3Key!: string | null;
+  @field('s3_etag') s3Etag!: string | null;
+  @field('local_etag') localEtag!: string | null;
   @field('uploaded_by_id') uploadedById!: string;
 
   @children('plan_annotations') annotations!: PlanAnnotation[];

@@ -1,7 +1,7 @@
 // ─── Tipos centrales de S-CUA Web ────────────────────────────────────────────
 // Mapeados 1:1 con las tablas de Supabase (y los modelos WatermelonDB del APK)
 
-export type UserRole = 'CREATOR' | 'RESIDENT' | 'INSPECTOR' | 'VIEWER';
+export type UserRole = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR';
 
 export interface User {
   id: string;
@@ -18,7 +18,9 @@ export interface User {
 export interface Project {
   id: string;
   name: string;
-  description: string | null;
+  status: string;
+  password: string | null;
+  created_by_id: string | null;
   logo_s3_key: string | null;
   stamp_comment: string | null;
   created_at: string;
@@ -64,7 +66,7 @@ export interface ProtocolTemplateItem {
   updated_at: string;
 }
 
-export type ProtocolStatus = 'PENDING' | 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'OBSERVED';
+export type ProtocolStatus = 'DRAFT' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 
 export interface Protocol {
   id: string;
@@ -72,28 +74,32 @@ export interface Protocol {
   location_id: string | null;
   template_id: string | null;
   protocol_number: string | null;
+  location_reference: string | null;
   status: ProtocolStatus;
-  observations: string | null;
+  rejection_reason: string | null;
   signed_by_id: string | null;
   signed_at: string | null;
-  created_by_id: string | null;
+  filled_by_id: string | null;
+  filled_at: string | null;
+  submitted_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type ItemStatus = 'PENDING' | 'OK' | 'OBSERVED' | 'NOK';
-
 export interface ProtocolItem {
   id: string;
   protocol_id: string;
-  template_item_id: string | null;
   partida_item: string | null;
   item_description: string;
   validation_method: string | null;
   section: string | null;
-  status: ItemStatus;
-  observations: string | null;
-  sort_order: number;
+  /** true = Sí cumple, false = No cumple, null = sin respuesta */
+  is_compliant: boolean | null;
+  /** true = No Aplica */
+  is_na: boolean;
+  /** true = ítem fue respondido */
+  has_answer: boolean;
+  comments: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -101,11 +107,13 @@ export interface ProtocolItem {
 export interface Evidence {
   id: string;
   protocol_item_id: string;
-  local_uri: string | null;
+  local_uri: string;
   s3_key: string | null;
-  file_name: string | null;
-  created_at: string;
-  updated_at: string;
+  s3_url_placeholder?: string | null;
+  file_name?: string | null;
+  upload_status: string;
+  created_at: string | number;
+  updated_at: string | number;
 }
 
 export interface NonConformity {
@@ -120,9 +128,11 @@ export interface NonConformity {
 export interface Plan {
   id: string;
   project_id: string;
+  location_id: string | null;
   name: string;
   s3_key: string | null;
   file_type: string | null;
+  s3_etag: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -130,13 +140,26 @@ export interface Plan {
 export interface PlanAnnotation {
   id: string;
   plan_id: string;
+  protocol_id: string | null;
   created_by_id: string | null;
-  annotation_data: string | null;
-  x: number;
-  y: number;
-  label: string | null;
-  color: string | null;
+  rect_x: number;
+  rect_y: number;
+  rect_width: number;
+  rect_height: number;
+  comment: string | null;
+  sequence_number: number;
+  is_ok: boolean;
   status: string | null;
+  page: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnnotationCommentPhoto {
+  id: string;
+  annotation_comment_id: string;
+  local_uri: string;
+  storage_path: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -144,8 +167,10 @@ export interface PlanAnnotation {
 export interface AnnotationComment {
   id: string;
   annotation_id: string;
-  user_id: string | null;
-  text: string;
+  author_id: string | null;
+  content: string | null;
+  read_by_creator: boolean;
+  photos?: AnnotationCommentPhoto[];
   created_at: string;
   updated_at: string;
 }

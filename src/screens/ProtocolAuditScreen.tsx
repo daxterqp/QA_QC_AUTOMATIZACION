@@ -9,6 +9,7 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { applyPhotoStamps } from '@services/PhotoStampService';
 import { getProjectSettings } from '@services/ProjectSettings';
+import { downloadFromS3, s3FileExists } from '@services/S3Service';
 import { uploadExtraPhoto } from '@services/S3PhotoService';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -26,7 +27,8 @@ import type Evidence from '@models/Evidence';
 import type Plan from '@models/Plan';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { notifyProtocolApproved } from '@services/NotificationService';
+import { notifyProtocolApproved, notifyProtocolRejected } from '@services/NotificationService';
+import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import AppHeader from '@components/AppHeader';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProtocolAudit'>;
@@ -83,7 +85,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
 
-      // Estampar fecha/hora/logo
+      // Estampar fecha/hora/logo/comentario
       const projectId = (protocol as any).projectId ?? '';
       const settings = await getProjectSettings(projectId);
       const destDir = `${FileSystem.documentDirectory}extra_photos/`;
@@ -91,7 +93,29 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
       const destUri = `${destDir}${protocolId}_${Date.now()}.jpg`;
       await FileSystem.copyAsync({ from: asset.uri, to: destUri });
 
-      const stamped = await applyPhotoStamps(destUri, settings.stampEnabled ? settings.stampPhotoUri : null);
+      // Load logo: try local cache, then download from S3 (same as CameraScreen)
+      let logoUri = settings.stampPhotoUri;
+      if (!logoUri && settings.stampEnabled) {
+        const s3Key = `logos/project_${projectId}/logo.jpg`;
+        const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+        try {
+          const exists = await s3FileExists(s3Key);
+          if (exists) { await downloadFromS3(s3Key, localUri); logoUri = localUri; }
+        } catch { /* logo optional */ }
+      }
+
+      // Load shared comment from WatermelonDB project model
+      let stampComment = settings.stampComment;
+      try {
+        const proj = await database.get<any>('projects').find(projectId);
+        if (proj?.stampComment) stampComment = proj.stampComment;
+      } catch { /* fallback to local */ }
+
+      const stamped = await applyPhotoStamps(
+        destUri,
+        settings.stampEnabled ? logoUri : null,
+        settings.stampEnabled ? stampComment : null,
+      );
 
       const updated = [...extraPhotos, stamped];
       setExtraPhotos(updated);
@@ -159,9 +183,10 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
               (p as any).signedAt = Date.now();
             });
           });
-          const locRef = (protocol as any).locationReference ?? '';
-          const protNum = (protocol as any).protocolNumber ?? '';
-          notifyProtocolApproved((protocol as any).projectId ?? '', '', locRef, protNum);
+          const locOnly = (location as any)?.locationOnly ?? null;
+          const spec = (location as any)?.specialty ?? null;
+          const protName = (protocol as any).protocolNumber ?? '';
+          notifyProtocolApproved((protocol as any).projectId ?? '', '', locOnly, spec, protName, protocol!.id);
           setSaving(false);
           Alert.alert('Aprobado', 'El protocolo fue aprobado y firmado.', [
             { text: 'OK', onPress: () => navigation.goBack() },
@@ -185,6 +210,11 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         p.rejectionReason = rejectReason.trim();
       });
     });
+    const locOnly = (location as any)?.locationOnly ?? null;
+    const spec = (location as any)?.specialty ?? null;
+    const protName = (protocol as any).protocolNumber ?? '';
+    notifyProtocolRejected((protocol as any).projectId ?? '', '', locOnly, spec, protName, protocol!.id);
+    pushProjectToSupabase((protocol as any).projectId).catch(() => {});
     setSaving(false);
     setRejectReason('');
     navigation.goBack();

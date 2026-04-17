@@ -1,0 +1,374 @@
+================================================================================
+  Flow-QA/QC — SISTEMA DE CONTROL Y ASEGURAMIENTO DE CALIDAD
+  DESCRIPCIÓN COMPLETA DEL FLUJO DE USO
+  Generado: 24/03/2026
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+1. RESUMEN DEL SISTEMA
+────────────────────────────────────────────────────────────────────────────────
+
+Flow-QA/QC es una aplicación móvil React Native de control de calidad en construcción.
+Permite registrar protocolos de inspección en campo, anotar planos PDF, gestionar
+evidencia fotográfica y exportar dosiers PDF completos.
+
+Arquitectura:
+  - WatermelonDB  → Base de datos local (modo offline-first)
+  - Supabase      → Backend en la nube (sincronización + autenticación)
+  - AWS S3        → Almacenamiento de archivos (PDFs, fotos)
+  - Expo Push     → Notificaciones en tiempo real
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. ROLES DE USUARIO
+────────────────────────────────────────────────────────────────────────────────
+
+  CREATOR (Administrador)
+    → Crear y cerrar proyectos
+    → Gestionar usuarios (crear, resetear contraseña, eliminar)
+    → Ver todos los proyectos del sistema
+    → Aprobar/rechazar protocolos
+    → Exportar dosiers PDF
+    → Acceso total a todas las funciones
+
+  RESIDENT (Jefe de Obra / Residente)
+    → Crear proyectos propios
+    → Importar Excel de protocolos y ubicaciones
+    → Cargar y gestionar planos PDF
+    → Ver, aprobar y rechazar protocolos enviados
+    → Exportar dosiers PDF
+    → Ver y gestionar observaciones en planos
+
+  SUPERVISOR (Inspector / QC)
+    → Llenar protocolos en campo (responder items Sí/No/N/A)
+    → Adjuntar fotos de evidencia a items
+    → Crear anotaciones y comentarios en planos
+    → Enviar protocolos para auditoría
+    → Ver dosier en modo lectura
+
+  OPERATOR (Otros)
+    → Acceso de lectura
+    → Funciones limitadas según proyecto
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. FLUJO COMPLETO DE USO (END-TO-END)
+────────────────────────────────────────────────────────────────────────────────
+
+  FASE 1 — CONFIGURACIÓN DEL PROYECTO (RESIDENT / CREATOR)
+  ──────────────────────────────────────────────────────────
+
+  Paso 1. Login
+    - Usuario ingresa nombre y contraseña
+    - Primera contraseña = nombre del usuario (debe cambiar al primer ingreso)
+    - Sistema busca usuario primero en BD local, luego en Supabase
+    - Sesión se guarda en AsyncStorage
+
+  Paso 2. Crear proyecto
+    - RESIDENT / CREATOR toca "Nuevo Proyecto"
+    - Ingresa nombre del proyecto + contraseña de acceso
+    - El proyecto queda en estado ACTIVE
+
+  Paso 3. Importar plantillas de protocolos (Excel)
+    - Selecciona archivo .xlsx con columnas:
+        · Protocolo (ID único: "1", "C1", etc.)
+        · Protocolo Nombre ("Hormigón", etc.)
+        · Partida/Item (código, ej: "C1-P1")
+        · Actividad/Item (descripción larga del item a verificar)
+        · Método de Validación ("In Situ", "Nivel", etc.)
+        · Sección (opcional, agrupa visualmente los items)
+    - Sistema crea protocol_templates y protocol_template_items en BD local
+    - Sincroniza a Supabase en background
+
+  Paso 4. Importar ubicaciones (Excel)
+    - Selecciona archivo .xlsx con columnas:
+        · Ubicación (nombre: "P1-Sector1-Cimiento")
+        · Plano de Referencia (nombre(s) del PDF vinculado)
+        · Especialidad ("Hormigón", "Carpintería", etc.)
+        · template_ids (IDs de protocolos que aplican: "1,2,3")
+    - Sistema crea locations con nombre, especialidad y plantillas asignadas
+    - Si ya existe una ubicación con el mismo nombre → la omite (no duplica)
+    - Sincroniza a Supabase en background
+
+  Paso 5. Cargar planos PDF
+    - Selecciona archivos PDF desde el dispositivo
+    - Sistema vincula cada PDF a ubicaciones que lo referencian por nombre
+    - Sube PDF a S3: bucket/projects/{projectId}/plans/{fileName}
+    - Crea registros plans en BD local por cada ubicación vinculada
+
+  Paso 6. Compartir acceso al proyecto
+    - Comparte nombre del proyecto + contraseña con supervisores
+    - Cada supervisor entra a la app → busca proyecto → ingresa contraseña
+    - Sistema crea user_project_access → supervisor ya puede trabajar en él
+
+
+  FASE 2 — INSPECCIÓN EN CAMPO (SUPERVISOR)
+  ──────────────────────────────────────────
+
+  Paso 7. Seleccionar ubicación
+    - Supervisor ve lista de ubicaciones del proyecto
+    - Puede filtrar por nombre, location_only (sector) y especialidad
+    - Badge muestra progreso: "protocolos aprobados / total asignados" (ej: 2/4)
+
+  Paso 8. Seleccionar protocolo a llenar
+    - Toca una ubicación → ve lista de plantillas asignadas a ella
+    - Cada fila muestra el nombre del protocolo + estado actual:
+        · Sin iniciar (vacío)
+        · DRAFT / IN_PROGRESS → Pendiente (naranja)
+        · SUBMITTED → Enviado (azul)
+        · APPROVED → Aprobado (verde)
+        · REJECTED → Rechazado (rojo)
+    - Si el protocolo no existe aún → toca la plantilla para iniciarlo
+    - Sistema crea instancia en protocols + copia todos los items de la plantilla
+
+  Paso 9. Llenar el protocolo
+    - Para cada item del protocolo el inspector responde:
+        · SÍ  (verde)   → Item cumple
+        · NO  (rojo)    → Item no cumple
+        · N/A (naranja) → No aplica
+    - Puede agregar un comentario de texto libre a cada item (auto-guardado)
+    - Puede adjuntar fotos de evidencia por item:
+        · Toca ícono de cámara → abre CameraScreen
+        · Captura foto → se aplica stamp (logo + fecha + usuario + firma)
+        · Foto se comprime y sube a S3 en background
+    - Puede cambiar la ubicación asociada al protocolo desde un buscador
+    - Puede ver los planos vinculados a la ubicación desde botón "Planos"
+
+  Paso 10. Ver planos y anotar
+    - Abre PlanViewerScreen con PDF del plano
+    - Puede navegar entre páginas con flechas
+    - Puede cambiar entre planos vinculados (dropdown con cooldown 5s)
+    - Cooldown de 5s también al entrar por primera vez
+    - Puede hacer zoom: 1x / 1.5x / 2x / 3x
+    - Para crear una anotación:
+        · Activa modo dibujo
+        · Arrastra para dibujar un rectángulo sobre el área del plano
+        · Escribe comentario + opcionalmente adjunta foto
+        · La anotación queda marcada con número secuencial (1, 2, 3...)
+        · Color rojo = no cumple / verde = cumple
+    - Puede responder anotaciones existentes (hilo de comentarios)
+    - Puede deshacer última anotación creada
+
+  Paso 11. Enviar protocolo para auditoría
+    - Validación previa: todos los items deben tener respuesta (Sí/No/N/A)
+    - Status cambia: DRAFT → SUBMITTED
+    - Registra fecha/hora de envío y usuario que envió
+    - Envía notificación push al jefe del proyecto
+    - Sincroniza todo a Supabase en background
+
+
+  FASE 3 — AUDITORÍA (RESIDENT / CREATOR)
+  ─────────────────────────────────────────
+
+  Paso 12. Revisar protocolos enviados desde el Dosier
+    - DossierScreen lista todos los protocolos enviados, ordenados por fecha
+    - Para cada protocolo muestra:
+        · Número de protocolo y ubicación
+        · Estado actual con color
+        · Usuario que lo envió
+        · % de conformidad (items Sí / total items respondidos)
+    - Puede abrir protocolo completo para revisión detallada
+
+  Paso 13. Auditar protocolo (ProtocolAuditScreen)
+    - Ve todos los items con sus respuestas, comentarios y fotos de evidencia
+    - Condición para APROBAR: todos los items deben ser Sí o N/A (ningún No)
+    - Si hay algún No → solo puede RECHAZAR
+
+    APROBAR:
+        · Toca "Aprobar y Firmar" (botón outlined verde, solo si puede aprobar)
+        · Status → APPROVED
+        · Protocolo queda bloqueado (is_locked = true)
+        · Registra quién firmó y cuándo
+        · Notificación push al inspector
+
+    RECHAZAR:
+        · Toca "Rechazar" (botón outlined rojo, siempre visible)
+        · Ingresa motivo del rechazo
+        · Status → REJECTED, corrections_allowed = true
+        · Notificación push al inspector
+        · Inspector puede volver a editar el protocolo y reenviarlo
+
+  Paso 14. Inspector corrige y reenvía
+    - Inspector ve protocolo con estado RECHAZADO + motivo
+    - Puede editar respuestas y agregar nuevas evidencias
+    - Reenvía → status vuelve a SUBMITTED
+    - Ciclo se repite hasta aprobación
+
+
+  FASE 4 — CIERRE Y REPORTE (RESIDENT / CREATOR)
+  ─────────────────────────────────────────────────
+
+  Paso 15. Exportar Dosier PDF
+    - Desde DossierScreen → botón "Exportar Dossier"
+    - Genera PDF completo con:
+        · Portada: logo, nombre del proyecto, fecha, usuario
+        · Estadísticas generales del proyecto
+        · Índice / resumen de todos los protocolos
+        · Detalle de cada protocolo:
+            - Items con respuesta (Sí/No/N/A)
+            - Comentarios por item
+            - Fotos de evidencia con stamp
+            - Columna "Obs. levantada" para comentarios
+        · Pie de página global con "Página X de Y"
+    - Comparte vía sistema del dispositivo (email, WhatsApp, Google Drive, etc.)
+    - El archivo se guarda como DOSSIER-{proyecto}-{fecha}.pdf
+
+  Paso 16. Cerrar proyecto (CREATOR)
+    - Desde gestión de proyectos → marcar como CLOSED
+    - Proyecto queda en modo solo-lectura
+    - Datos no se eliminan, accesibles para consulta histórica
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. FUNCIONALIDADES ADICIONALES
+────────────────────────────────────────────────────────────────────────────────
+
+  OBSERVACIONES (AnnotationCommentsScreen)
+    - Accesible desde la lista de proyectos con badge de "no leídas"
+    - Lista todas las anotaciones del proyecto más recientes primero
+    - Muestra comentario inicial + última respuesta + fotos
+    - Al tocar → abre el plano en la posición exacta de la anotación
+
+  DASHBOARD HISTÓRICO (HistoricalScreen)
+    - Selector de rango de fechas con calendario desplegable
+    - Agrupa protocolos por semana
+    - Métricas: enviados, aprobados, rechazados, % cumplimiento
+    - Anotaciones abiertas vs cerradas
+    - Notas del proyecto (texto libre por usuario)
+
+  NO CONFORMIDADES (NonConformityScreen)
+    - Registro formal de incumplimientos detectados en auditoría
+    - Vinculados a un protocolo específico
+    - Estados: OPEN / RESOLVED
+
+  GESTIÓN DE USUARIOS (UserManagementScreen) — Solo CREATOR
+    - Importar usuarios desde Excel (Name, Apellido, Role)
+    - Primera contraseña = nombre del usuario
+    - Resetear contraseña (vuelve al nombre)
+    - Eliminar usuario
+
+  CAMBIAR CONTRASEÑA (ChangePasswordScreen)
+    - Disponible para todos los usuarios
+    - Valida contraseña actual antes de cambiar
+    - Actualiza en BD local + sincroniza a Supabase
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. PANTALLAS DE LA APLICACIÓN (LISTADO COMPLETO)
+────────────────────────────────────────────────────────────────────────────────
+
+  LoginScreen              → Autenticación de usuario
+  ProjectListScreen        → Lista de proyectos con acceso + crear/unirse
+  LocationListScreen       → Ubicaciones de un proyecto con filtros y progreso
+  LocationProtocolsScreen  → Protocolos asignados a una ubicación
+  ProtocolFillScreen       → Llenar protocolo en campo (inspector)
+  ProtocolAuditScreen      → Revisar y aprobar/rechazar protocolo (jefe)
+  PlanViewerScreen         → Visualizar PDF + anotar + comentar
+  AnnotationCommentsScreen → Resumen de observaciones del proyecto
+  DossierScreen            → Vista consolidada + aprobación + exportar PDF
+  HistoricalScreen         → Dashboard de métricas históricas
+  PlansManagementScreen    → Cargar y gestionar planos PDF
+  ExcelImportScreen        → Importar plantillas de protocolos desde Excel
+  LocationsImportScreen    → Importar ubicaciones desde Excel
+  NonConformityScreen      → Registrar no conformidades
+  UserManagementScreen     → Gestión de usuarios (solo CREATOR)
+  ChangePasswordScreen     → Cambiar contraseña propia
+  CameraScreen             → Captura de fotos con stamp
+  FileUploadScreen         → Carga de archivos al proyecto
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. ESTRUCTURA DE DATOS PRINCIPAL
+────────────────────────────────────────────────────────────────────────────────
+
+  users
+    name, apellido, role, password, pin, signature_uri
+
+  projects
+    name, status (ACTIVE|CLOSED), password, created_by_id
+
+  user_project_access
+    user_id, project_id
+
+  locations
+    project_id, name, location_only, specialty, reference_plan, template_ids
+
+  protocol_templates
+    project_id, id_protocolo, name
+
+  protocol_template_items
+    template_id, partida_item, item_description, validation_method, section
+
+  protocols
+    project_id, location_id, template_id, protocol_number, location_reference,
+    status, latitude, longitude, is_locked, corrections_allowed,
+    filled_by_id, filled_at, submitted_at, signed_by_id, signed_at,
+    rejection_reason, upload_status
+
+  protocol_items
+    protocol_id, partida_item, item_description, validation_method, section,
+    is_compliant, is_na, has_answer, comments
+
+  evidences
+    protocol_item_id, local_uri, s3_url_placeholder, upload_status
+
+  plans
+    project_id, location_id, name, file_uri, uploaded_by_id
+
+  plan_annotations
+    plan_id, protocol_id, rect_x, rect_y, rect_width, rect_height,
+    comment, sequence_number, is_ok, status (OPEN|CLOSED), page, created_by_id
+
+  annotation_comments
+    annotation_id, author_id, content, read_by_creator
+
+  annotation_comment_photos
+    annotation_comment_id, local_uri, storage_path
+
+  non_conformities
+    project_id, protocol_id, description, status (OPEN|RESOLVED),
+    raised_by_id, resolution_notes
+
+  dashboard_notes
+    project_id, content, created_by_id
+
+
+────────────────────────────────────────────────────────────────────────────────
+7. NOTIFICACIONES PUSH
+────────────────────────────────────────────────────────────────────────────────
+
+  Evento                          → Destinatario
+  ─────────────────────────────────────────────────────────────────
+  Protocolo enviado               → Jefe del proyecto (RESIDENT/CREATOR)
+  Protocolo aprobado              → Inspector que lo envió
+  Protocolo rechazado             → Inspector que lo envió
+  Nueva anotación en plano        → Creador del proyecto
+  Nueva respuesta a anotación     → Creador de la anotación original
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. ALMACENAMIENTO S3
+────────────────────────────────────────────────────────────────────────────────
+
+  s3://bucket/projects/{projectId}/
+    plans/         → PDFs de planos arquitectónicos
+    evidences/     → Fotos de evidencia de protocolos (con stamp)
+    annotations/   → Fotos adjuntas a comentarios en planos
+
+
+────────────────────────────────────────────────────────────────────────────────
+9. COMPORTAMIENTO OFFLINE
+────────────────────────────────────────────────────────────────────────────────
+
+  - Toda la app funciona sin conexión a internet
+  - Datos se guardan localmente en WatermelonDB
+  - Al recuperar conexión → sincroniza automáticamente con Supabase
+  - Fotos se suben a S3 en background cuando hay internet
+  - Conflictos de sincronización → gana la última escritura por timestamp
+  - Al abrir un proyecto → hace pull de datos desde la nube
+
+
+================================================================================
+  Versión app: V1.6.2
+================================================================================

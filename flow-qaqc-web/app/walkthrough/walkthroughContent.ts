@@ -176,7 +176,7 @@ export const walkthroughBody = `<!-- HERO -->
     <div class="hero-badge"><div class="dot-pulse"></div><span>Product Walkthrough · V1.6.2</span></div>
     <h1>Flow-<span>QA/QC</span></h1>
     <div class="hero-sub">Flujo de Uso Completo — Sistema de Control de Calidad en Obra</div>
-    <p class="hero-desc">Desde la configuración inicial del proyecto hasta la exportación del Dossier de Calidad. Así funciona Flow-QA/QC en un proyecto real de construcción.</p>
+    <p class="hero-desc">Desde la configuración inicial del proyecto hasta la exportación del Dosier de Calidad. Así funciona Flow-QA/QC en un proyecto real de construcción.</p>
     <div class="hero-pills">
       <div class="pill teal">📱 React Native · Offline-First</div>
       <div class="pill">⚙️ WatermelonDB + Supabase</div>
@@ -191,7 +191,7 @@ export const walkthroughBody = `<!-- HERO -->
   <div class="phase-tab active">① Configuración</div>
   <div class="phase-tab">② Inspección en Campo</div>
   <div class="phase-tab">③ Auditoría</div>
-  <div class="phase-tab">④ Dossier & Cierre</div>
+  <div class="phase-tab">④ Dosier & Cierre</div>
 </div>
 
 <!-- CONTENT -->
@@ -567,7 +567,7 @@ export const walkthroughBody = `<!-- HERO -->
     <div class="phase-header">
       <div class="phase-number" style="background:#16A34A;">4</div>
       <div>
-        <h2>Dashboard y <span>Dossier de Calidad</span></h2>
+        <h2>Dashboard y <span>Dosier de Calidad</span></h2>
         <p>Monitoreo en tiempo real y exportación del expediente técnico de cierre del proyecto.</p>
       </div>
       <div class="phase-header-line"></div>
@@ -606,9 +606,9 @@ export const walkthroughBody = `<!-- HERO -->
         <div class="step-num">PASO 12</div>
         <div class="step-role role-creator">⚙️ Creator / Residente</div>
       </div>
-      <h3 style="font-family:'Arial Black',Arial,sans-serif;font-size:22px;font-weight:900;color:white;margin-bottom:10px;">Exportar Dossier de Calidad PDF</h3>
+      <h3 style="font-family:'Arial Black',Arial,sans-serif;font-size:22px;font-weight:900;color:white;margin-bottom:10px;">Exportar Dosier de Calidad PDF</h3>
       <p style="font-size:14px;color:rgba(255,255,255,0.65);line-height:1.7;margin-bottom:20px;max-width:780px;">
-        Con un toque, Flow-QA/QC genera el <strong style="color:#22D3EE">Dossier de Calidad completo en PDF</strong>: portada con nombre del proyecto y fecha de generación, estadísticas generales (aprobados, en revisión, rechazados y total), resumen estadístico con gráfico de protocolos aprobados por semana y avance por especialidad, tabla resumen de todos los protocolos con estado, fechas y responsables, y el detalle completo de cada protocolo con ítems respondidos y firma del Jefe de Calidad. Listo para compartir por email, WhatsApp o Google Drive.
+        Con un toque, Flow-QA/QC genera el <strong style="color:#22D3EE">Dosier de Calidad completo en PDF</strong>: portada con nombre del proyecto y fecha de generación, estadísticas generales (aprobados, en revisión, rechazados y total), resumen estadístico con gráfico de protocolos aprobados por semana y avance por especialidad, tabla resumen de todos los protocolos con estado, fechas y responsables, y el detalle completo de cada protocolo con ítems respondidos y firma del Jefe de Calidad. Listo para compartir por email, WhatsApp o Google Drive.
       </p>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">

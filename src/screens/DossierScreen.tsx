@@ -19,7 +19,7 @@ interface Props {
   projectId: string;
   projectName: string;
   onBack: () => void;
-  onOpenProtocol: (protocolId: string) => void;
+  onOpenProtocol: (protocolId: string, status: string) => void;
   onPreviewPdf?: (pdfUri: string) => void;
 }
 
@@ -232,7 +232,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
               style={[styles.card, { borderLeftColor: color }]}
               onPress={() => {
                 if (isFirst && tourActive && tourStep?.id === 'dossier_protocol_list') tourNextStep();
-                onOpenProtocol(item.id);
+                onOpenProtocol(item.id, item.status);
               }}
               activeOpacity={0.8}
             >

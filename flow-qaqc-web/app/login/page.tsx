@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@lib/supabase/client';
+import { setCookieUserId } from '@lib/auth-context';
+import SkylineBackground from '@components/SkylineBackground';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,73 +27,59 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      // 1. Buscar usuario por nombre en la tabla users
       const { data: users, error: fetchErr } = await supabase
         .from('users')
-        .select('id, name, email')
+        .select('*')
         .ilike('name', name.trim())
+        .order('created_at', { ascending: true })
         .limit(1);
 
       if (fetchErr || !users || users.length === 0) {
-        setError('No existe un usuario con ese nombre. Contacte al administrador.');
+        setError('No existe un usuario con ese nombre.');
         return;
       }
 
       const user = users[0];
-
-      // 2. Autenticar con Supabase Auth (email + password)
-      const { error: authErr } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password,
-      });
-
-      if (authErr) {
-        setError('Contraseña incorrecta. La primera vez, su contraseña es su nombre.');
+      const storedPassword: string = user.password ?? user.name;
+      if (storedPassword !== password) {
+        setError('Contraseña incorrecta. Si es su primera vez, use su nombre.');
         return;
       }
 
-      router.push('/app/projects');
-      router.refresh();
+      setCookieUserId(user.id);
+      window.location.href = '/app/projects';
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-navy flex flex-col">
-      {/* Header con logo */}
-      <div className="flex flex-col items-center pt-12 pb-0 px-8">
-        <div className="flex flex-col items-center gap-2">
-          {/* Logotipo textual S-CUA */}
-          <div className="text-white text-center">
-            <div
-              className="font-black tracking-widest text-5xl leading-none"
-              style={{ fontFamily: 'Arial Black, Arial, sans-serif' }}
-            >
-              S<span className="text-secondary">-</span>CUA
-            </div>
-            <div className="text-light text-xs tracking-[0.3em] uppercase mt-1 font-semibold">
-              Sistema de Control de Calidad
-            </div>
-            <div className="w-12 h-0.5 bg-secondary mx-auto mt-3" />
-          </div>
-        </div>
+    <div className="min-h-screen relative overflow-hidden bg-black">
+      {/* ── Fondo video ── */}
+      <SkylineBackground />
+
+      {/* ── Logo esquina superior derecha ── */}
+      <div className="absolute top-6 right-8 z-20 opacity-0 animate-fade-up">
+        <img
+          src="/logo-login.svg"
+          alt="Flow QC"
+          className="h-20 w-auto"
+        />
       </div>
 
-      {/* Card de login */}
-      <div className="flex-1 flex items-start justify-center px-5 pt-8 pb-10">
-        <div className="w-full max-w-sm bg-white rounded-xl shadow-modal p-7 flex flex-col gap-5">
+      {/* ── Contenido a la izquierda ── */}
+      <div className="relative z-10 min-h-screen flex flex-col items-start justify-center px-8 lg:px-16 py-10 w-full lg:w-[440px]">
 
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-primary tracking-[0.2em] uppercase">
-              Iniciar Sesión
-            </span>
-          </div>
+        {/* ── Card de login (glassmorphism oscuro) ── */}
+        <div className="w-full max-w-sm bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-7 flex flex-col gap-5 opacity-0 animate-[fadeSlideUp_0.8s_ease-out_0.3s_forwards]">
+
+          <span className="text-[11px] font-bold text-white/60 tracking-[0.2em] uppercase">
+            Iniciar Sesión
+          </span>
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            {/* Nombre */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold text-[#4a5568] tracking-[0.15em] uppercase">
+              <label className="text-[10px] font-semibold text-white/40 tracking-[0.15em] uppercase">
                 Nombre
               </label>
               <input
@@ -99,13 +88,12 @@ export default function LoginPage() {
                 onChange={e => setName(e.target.value)}
                 placeholder="Ingrese su nombre"
                 autoComplete="username"
-                className="bg-surface border border-border rounded-md px-3.5 py-3 text-[15px] text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition"
+                className="bg-white/[0.07] border border-white/10 rounded-lg px-3.5 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition"
               />
             </div>
 
-            {/* Contraseña */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold text-[#4a5568] tracking-[0.15em] uppercase">
+              <label className="text-[10px] font-semibold text-white/40 tracking-[0.15em] uppercase">
                 Contraseña
               </label>
               <div className="flex gap-2 items-center">
@@ -115,12 +103,12 @@ export default function LoginPage() {
                   onChange={e => setPassword(e.target.value)}
                   placeholder="Ingrese su contraseña"
                   autoComplete="current-password"
-                  className="flex-1 bg-surface border border-border rounded-md px-3.5 py-3 text-[15px] text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition"
+                  className="flex-1 bg-white/[0.07] border border-white/10 rounded-lg px-3.5 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="border border-border bg-surface rounded-md p-3 text-[#4a5568] hover:bg-[#e8edf4] transition"
+                  className="border border-white/10 bg-white/[0.07] rounded-lg p-3 text-white/40 hover:text-white/70 hover:bg-white/10 transition"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -128,34 +116,38 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Hint */}
-            <p className="text-xs text-[#8896a5] italic text-center -mt-1">
+            <p className="text-[11px] text-white/25 italic text-center -mt-1">
               Primera vez: su contraseña es su nombre
             </p>
 
-            {/* Error */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-md px-3.5 py-2.5 text-sm text-danger">
+              <div className="bg-red-500/15 border border-red-400/30 rounded-lg px-3.5 py-2.5 text-sm text-red-300">
                 {error}
               </div>
             )}
 
-            {/* Botón */}
             <button
               type="submit"
               disabled={!canSubmit || loading}
-              className="bg-primary text-white rounded-md py-4 text-[13px] font-bold tracking-[0.15em] uppercase mt-1 transition hover:bg-navy disabled:bg-light disabled:cursor-not-allowed"
+              className="bg-white/15 border border-white/20 text-white rounded-lg py-4 text-[13px] font-bold tracking-[0.15em] uppercase mt-1 transition-all hover:bg-white/25 hover:shadow-[0_0_20px_rgba(255,255,255,0.08)] disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {loading ? 'Verificando...' : 'Ingresar'}
             </button>
           </form>
         </div>
+
+        {/* ── Footer ── */}
+        <p className="text-center text-white/20 text-[11px] mt-8 px-6 leading-relaxed w-full max-w-sm">
+          Para solicitar acceso, contacte al administrador del sistema.
+        </p>
       </div>
 
-      {/* Footer */}
-      <p className="text-center text-light text-xs pb-8 px-6 leading-relaxed">
-        Para solicitar acceso, contacte al administrador del sistema.
-      </p>
+      {/* ── Franja inferior ── */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/50 backdrop-blur-sm py-2.5">
+        <p className="text-center text-white/40 text-[11px] tracking-[0.15em]">
+          © 2026 — Desarrollado por <span className="text-white/60 font-semibold">Vastoria</span>
+        </p>
+      </div>
     </div>
   );
 }

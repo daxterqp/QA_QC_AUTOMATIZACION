@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Modal, Alert, RefreshControl, Platform, StatusBar,
+  TextInput, Modal, Alert, RefreshControl, Platform, StatusBar, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,6 +11,7 @@ import type { RootStackParamList } from '@navigation/types';
 import {
   database, projectsCollection, annotationCommentsCollection,
   planAnnotationsCollection, userProjectAccessCollection,
+  protocolsCollection, plansCollection,
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
@@ -27,6 +28,26 @@ import { useTour } from '@context/TourContext';
 import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectList'>;
+
+/** Badge con efecto "respirando" (pulso rojo) */
+function PulsingBadge({ count }: { count: number }) {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 0.45, duration: 900, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim]);
+  return (
+    <Animated.Text style={{ color: Colors.danger, fontWeight: '900', fontSize: 12, opacity: anim }}>
+      {count}!
+    </Animated.Text>
+  );
+}
 
 /** Fila de proyecto tal como viene de Supabase */
 type ProjectRow = { id: string; name: string; status: string };
@@ -57,6 +78,9 @@ export default function ProjectListScreen({ navigation }: Props) {
   }, []);
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [projectCounts, setProjectCounts] = useState<Record<string, {
+    openObs: number; approved: number; submitted: number; rejected: number;
+  }>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -132,6 +156,31 @@ export default function ProjectListScreen({ navigation }: Props) {
         for (const p of data) {
           await pullProjectFromCloud(p.id).catch(() => {});
         }
+        // Load counts after pull
+        const counts: typeof projectCounts = {};
+        for (const p of data) {
+          try {
+            const plans = await plansCollection.query(Q.where('project_id', p.id)).fetch();
+            const planIds = plans.map(pl => pl.id);
+            let openObs = 0;
+            if (planIds.length > 0) {
+              const anns = await planAnnotationsCollection
+                .query(Q.where('plan_id', Q.oneOf(planIds)), Q.where('is_ok', false))
+                .fetch();
+              openObs = anns.length;
+            }
+            const protos = await protocolsCollection
+              .query(Q.where('project_id', p.id), Q.where('status', Q.notEq('DRAFT')))
+              .fetch();
+            counts[p.id] = {
+              openObs,
+              approved: protos.filter(pr => (pr as any).status === 'APPROVED').length,
+              submitted: protos.filter(pr => (pr as any).status === 'SUBMITTED').length,
+              rejected: protos.filter(pr => (pr as any).status === 'REJECTED').length,
+            };
+          } catch { counts[p.id] = { openObs: 0, approved: 0, submitted: 0, rejected: 0 }; }
+        }
+        setProjectCounts(counts);
       })();
     } catch {
       setDebugInfo('Sin conexión');
@@ -175,6 +224,12 @@ export default function ProjectListScreen({ navigation }: Props) {
   // ── Crear proyecto ─────────────────────────────────────────────────────────
   const createProject = async () => {
     if (!newName.trim() || !newPassword.trim()) return;
+    // Validar nombre duplicado
+    const duplicate = projects.find(p => p.name.toLowerCase().trim() === newName.toLowerCase().trim());
+    if (duplicate) {
+      Alert.alert('Nombre duplicado', 'Ya existe un proyecto con ese nombre. Usa un nombre diferente.');
+      return;
+    }
     let newProjectId = '';
     await database.write(async () => {
       const proj = await projectsCollection.create((p) => {
@@ -188,10 +243,16 @@ export default function ProjectListScreen({ navigation }: Props) {
     // Push inmediato, crear carpetas S3 y refrescar lista
     if (newProjectId) {
       const name = newName.trim();
-      pushProjectToSupabase(newProjectId)
-        .then(() => loadProjectsFromCloud())
-        .catch(() => loadProjectsFromCloud());
-      initProjectFolders(name).catch(() => {});
+      try {
+        const result = await pushProjectToSupabase(newProjectId);
+        if (result.errors.length > 0) {
+          Alert.alert('Error al sincronizar proyecto', result.errors.join('\n'));
+        }
+      } catch (e: any) {
+        Alert.alert('Error de red', `No se pudo sincronizar el proyecto: ${e.message}`);
+      }
+      initProjectFolders(name).catch((e) => console.warn('[S3] initProjectFolders:', e));
+      await loadProjectsFromCloud();
     }
     setNewName('');
     setNewPassword('');
@@ -364,7 +425,7 @@ export default function ProjectListScreen({ navigation }: Props) {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: (StatusBar.currentHeight ?? 24) + 16 }]}>
-        <Text style={styles.versionBadge}>V1.7</Text>
+        <Text style={styles.versionBadge}>V2.0</Text>
 
         <View style={styles.headerTop}>
           {/* Izquierda: nombre + rol */}
@@ -459,38 +520,54 @@ export default function ProjectListScreen({ navigation }: Props) {
             <View ref={index === 0 ? actionChipsRef : undefined} style={styles.actionsRow}>
               <TouchableOpacity
                 ref={index === 0 ? observacionesChipRef : undefined}
-                style={[styles.actionChip, styles.actionChipAccent]}
+                style={styles.actionChip}
                 onPress={() => {
                   pullProjectFromCloud(item.id).catch(() => {});
                   navigation.navigate('AnnotationComments', { projectId: item.id, projectName: item.name });
                 }}
               >
-                <Text style={[styles.actionChipText, styles.actionChipTextLight]}>Observaciones</Text>
+                <Text style={styles.actionChipText}>Obs: </Text>
+                {(projectCounts[item.id]?.openObs ?? 0) > 0 ? (
+                  <PulsingBadge count={projectCounts[item.id].openObs} />
+                ) : (
+                  <Text style={styles.obsZero}>0</Text>
+                )}
               </TouchableOpacity>
 
               {(isJefe || isSupervisor) && (
                 <TouchableOpacity
                   ref={index === 0 ? dosierChipRef : undefined}
-                  style={[styles.actionChip, styles.actionChipAccent, styles.actionChipDossier]}
+                  style={styles.actionChip}
                   onPress={() => {
                   pullProjectFromCloud(item.id).catch(() => {});
                   navigation.navigate('Dossier', { projectId: item.id, projectName: item.name });
                 }}
                 >
-                  <Text style={[styles.actionChipText, styles.actionChipTextLight]}>Dosier</Text>
+                  <Text style={styles.actionChipText}>Dosier: </Text>
+                  <View style={styles.dossierCounts}>
+                    <View style={[styles.dossierBadge, { backgroundColor: Colors.success }]}>
+                      <Text style={styles.dossierBadgeText}>{projectCounts[item.id]?.approved ?? 0}</Text>
+                    </View>
+                    <View style={[styles.dossierBadge, { backgroundColor: Colors.primary }]}>
+                      <Text style={styles.dossierBadgeText}>{projectCounts[item.id]?.submitted ?? 0}</Text>
+                    </View>
+                    <View style={[styles.dossierBadge, { backgroundColor: Colors.danger }]}>
+                      <Text style={styles.dossierBadgeText}>{projectCounts[item.id]?.rejected ?? 0}</Text>
+                    </View>
+                  </View>
                 </TouchableOpacity>
               )}
 
               {isJefe && (
                 <TouchableOpacity
                   ref={index === 0 ? cargarChipRef : undefined}
-                  style={styles.actionChip}
+                  style={styles.actionChipUpload}
                   onPress={() => {
                     if (index === 0 && tourActive && tourStep?.id === 'fileupload_entry') tourNextStep();
                     navigation.navigate('FileUpload', { projectId: item.id, projectName: item.name });
                   }}
                 >
-                  <Text style={styles.actionChipText}>Cargar archivos</Text>
+                  <Ionicons name="cloud-upload-outline" size={15} color={Colors.textSecondary} />
                 </TouchableOpacity>
               )}
 
@@ -542,6 +619,8 @@ export default function ProjectListScreen({ navigation }: Props) {
             onPress={() => {
               if (isDemo) {
                 Alert.alert('Opción no disponible en demo', 'Esta función no está habilitada en el modo de demostración.');
+              } else if (!isCreator) {
+                Alert.alert('Acceso restringido', 'Para crear un nuevo proyecto comuníquese con el administrador.');
               } else {
                 setShowCreate(true);
               }
@@ -753,11 +832,22 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   actionChip: {
-    flex: 1, borderRadius: Radius.sm, paddingHorizontal: 6, paddingVertical: 6,
-    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
-    alignItems: 'center',
+    flex: 1, borderRadius: Radius.sm, paddingHorizontal: 8, paddingVertical: 6,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
   },
-  actionChipDossier: { flex: 0.75 },
+  actionChipUpload: {
+    flex: 0, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  obsZero: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+  dossierCounts: { flexDirection: 'row', gap: 3, marginLeft: 2 },
+  dossierBadge: {
+    borderRadius: 4, minWidth: 16, height: 16,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  dossierBadgeText: { color: Colors.white, fontSize: 8, fontWeight: '800' },
   actionChipAccent: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   actionChipPhone: {
     flex: 0,

@@ -7,8 +7,8 @@ import { QueryProvider } from '@lib/query-client';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'S-CUA — Sistema de Control de Calidad',
-  description: 'Sistema digital QA/QC para construcción',
+  title: 'Flow-QA/QC',
+  description: 'La calidad puesta en cada detalle',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

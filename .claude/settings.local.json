@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(node --version)",
+      "Bash(where node)",
+      "Bash(where npm)",
+      "Bash(where npx)",
+      "Bash(npm --version)",
+      "Bash(npx --version)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb devices)",
+      "Bash(npx expo export --platform android)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe reverse tcp:38899 tcp:38899)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe reverse --list)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe connect 192.168.100.6:38899)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe devices)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe -s 192.168.100.6:38899 reverse tcp:8081 tcp:8081)",
+      "Bash(/c/Users/Personal/AppData/Local/Android/Sdk/platform-tools/adb.exe -s 192.168.100.6:38899 reverse --list)",
+      "Bash(curl -s http://localhost:8081/status)",
+      "Bash(./gradlew assembleRelease)"
+    ]
+  }
+}
