@@ -43,6 +43,18 @@ const login: Record<string, { es: string; en: string; pt: string }> = {
     en: 'Google sign-in will be enabled in the next step (requires an app rebuild and the Google client ID).',
     pt: 'O login com Google será ativado na próxima etapa (requer recompilar o app e o ID de cliente do Google).',
   },
+  'login.googleNoAccountTitle': { es: 'Cuenta creada', en: 'Account created', pt: 'Conta criada' },
+  'login.googleNoAccountMsg': {
+    es: 'Tu cuenta quedó lista pero aún no tiene acceso. Pedile a un administrador que te asigne proyectos.',
+    en: 'Your account is ready but has no access yet. Ask an administrator to assign you projects.',
+    pt: 'Sua conta está pronta, mas ainda sem acesso. Peça a um administrador para atribuir projetos.',
+  },
+  'login.googleErrorTitle': { es: 'No se pudo con Google', en: 'Google sign-in failed', pt: 'Falha no Google' },
+  'login.googleErrorMsg': {
+    es: 'No se pudo iniciar con Google. Si recién se configuró, puede faltar reconstruir la app.',
+    en: 'Could not sign in with Google. If it was just set up, the app may need a rebuild.',
+    pt: 'Não foi possível entrar com Google. Se foi configurado agora, o app pode precisar ser recompilado.',
+  },
   'login.signupSoonTitle': { es: 'Crear cuenta', en: 'Create account', pt: 'Criar conta' },
   'login.signupSoonMsg': {
     es: 'El registro de cuenta se activa en el siguiente paso.',

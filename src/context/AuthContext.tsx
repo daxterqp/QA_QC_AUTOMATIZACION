@@ -17,6 +17,8 @@ interface AuthContextValue {
   isLoading: boolean;
   isDemo: boolean;
   login: (email: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
+  /** Inicia sesión con Google (flujo OAuth de Supabase en el navegador del sistema). */
+  loginWithGoogle: () => Promise<'ok' | 'cancelled' | 'error' | 'no_account'>;
   loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
@@ -200,6 +202,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return 'ok';
   }, []);
 
+  const loginWithGoogle = useCallback(async (): Promise<'ok' | 'cancelled' | 'error' | 'no_account'> => {
+    try {
+      // require diferido: expo-web-browser es nativo; si el dev-client no se reconstruyó
+      // todavía, la llamada nativa falla y cae al catch (NO rompe el arranque de la app).
+      const WebBrowser = require('expo-web-browser');
+      const redirectTo = 'flow://login-callback'; // scheme `flow` (app.json) — registrar en Supabase URL Config
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo, skipBrowserRedirect: true },
+      });
+      if (error || !data?.url) return 'error';
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+      if (result.type !== 'success' || !result.url) return 'cancelled';
+
+      // Extraer el `code` (PKCE) o los tokens del fragment del deep link de retorno.
+      const returned = result.url;
+      const raw = (returned.split('?')[1] || returned.split('#')[1] || '');
+      const params: Record<string, string> = {};
+      for (const pair of raw.split('&')) {
+        const [k, v] = pair.split('=');
+        if (k) params[decodeURIComponent(k)] = decodeURIComponent(v ?? '');
+      }
+
+      if (params.code) {
+        const { error: exErr } = await supabase.auth.exchangeCodeForSession(params.code);
+        if (exErr) return 'error';
+      } else if (params.access_token && params.refresh_token) {
+        const { error: ssErr } = await supabase.auth.setSession({
+          access_token: params.access_token, refresh_token: params.refresh_token,
+        });
+        if (ssErr) return 'error';
+      } else {
+        return 'error';
+      }
+
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return 'error';
+      const appUser = await resolveAppUserByAuthId(authUser.id);
+      if (!appUser) return 'no_account'; // el trigger crea la fila VIEWER; si está inactiva → sin acceso
+      setCurrentUser(appUser);
+      registerPushToken(appUser.id).catch(() => {});
+      return 'ok';
+    } catch {
+      return 'error';
+    }
+  }, []);
+
   const loginDemo = useCallback(() => {
     const demoUser = {
       id: 'demo-user',
@@ -272,7 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser, isDemo]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginWithGoogle, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

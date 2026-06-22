@@ -22,7 +22,7 @@ const FF_XBOLD = 'Montserrat_800ExtraBold';
 
 export default function LoginScreen() {
   const { t } = useI18n();
-  const { login, resetPassword } = useAuth();
+  const { login, loginWithGoogle, resetPassword } = useAuth();
   const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
 
   const [email, setEmail] = useState('');
@@ -35,6 +35,7 @@ export default function LoginScreen() {
   const [showReset, setShowReset] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const enterAnim = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
@@ -81,7 +82,18 @@ export default function LoginScreen() {
     } finally { setResetting(false); }
   };
 
-  const handleGoogle = () => Alert.alert(t('login.googleSetupTitle'), t('login.googleSetupMsg'));
+  const handleGoogle = async () => {
+    if (googleLoading) return;
+    setGoogleLoading(true);
+    const res = await loginWithGoogle();
+    setGoogleLoading(false);
+    if (res === 'ok' || res === 'cancelled') return;
+    if (res === 'no_account') {
+      Alert.alert(t('login.googleNoAccountTitle'), t('login.googleNoAccountMsg'));
+    } else {
+      Alert.alert(t('login.googleErrorTitle'), t('login.googleErrorMsg'));
+    }
+  };
   const handleCreateAccount = () => Alert.alert(t('login.signupSoonTitle'), t('login.signupSoonMsg'));
 
   const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.27, 0] });
@@ -119,9 +131,13 @@ export default function LoginScreen() {
             pointerEvents={entered ? 'auto' : 'none'}
           >
             {/* Arriba: Google + Crear cuenta */}
-            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85}>
-              <Ionicons name="logo-google" size={18} color="#4285F4" />
-              <Text style={styles.googleBtnText}>{t('login.continueGoogle')}</Text>
+            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} disabled={googleLoading} activeOpacity={0.85}>
+              {googleLoading ? <ActivityIndicator color={Colors.primary} /> : (
+                <>
+                  <Ionicons name="logo-google" size={18} color="#4285F4" />
+                  <Text style={styles.googleBtnText}>{t('login.continueGoogle')}</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleCreateAccount} style={styles.createBtn}>
