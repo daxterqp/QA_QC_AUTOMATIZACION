@@ -19,12 +19,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'flow-qaqc-web');
 const W = 1200, H = 2400;
 
-// Líneas diagonales MUY tenues (textura sutil, ya no marcadas).
+// Líneas diagonales (textura elegante, como el clásico — visibles pero sutiles).
 let lines = '';
-for (let i = -H; i < W; i += 200) {
+for (let i = -H; i < W; i += 120) {
   lines += `<line x1="${i}" y1="0" x2="${i + H}" y2="${H}" />`;
 }
 
+// Difuminado ESTÁTICO desde la esquina superior derecha + gradiente mejorado.
 const bgSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
     <linearGradient id="g" x1="0.08" y1="0" x2="0.92" y2="1">
@@ -32,37 +33,20 @@ const bgSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}
       <stop offset="0.5" stop-color="#15294c"/>
       <stop offset="1" stop-color="#2b4474"/>
     </linearGradient>
-    <radialGradient id="glowTR" cx="0.82" cy="0.1" r="0.65">
-      <stop offset="0" stop-color="#6f93cf" stop-opacity="0.38"/>
+    <radialGradient id="glowTR" cx="0.85" cy="0.08" r="0.72">
+      <stop offset="0" stop-color="#7ba0dd" stop-opacity="0.5"/>
+      <stop offset="0.55" stop-color="#6f93cf" stop-opacity="0.16"/>
       <stop offset="1" stop-color="#6f93cf" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glowBL" cx="0.08" cy="0.95" r="0.7">
-      <stop offset="0" stop-color="#081226" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#081226" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="vig" cx="0.5" cy="0.46" r="0.75">
-      <stop offset="0.55" stop-color="#060f20" stop-opacity="0"/>
-      <stop offset="1" stop-color="#060f20" stop-opacity="0.42"/>
+    <radialGradient id="vig" cx="0.4" cy="0.62" r="0.8">
+      <stop offset="0.6" stop-color="#060f20" stop-opacity="0"/>
+      <stop offset="1" stop-color="#060f20" stop-opacity="0.34"/>
     </radialGradient>
   </defs>
   <rect width="${W}" height="${H}" fill="url(#g)"/>
-  <g stroke="#ffffff" stroke-opacity="0.02" stroke-width="2">${lines}</g>
+  <g stroke="#ffffff" stroke-opacity="0.035" stroke-width="2">${lines}</g>
   <rect width="${W}" height="${H}" fill="url(#glowTR)"/>
-  <rect width="${W}" height="${H}" fill="url(#glowBL)"/>
   <rect width="${W}" height="${H}" fill="url(#vig)"/>
-</svg>`;
-
-// Sprite de glow suave (se desplaza/late en el login para un difuminado "cambiante").
-const GW = 700;
-const glowSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${GW}" height="${GW}" viewBox="0 0 ${GW} ${GW}">
-  <defs>
-    <radialGradient id="r" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#7ba0dd" stop-opacity="0.5"/>
-      <stop offset="0.6" stop-color="#7ba0dd" stop-opacity="0.12"/>
-      <stop offset="1" stop-color="#7ba0dd" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="${GW}" height="${GW}" fill="url(#r)"/>
 </svg>`;
 
 // Degradado horizontal del botón "Ingresar".
@@ -98,5 +82,4 @@ async function emit(svg, rel, w, h) {
 }
 
 await emit(bgSvg, 'assets/login-bg.png', W, H);
-await emit(glowSvg, 'assets/login-glow.png', GW, GW);
 await emit(btnSvg, 'assets/login-btn.png', BW, BH);

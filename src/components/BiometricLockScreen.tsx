@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Image, ImageBackground, Animated, Easing, Pressable, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Image, ImageBackground, Animated, Pressable, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFonts, Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
@@ -23,19 +23,14 @@ export default function BiometricLockScreen() {
   const [busy, setBusy] = useState(false);
   const triedRef = useRef(false);
 
-  const breathe = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
-      Animated.timing(breathe, { toValue: 1, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      Animated.timing(breathe, { toValue: 0, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-    ])).start();
-    Animated.loop(Animated.sequence([
       Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
       Animated.timing(pulse, { toValue: 0, duration: 1100, useNativeDriver: true }),
     ])).start();
-  }, [breathe, pulse]);
+  }, [pulse]);
 
   const tryUnlock = async () => {
     if (busy) return;
@@ -51,14 +46,13 @@ export default function BiometricLockScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
   const hintOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
 
   return (
     <View style={styles.root}>
-      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
+      <View style={StyleSheet.absoluteFill}>
         <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
-      </Animated.View>
+      </View>
 
       <WaterRipples>
         <Pressable style={styles.center} onPress={tryUnlock}>

@@ -57,24 +57,14 @@ export default function LoginScreen() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const enterAnim = useRef(new Animated.Value(0)).current;
-  const breathe = useRef(new Animated.Value(0)).current;
   const hintPulse = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current; // difuminado "cambiante"
 
   useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(breathe, { toValue: 1, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      Animated.timing(breathe, { toValue: 0, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-    ])).start();
     Animated.loop(Animated.sequence([
       Animated.timing(hintPulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
       Animated.timing(hintPulse, { toValue: 0, duration: 1100, useNativeDriver: true }),
     ])).start();
-    Animated.loop(Animated.sequence([
-      Animated.timing(glowAnim, { toValue: 1, duration: 13000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      Animated.timing(glowAnim, { toValue: 0, duration: 13000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-    ])).start();
-  }, [breathe, hintPulse, glowAnim]);
+  }, [hintPulse]);
 
   const resetIdle = () => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
@@ -156,24 +146,13 @@ export default function LoginScreen() {
   const introOpacity = enterAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' });
   const cardOpacity = enterAnim.interpolate({ inputRange: [0.35, 1], outputRange: [0, 1], extrapolate: 'clamp' });
   const cardTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
-  const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] });
   const hintOpacity = hintPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
-  const glowX = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [-40, 70] });
-  const glowY = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [-30, 80] });
-  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.35, 0.8, 0.35] });
 
-  // Fondo siempre presente (también mientras cargan las fuentes) + glow que se
-  // desplaza lento (difuminado "cambiante", sin deps nativas).
+  // Fondo estático (difuminado desde la esquina superior derecha + líneas).
   const Background = (
-    <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
-      <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover">
-        <Animated.Image
-          source={require('../../assets/login-glow.png')}
-          resizeMode="contain"
-          style={[styles.glow, { opacity: glowOpacity, transform: [{ translateX: glowX }, { translateY: glowY }] }]}
-        />
-      </ImageBackground>
-    </Animated.View>
+    <View style={StyleSheet.absoluteFill}>
+      <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
+    </View>
   );
 
   if (!fontsLoaded) {
@@ -431,8 +410,6 @@ const styles = StyleSheet.create({
     position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
     fontFamily: FF_SEMI, fontSize: 12, color: Colors.white, letterSpacing: 2, textTransform: 'uppercase',
   },
-
-  glow: { position: 'absolute', top: -120, left: -60, width: 700, height: 700 },
 
   // Tarjeta translúcida compacta
   card: {
