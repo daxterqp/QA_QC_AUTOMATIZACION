@@ -290,9 +290,11 @@ export default function UserManagementScreen({ navigation }: Props) {
         text: t('usersMgmt.alert.resetConfirm'),
         onPress: async () => {
           // v47 (RLS): el reset de contraseña pasa por la Edge Function `admin-users`
-          // (no se puede escribir `users` directo). Temporal = el nombre del usuario.
+          // (no se puede escribir `users` directo). Temporal = el nombre del usuario,
+          // rellenado a ≥6 chars (mínimo de Supabase Auth) para nombres cortos (Ronda 3).
+          const tempPass = user.name.length >= 6 ? user.name : user.name.padEnd(6, '0');
           const { error } = await supabase.functions.invoke('admin-users', {
-            body: { action: 'update', userId: user.id, password: user.name },
+            body: { action: 'update', userId: user.id, password: tempPass },
           });
           if (error) { Alert.alert(t('usersMgmt.alert.error'), await edgeFnError(error, t('usersMgmt.alert.opFailed'))); return; }
           Alert.alert(t('usersMgmt.alert.done'), t('usersMgmt.alert.passwordReset'));

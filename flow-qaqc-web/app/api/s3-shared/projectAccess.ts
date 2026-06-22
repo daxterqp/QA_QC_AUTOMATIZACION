@@ -83,6 +83,16 @@ export async function accessibleProjectSegments(): Promise<Set<string>> {
  *   destructivas (s3-delete) para exigir `projects/<accesible>/...`.
  * - Si empieza con `projects/<seg>/` → el `<seg>` debe coincidir con el nombre
  *   saneado de un proyecto accesible.
+ *
+ * LIMITACIÓN CONOCIDA (riesgo bajo en app interna): la autorización es por
+ * IGUALDAD del string saneado, no por `project_id`. El saneado es lossy → dos
+ * proyectos con nombres distintos ("Planta 1" / "Planta#1", o "a.b.c" / "abc")
+ * pueden colapsar al mismo segmento, y entonces un usuario con acceso a uno
+ * podría listar/leer objetos del otro. Hoy NO es explotable (los 10 proyectos
+ * existentes tienen segmentos únicos) y la app es interna (5 usuarios de
+ * confianza). Fix de raíz (hardening futuro, requiere migración): usar el
+ * `project_id` (UUID, no colisionable) en la ruta S3 en lugar del nombre saneado,
+ * o validar unicidad del segmento al crear proyecto. Ver docs/HANDOFF_SEGURIDAD.md.
  */
 export async function keyBelongsToAccessibleProject(
   key: string,

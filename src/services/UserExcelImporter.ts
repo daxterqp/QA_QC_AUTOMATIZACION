@@ -161,8 +161,14 @@ export async function bulkCreateUsersViaEdgeFunction(
       // no-ASCII), usamos un fallback por fila para no generar `.@flowqc.local`.
       const localBase = [slugify(u.name), slugify(u.apellido)].filter(Boolean).join('.') || `usuario${i + 1}`;
       email = `${localBase}@flowqc.local`;
-      // Desambiguar homónimos: si ya generamos ese placeholder, sufijo por fila.
-      if (usedEmails.has(email.toLowerCase())) email = `${localBase}.${i + 1}@flowqc.local`;
+      // Desambiguar homónimos Y colisiones con cualquier email ya usado (incluidos
+      // los explícitos del Excel): sufijo incremental hasta uno libre. Bucle, no
+      // single-shot, para que `base.N` no choque con un explícito igual (Ronda 3).
+      let suffix = 2;
+      while (usedEmails.has(email.toLowerCase())) {
+        email = `${localBase}.${suffix}@flowqc.local`;
+        suffix++;
+      }
     }
     usedEmails.add(email.toLowerCase());
     // Password temporal = el nombre (el usuario la cambia luego). Supabase Auth

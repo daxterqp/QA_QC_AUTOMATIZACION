@@ -86,6 +86,20 @@ Si algo falla, anotá el mensaje (ahora son descriptivos) y me lo pasás.
 
 ---
 
+### Hardening futuro (opcional, NO urgente)
+- **Keys S3 por `project_id`**: hoy las rutas S3 se autorizan comparando el *nombre
+  saneado* del proyecto (la carpeta `projects/<nombre-saneado>/...`). Como ese saneado
+  pierde información, dos proyectos con nombres muy parecidos podrían colapsar a la
+  misma carpeta y mezclarse. Hoy **no pasa** (los 10 proyectos tienen carpetas únicas)
+  y la app es interna, pero si en el futuro hay muchos proyectos conviene migrar a usar
+  el **id** del proyecto (un UUID único) en la ruta. Es una migración (renombrar objetos
+  en S3 + actualizar la base), por eso la dejo anotada y no la hago sin que puedas probar.
+- **Mover los helpers RLS a un schema `private`** para silenciar los 15 avisos
+  “authenticated_security_definer” (son inofensivos, por diseño). Requiere reescribir
+  las 35 políticas → hacerlo juntos, con la app a mano para probar.
+- **Firma S3 server-side** (que la clave AWS no viaje al cliente). Mitigado hoy por
+  permisos mínimos de esa clave.
+
 ### Lo que YA quedó hecho (no tenés que tocar)
 - Login por email (móvil + web) sobre Supabase Auth real.
 - RLS estricto en las 35 tablas (`can_access_project` + helpers); 0 políticas permisivas.
