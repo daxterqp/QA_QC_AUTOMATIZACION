@@ -251,6 +251,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
         prevLX = lx; prevRX = rx;
 
+        // PRUEBA: dos puntos sostenidos arriba (como dos dedos quietos). uv.y≈0.86 = parte alta.
+        push(0.40, 0.86, 0.3);
+        push(0.60, 0.86, 0.3);
+
         // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
         if (--ambient <= 0) {
           push(Math.random(), Math.random(), 0.4);    // más marcadas pero menos que el toque
