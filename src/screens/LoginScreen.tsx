@@ -103,18 +103,19 @@ export default function LoginScreen() {
     const { width, height } = e.nativeEvent.layout;
     layoutRef.current = { w: width || 1, h: height || 1 };
   };
-  const dropAt = (x: number, y: number) => glRef.current?.drop(x / layoutRef.current.w, y / layoutRef.current.h);
+  const dropAt = (x: number, y: number, isMove: boolean) =>
+    glRef.current?.drop(x / layoutRef.current.w, y / layoutRef.current.h, isMove);
   const onTouchGL = (e: any) => {
     const { locationX, locationY } = e.nativeEvent;
     lastMove.current = { x: locationX, y: locationY };
-    dropAt(locationX, locationY);
+    dropAt(locationX, locationY, false);
     resetIdle();
   };
   const onTouchGLMove = (e: any) => {
     const { locationX, locationY } = e.nativeEvent;
-    if (Math.hypot(locationX - lastMove.current.x, locationY - lastMove.current.y) > 30) {
+    if (Math.hypot(locationX - lastMove.current.x, locationY - lastMove.current.y) > 8) {
       lastMove.current = { x: locationX, y: locationY };
-      dropAt(locationX, locationY);
+      dropAt(locationX, locationY, true);
     }
   };
   const renderContent = (inner: React.ReactNode) => useGL
