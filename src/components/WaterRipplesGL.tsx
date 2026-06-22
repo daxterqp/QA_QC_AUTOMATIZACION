@@ -224,8 +224,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         }
         while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
 
-        // 2 sub-pasos por frame → las ondas viajan más rápido (baja viscosidad).
+        // 3 sub-pasos por frame → las ondas viajan más rápido (más parecido al agua).
         simStep(flat, count);
+        simStep(EMPTY, 0);
         simStep(EMPTY, 0);
 
         // ── Render a pantalla desde `a` ──
