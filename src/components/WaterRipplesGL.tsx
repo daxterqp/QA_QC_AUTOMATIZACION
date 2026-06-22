@@ -22,10 +22,15 @@ export type WaterGLHandle = {
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
 // Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
-const AUTO_SPEED = 0.19;    // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_SPEED = 0.15;    // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
+// "Twin": dos puntos cercanos sostenidos ~1 s → genera una ola hermosa entre ellos.
+const TWIN_EVERY = 180;    // frames base entre apariciones (~3 s a 60fps)
+const TWIN_HOLD = 60;      // frames sostenidos (~1 s)
+const TWIN_STR = 0.85;     // intensidad sostenida de cada punto
+const TWIN_GAP = 0.07;     // media separación entre los dos puntos (no muy separados)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
 const Y_OFFSET = 0.045;
@@ -212,6 +217,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
       let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
       let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
+      let twinTimer = TWIN_EVERY;         // cuenta regresiva a la próxima aparición "twin"
+      let twinHold = 0;                   // frames restantes sosteniendo los dos puntos
+      let twinA = { x: 0.4, y: 0.5 }, twinB = { x: 0.6, y: 0.5 };
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
         const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
@@ -263,6 +271,20 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           for (let i = 0; i < 3; i++) push((i + 0.5) / 3, sy, 3.0);   // pocos puntos, mucha masa
           sweep.current.y += 0.028;                                    // lento → sostenido
           if (sweep.current.y > 1.2) sweep.current.active = false;
+        }
+
+        // Twin: dos puntos cercanos sostenidos ~1 s → ola hermosa entre ellos (cada ~3 s).
+        if (twinHold > 0) {
+          push(twinA.x, twinA.y, TWIN_STR);
+          push(twinB.x, twinB.y, TWIN_STR);
+          twinHold--;
+        } else if (--twinTimer <= 0) {
+          const cx = 0.22 + Math.random() * 0.56;   // centro (evita bordes)
+          const cy = 0.30 + Math.random() * 0.45;   // zona media
+          twinA = { x: cx - TWIN_GAP, y: cy };
+          twinB = { x: cx + TWIN_GAP, y: cy };
+          twinHold = TWIN_HOLD;
+          twinTimer = TWIN_EVERY + Math.floor(Math.random() * 90);
         }
 
         const flat: number[] = [];
