@@ -222,7 +222,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1fv(gl.getUniformLocation(simP, 'uDropStr'), strs);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
         gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.04);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.44);  // más masa en la ola
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.55);  // más masa en la ola
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         const tmp = a; a = b; b = tmp;
       };
@@ -245,8 +245,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
         while (strs.length < MAX_DROPS) strs.push(0);
 
-        // 3 sub-pasos por frame → las ondas viajan más rápido (más parecido al agua).
+        // 4 sub-pasos por frame → las ondas viajan más rápido (más parecido al agua).
         simStep(flat, strs, count);
+        simStep(EMPTY, EMPTY_STR, 0);
         simStep(EMPTY, EMPTY_STR, 0);
         simStep(EMPTY, EMPTY_STR, 0);
 

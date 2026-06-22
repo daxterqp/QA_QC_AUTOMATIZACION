@@ -464,21 +464,21 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
 
-  // Tarjeta translúcida compacta
+  // Tarjeta translúcida: deja ver el agua detrás (aparece con el fade de entrada).
   card: {
-    backgroundColor: CARD_BG,
+    backgroundColor: 'rgba(244,247,250,0.40)',
     borderRadius: Radius.lg,
     paddingHorizontal: 20, paddingTop: 14, paddingBottom: 14,
     marginTop: -10,
     gap: 9,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
-    ...Shadow.card, shadowOpacity: 0.35, shadowRadius: 24, elevation: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)',
+    ...Shadow.card, shadowOpacity: 0.3, shadowRadius: 24, elevation: 10,
   },
 
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    borderWidth: 1.5, borderColor: Colors.border, borderRadius: 24,
-    paddingVertical: 11, backgroundColor: Colors.white,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.55)', borderRadius: 24,
+    paddingVertical: 11, backgroundColor: 'rgba(255,255,255,0.85)',
   },
   googleBtnText: { fontFamily: FF_BOLD, fontSize: 14, color: Colors.textPrimary },
   createBtn: { alignItems: 'center', paddingVertical: 2 },
@@ -489,14 +489,14 @@ const styles = StyleSheet.create({
   dividerText: { fontFamily: FF_REG, fontSize: 12, color: Colors.textMuted },
 
   field: { position: 'relative' },
-  fieldLabelChip: { position: 'absolute', top: -8, left: 14, zIndex: 2, backgroundColor: CARD_BG, paddingHorizontal: 6 },
-  fieldLabel: { fontFamily: FF_SEMI, fontSize: 9.5, color: Colors.textMuted, letterSpacing: 0.8 },
+  fieldLabelChip: { position: 'absolute', top: -8, left: 14, zIndex: 2, backgroundColor: 'rgba(244,247,250,0.85)', borderRadius: 6, paddingHorizontal: 6 },
+  fieldLabel: { fontFamily: FF_SEMI, fontSize: 9.5, color: Colors.textSecondary, letterSpacing: 0.8 },
   fieldBox: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1.5, borderColor: Colors.border, borderRadius: 22,
-    paddingHorizontal: 18, backgroundColor: Colors.white,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.55)', borderRadius: 22,
+    paddingHorizontal: 18, backgroundColor: 'rgba(255,255,255,0.78)',
   },
-  fieldBoxFocused: { borderColor: Colors.primary },
+  fieldBoxFocused: { borderColor: Colors.primary, backgroundColor: Colors.white },
   fieldInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
 
   recentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -4 },
