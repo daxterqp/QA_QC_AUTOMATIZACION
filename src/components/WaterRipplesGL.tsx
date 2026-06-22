@@ -267,7 +267,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         if (barridoRef.current.active) {
           // BARRIDO: UN SOLO impulso con mucha masa en el frame 0; la onda viaja sola,
           // rápida y casi sin atenuarse (ver c2/damp abajo), y cruza hasta el otro lado.
-          if (barridoRef.current.frame === 0) push(0.5, 0.06, 7.0);   // un click, bastante masa
+          if (barridoRef.current.frame === 0) push(0.5, 0.06, 3.4);   // un click, masa moderada
           barridoRef.current.frame++;
           if (barridoRef.current.frame > 90) barridoRef.current.active = false;
         } else if (em.length > 0) {
@@ -341,9 +341,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         // 3 sub-pasos por frame → menos carga de GPU = framerate más fluido.
         // Durante el barrido: onda RÁPIDA (c2 alto + más sub-pasos) y casi sin atenuar (damp↑)
         // → un solo impulso cruza la pantalla. No toca al resto (ocurre en la transición).
-        const c2 = barridoOn ? 0.92 : 0.5;
+        const c2 = barridoOn ? 0.68 : 0.5;       // rápida pero estable (0.92 reventaba)
         const damp = barridoOn ? 0.997 : 0.99;
-        const sub = barridoOn ? 6 : 3;
+        const sub = barridoOn ? 5 : 3;
         simStep(flat, strs, count, c2, damp);
         for (let i = 1; i < sub; i++) simStep(EMPTY, EMPTY_STR, 0, c2, damp);
 
