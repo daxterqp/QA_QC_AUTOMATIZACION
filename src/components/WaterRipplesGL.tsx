@@ -29,7 +29,7 @@ const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
 // Orbital "círculos" en la esquina superior derecha (gesto grabado por el usuario).
 const CIRCLE_SPEED = 0.22;   // rad/frame (período ≈ 2π/este). Subir = más rápido.
 const CIRCLE_CX = 0.85;      // centro X de la elipse
-const CIRCLE_CY = 0.09;      // centro Y (cerca del borde superior)
+const CIRCLE_CY = 0.91;      // centro Y en espacio de sim (1 = arriba) → esquina superior
 const CIRCLE_RX = 0.075;     // radio horizontal
 const CIRCLE_RY = 0.05;      // radio vertical
 const CIRCLE_STR = 0.5;      // intensidad del trazo
