@@ -1,6 +1,8 @@
 import 'react-native-screens';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from '@expo-google-fonts/montserrat';
+import { MONTSERRAT_FONTS, applyGlobalMontserrat } from './theme/fonts';
 import { AuthProvider } from '@context/AuthContext';
 import { NetworkProvider, useNetwork } from '@context/NetworkContext';
 import { CroquisCaptureProvider } from '@context/CroquisCaptureContext';
@@ -39,6 +41,12 @@ function AppInner() {
 }
 
 export default function App() {
+  // Tipografía global Montserrat (toda la app). Carga al arranque; mientras tanto
+  // dejamos el splash nativo (render null). Idempotente.
+  const [fontsLoaded] = useFonts(MONTSERRAT_FONTS);
+  if (fontsLoaded) applyGlobalMontserrat();
+  if (!fontsLoaded) return null;
+
   return (
     <LanguageProvider>
       <NetworkProvider>

@@ -270,10 +270,10 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.navy },
   flex: { flex: 1 },
-  scroll: { flexGrow: 1, justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 24, paddingTop: SCREEN_H * 0.085, paddingBottom: 32 },
+  scroll: { flexGrow: 1, justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 24, paddingTop: SCREEN_H * 0.07, paddingBottom: 32 },
 
-  logoWrap: { alignItems: 'center', marginBottom: 4 },
-  logo: { width: 336, height: 206 },
+  logoWrap: { alignItems: 'center', marginBottom: 0 },
+  logo: { width: 374, height: 230 },
 
   tapHint: {
     position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
     borderRadius: Radius.lg,
     paddingHorizontal: 20, paddingTop: 18, paddingBottom: 18,
-    marginTop: 8,
+    marginTop: -10,
     gap: 12,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
     ...Shadow.card, shadowOpacity: 0.35, shadowRadius: 24, elevation: 12,
