@@ -122,6 +122,7 @@ function program(gl: any, vs: string, fs: string) {
 const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>(({ onUnsupported }, ref) => {
   const queue = useRef<number[]>([]);              // cola de impactos en triplets (x, y, intensidad)
   const lastUv = useRef({ x: 0.5, y: 0.5 });
+  const sweep = useRef({ active: false, y: 0 });   // barrido fuerte abajo→arriba (entrar al login)
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -145,8 +146,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       lastUv.current = { x, y };
     },
     bigWave() {
-      // Fila de impactos FUERTES en el borde inferior → ola plana que sube.
-      for (let i = 0; i < 8; i++) push((i + 0.5) / 8, 0.05, 3.2);
+      // Arranca un BARRIDO de mucha masa que sube (como deslizar la pantalla hacia arriba).
+      sweep.current = { active: true, y: 0.0 };
     },
   }));
 
@@ -232,6 +233,14 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         if (--ambient <= 0) {
           push(Math.random(), Math.random(), 0.4);    // más marcadas pero menos que el toque
           ambient = 45 + Math.floor(Math.random() * 90);
+        }
+
+        // Barrido de entrada: banda ancha y FUERTE que sube de abajo hacia arriba.
+        if (sweep.current.active) {
+          const sy = sweep.current.y;
+          for (let i = 0; i < 6; i++) push((i + 0.5) / 6, sy, 2.6);
+          sweep.current.y += 0.05;
+          if (sweep.current.y > 1.15) sweep.current.active = false;
         }
 
         const flat: number[] = [];

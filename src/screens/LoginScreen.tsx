@@ -120,7 +120,7 @@ export default function LoginScreen() {
     }
   };
   const renderContent = (inner: React.ReactNode) => useGL
-    ? <View style={styles.flex} onLayout={onWrapLayout} onTouchStart={onTouchGL} onTouchMove={onTouchGLMove}>{inner}</View>
+    ? <View style={styles.flex} onLayout={onWrapLayout} onTouchStartCapture={onTouchGL} onTouchMoveCapture={onTouchGLMove}>{inner}</View>
     : <WaterRipples onInteract={resetIdle}>{inner}</WaterRipples>;
 
   const canContinue = /\S+@\S+\.\S+/.test(email.trim()) && password.length >= 1;
