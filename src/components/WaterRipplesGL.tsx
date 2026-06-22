@@ -20,9 +20,9 @@ export type WaterGLHandle = {
   bigWave: () => void;
 };
 
-const MAX_DROPS = 8; // impactos inyectados por frame (rastro del arrastre)
+const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
 // Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
-const AUTO_SPEED = 0.22;    // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_SPEED = 1.0;     // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 1.1; // desfase entre los dos dedos (no van en lockstep)
@@ -44,8 +44,8 @@ uniform vec2 uTexel;
 uniform float uC2;
 uniform float uDamp;
 uniform float uAspect;     // H/W → gota circular en pantalla
-uniform vec2 uDrops[8];
-uniform float uDropStr[8];   // intensidad por gota (toque=1.0, ambiente<1)
+uniform vec2 uDrops[16];
+uniform float uDropStr[16];  // intensidad por gota (toque=1.0, ambiente<1)
 uniform int uDropCount;
 uniform float uDropRadius;
 uniform float uDropStrength;
@@ -58,7 +58,7 @@ void main(){
   float lap = (n + s + e + w) - 4.0 * c.r;
   float vel = (c.g + lap * uC2) * uDamp;
   float h = c.r + vel;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < 16; i++) {
     if (i >= uDropCount) break;
     vec2 diff = vUv - uDrops[i];
     diff.y *= uAspect;                            // corrige elongación en Y
@@ -211,6 +211,12 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const EMPTY_STR = new Array(MAX_DROPS).fill(0);
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
       let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
+      let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
+      // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
+      const pushSeg = (x0: number, x1: number, y: number, str: number) => {
+        const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
+        for (let i = 1; i <= steps; i++) push(x0 + (x1 - x0) * (i / steps), y, str);
+      };
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
       const simStep = (flat: number[], strs: number[], count: number) => {
@@ -239,8 +245,11 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         autoPhase += AUTO_SPEED;
         const sL = (1 - Math.cos(autoPhase)) * 0.5;                  // izquierdo 0→1→0
         const sR = (1 - Math.cos(autoPhase + AUTO_PHASE_OFF)) * 0.5; // derecho desfasado
-        push(0.06 + 0.44 * sL, AUTO_Y, AUTO_STR);        // izquierdo: borde izq → centro
-        push(0.94 - 0.44 * sR, AUTO_Y, AUTO_STR);        // derecho: borde der → centro
+        const lx = 0.06 + 0.44 * sL;                     // izquierdo: borde izq → centro
+        const rx = 0.94 - 0.44 * sR;                     // derecho: borde der → centro
+        pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);           // interpolado → trazo continuo
+        pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
+        prevLX = lx; prevRX = rx;
 
         // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
         if (--ambient <= 0) {
