@@ -229,26 +229,23 @@ export default function LoginScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Abajo: correo + contraseña + ingresar */}
-            <View style={styles.field}>
-              <View style={styles.fieldLabelChip}><Text style={styles.fieldLabel}>{t('login.emailLabel')}</Text></View>
-              <View style={[styles.fieldBox, focused === 'email' && styles.fieldBoxFocused]}>
-                <TextInput
-                  style={styles.fieldInput}
-                  placeholder={t('login.emailPlaceholder')}
-                  placeholderTextColor={Colors.textMuted}
-                  value={email}
-                  onChangeText={setEmail}
-                  onFocus={() => setFocused('email')}
-                  onBlur={() => setFocused(null)}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="email"
-                  textContentType="emailAddress"
-                  returnKeyType="next"
-                />
-              </View>
+            {/* Abajo: correo + contraseña + ingresar (sin etiquetas, solo recuadros) */}
+            <View style={[styles.fieldBox, focused === 'email' && styles.fieldBoxFocused]}>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={t('login.emailPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                onFocus={() => setFocused('email')}
+                onBlur={() => setFocused(null)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                returnKeyType="next"
+              />
             </View>
 
             {recentEmails.length > 0 && email.length === 0 && (
@@ -262,25 +259,22 @@ export default function LoginScreen() {
               </View>
             )}
 
-            <View style={styles.field}>
-              <View style={styles.fieldLabelChip}><Text style={styles.fieldLabel}>{t('login.passwordLabel')}</Text></View>
-              <View style={[styles.fieldBox, focused === 'password' && styles.fieldBoxFocused]}>
-                <TextInput
-                  style={styles.fieldInput}
-                  placeholder={t('login.passwordPlaceholder')}
-                  placeholderTextColor={Colors.textMuted}
-                  value={password}
-                  onChangeText={setPassword}
-                  onFocus={() => setFocused('password')}
-                  onBlur={() => setFocused(null)}
-                  secureTextEntry={!showPassword}
-                  returnKeyType="done"
-                  onSubmitEditing={handleLogin}
-                />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
-                </TouchableOpacity>
-              </View>
+            <View style={[styles.fieldBox, focused === 'password' && styles.fieldBoxFocused]}>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={t('login.passwordPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                value={password}
+                onChangeText={setPassword}
+                onFocus={() => setFocused('password')}
+                onBlur={() => setFocused(null)}
+                secureTextEntry={!showPassword}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+              />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity onPress={openReset} style={styles.forgotBtn}>
@@ -464,15 +458,11 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
 
-  // Tarjeta translúcida: deja ver el agua detrás (aparece con el fade de entrada).
+  // Sin "cajetín": las opciones flotan directo sobre el agua (solo contenedor + fade).
   card: {
-    backgroundColor: 'rgba(244,247,250,0.40)',
-    borderRadius: Radius.lg,
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 14,
-    marginTop: -10,
-    gap: 9,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)',
-    ...Shadow.card, shadowOpacity: 0.3, shadowRadius: 24, elevation: 10,
+    paddingHorizontal: 4, paddingTop: 8, paddingBottom: 12,
+    marginTop: 0,
+    gap: 12,
   },
 
   googleBtn: {
@@ -482,11 +472,11 @@ const styles = StyleSheet.create({
   },
   googleBtnText: { fontFamily: FF_BOLD, fontSize: 14, color: Colors.textPrimary },
   createBtn: { alignItems: 'center', paddingVertical: 2 },
-  createText: { fontFamily: FF_BOLD, fontSize: 13.5, color: Colors.primary },
+  createText: { fontFamily: FF_BOLD, fontSize: 13.5, color: Colors.white },
 
   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 2 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { fontFamily: FF_REG, fontSize: 12, color: Colors.textMuted },
+  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.28)' },
+  dividerText: { fontFamily: FF_REG, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
 
   field: { position: 'relative' },
   fieldLabelChip: { position: 'absolute', top: -8, left: 14, zIndex: 2, backgroundColor: 'rgba(244,247,250,0.85)', borderRadius: 6, paddingHorizontal: 6 },
@@ -508,7 +498,7 @@ const styles = StyleSheet.create({
   recentChipText: { fontFamily: FF_REG, fontSize: 11, color: Colors.textSecondary, maxWidth: 200 },
 
   forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
-  forgotText: { fontFamily: FF_SEMI, fontSize: 12.5, color: Colors.primary },
+  forgotText: { fontFamily: FF_SEMI, fontSize: 12.5, color: 'rgba(255,255,255,0.9)' },
 
   // Botón Ingresar con degradado
   btnWrap: {
