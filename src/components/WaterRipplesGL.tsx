@@ -36,6 +36,7 @@ uniform float uC2;
 uniform float uDamp;
 uniform float uAspect;     // H/W → gota circular en pantalla
 uniform vec2 uDrops[8];
+uniform float uDropStr[8];   // intensidad por gota (toque=1.0, ambiente<1)
 uniform int uDropCount;
 uniform float uDropRadius;
 uniform float uDropStrength;
@@ -52,7 +53,7 @@ void main(){
     if (i >= uDropCount) break;
     vec2 diff = vUv - uDrops[i];
     diff.y *= uAspect;                            // corrige elongación en Y
-    h -= uDropStrength * smoothstep(uDropRadius, 0.0, length(diff));
+    h -= uDropStrength * uDropStr[i] * smoothstep(uDropRadius, 0.0, length(diff));
   }
   gl_FragColor = vec4(h, vel, 0.0, 1.0);
 }
@@ -115,12 +116,12 @@ function program(gl: any, vs: string, fs: string) {
 }
 
 const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>(({ onUnsupported }, ref) => {
-  const queue = useRef<number[]>([]);              // cola de impactos (x,y uv, y ya flippeado)
+  const queue = useRef<number[]>([]);              // cola de impactos en triplets (x, y, intensidad)
   const lastUv = useRef({ x: 0.5, y: 0.5 });
 
-  const push = (x: number, y: number) => {
-    queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)));
-    if (queue.current.length > 128) queue.current.splice(0, queue.current.length - 128);
+  const push = (x: number, y: number, str: number) => {
+    queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
+    if (queue.current.length > 192) queue.current.splice(0, queue.current.length - 192);
   };
 
   useImperativeHandle(ref, () => ({
@@ -132,10 +133,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         const steps = Math.min(10, Math.max(1, Math.floor(d / 0.012)));
         for (let i = 1; i <= steps; i++) {
           const t = i / steps;
-          push(lastUv.current.x + (x - lastUv.current.x) * t, lastUv.current.y + (y - lastUv.current.y) * t);
+          push(lastUv.current.x + (x - lastUv.current.x) * t, lastUv.current.y + (y - lastUv.current.y) * t, 1.0);
         }
       } else {
-        push(x, y);
+        push(x, y, 1.0);
       }
       lastUv.current = { x, y };
     },
@@ -193,9 +194,11 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const EMPTY = new Array(MAX_DROPS * 2).fill(0);
+      const EMPTY_STR = new Array(MAX_DROPS).fill(0);
+      let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
-      const simStep = (flat: number[], count: number) => {
+      const simStep = (flat: number[], strs: number[], count: number) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
         gl.viewport(0, 0, SIM_W, SIM_H);
         gl.useProgram(simP);
@@ -208,6 +211,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1f(gl.getUniformLocation(simP, 'uDamp'), 0.99);   // ondas vibran más (agua)
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
+        gl.uniform1fv(gl.getUniformLocation(simP, 'uDropStr'), strs);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
         gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.04);
         gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.44);  // más masa en la ola
@@ -216,18 +220,27 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const loop = () => {
+        // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
+        if (--ambient <= 0) {
+          push(Math.random(), Math.random(), 0.18);   // intensidad baja = sutil
+          ambient = 50 + Math.floor(Math.random() * 110);
+        }
+
         const flat: number[] = [];
+        const strs: number[] = [];
         let count = 0;
-        while (count < MAX_DROPS && queue.current.length >= 2) {
+        while (count < MAX_DROPS && queue.current.length >= 3) {
           flat.push(queue.current.shift()!, queue.current.shift()!);
+          strs.push(queue.current.shift()!);
           count++;
         }
         while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
+        while (strs.length < MAX_DROPS) strs.push(0);
 
         // 3 sub-pasos por frame → las ondas viajan más rápido (más parecido al agua).
-        simStep(flat, count);
-        simStep(EMPTY, 0);
-        simStep(EMPTY, 0);
+        simStep(flat, strs, count);
+        simStep(EMPTY, EMPTY_STR, 0);
+        simStep(EMPTY, EMPTY_STR, 0);
 
         // ── Render a pantalla desde `a` ──
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
