@@ -123,12 +123,20 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
   const onContextCreate = (gl: any) => {
     try {
-      // Capacidad: half-float + render a FBO half-float.
-      const ext = gl.getExtension('OES_texture_half_float');
-      gl.getExtension('OES_texture_half_float_linear');
-      const colorExt = gl.getExtension('EXT_color_buffer_half_float');
-      const HALF = ext ? ext.HALF_FLOAT_OES : null;
-      if (!HALF || !colorExt) { onUnsupported?.(); return; }
+      // expo-gl entrega WebGL2 en equipos modernos (half-float es core: RGBA16F/HALF_FLOAT)
+      // y WebGL1 en otros (extensión OES_texture_half_float). Soportamos ambos.
+      const isGL2 = typeof (gl as any).RGBA16F !== 'undefined' && typeof (gl as any).HALF_FLOAT !== 'undefined';
+      let internalFormat: number; let texType: number;
+      if (isGL2) {
+        gl.getExtension('EXT_color_buffer_float');       // habilita render a half/float
+        internalFormat = (gl as any).RGBA16F;
+        texType = (gl as any).HALF_FLOAT;
+      } else {
+        const ext = gl.getExtension('OES_texture_half_float');
+        if (!ext) { onUnsupported?.(); return; }
+        internalFormat = gl.RGBA;
+        texType = ext.HALF_FLOAT_OES;
+      }
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -137,9 +145,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const makeTarget = () => {
         const tex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, HALF, null);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, SIM_W, SIM_H, 0, gl.RGBA, texType, null);
+        // NEAREST: evita depender de filtrado lineal sobre half-float.
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         const fb = gl.createFramebuffer();
