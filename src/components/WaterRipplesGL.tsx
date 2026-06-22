@@ -262,11 +262,16 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const loop = () => {
         const em = emittersRef.current;
         if (barridoRef.current.active) {
-          // BARRIDO: UN punto desde el centro, mucha masa. Sube LENTO al inicio y va
-          // acelerando, recorriendo solo de abajo hasta la MITAD de la pantalla (y=0.5).
-          push(0.5, barridoRef.current.y, 2.2);
+          // BARRIDO: un FRENTE en forma de ARCO (∩, centro más alto) a lo ancho de la
+          // pantalla, que sube → recorre como un arco (en vez del punto que dejaba una V).
           const by = barridoRef.current.y;
-          const p = Math.min(1, (by - 0.06) / 0.607);      // 0 abajo → 1 en 2/3 (y≈0.667)
+          const N = 14;                                    // puntos del arco a lo ancho
+          for (let i = 0; i <= N; i++) {
+            const x = i / N;
+            const yArc = by + 0.13 * Math.sin(Math.PI * x);  // arco: sube en el centro
+            push(x, yArc, 0.85);                             // masa repartida (no revienta)
+          }
+          const p = Math.min(1, by / 0.667);               // 0 abajo → 1 en 2/3
           const v = 0.0011 + 0.0132 * p;                   // lento al inicio, acelera (+10%)
           barridoRef.current.y += v;
           if (barridoRef.current.y > 0.667) barridoRef.current.active = false;
