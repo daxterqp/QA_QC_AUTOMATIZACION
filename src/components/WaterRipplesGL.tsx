@@ -19,7 +19,7 @@ export type WaterGLHandle = { drop: (xNorm: number, yNorm: number, isMove?: bool
 const MAX_DROPS = 8; // impactos inyectados por frame (rastro del arrastre)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
-const Y_OFFSET = 0.03;
+const Y_OFFSET = 0.045;
 
 const QUAD_VS = `
 attribute vec2 aPos;
@@ -209,8 +209,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.03);   // olas chicas
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.28);
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.035);  // ~15% más grande
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.32);  // ~15% más fuerte
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         const tmp = a; a = b; b = tmp;
       };
