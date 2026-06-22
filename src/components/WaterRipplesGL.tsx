@@ -267,9 +267,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.44 * sL;
           const rx = 0.94 - 0.44 * sR;
-          // Vaivén en Y sutil (no pronunciado).
-          const lyy = AUTO_Y + 0.02 * Math.sin(autoPhaseL * 1.6);
-          const ryy = AUTO_Y + 0.02 * Math.sin(autoPhaseR * 1.15 + 0.8);
+          // Vaivén en Y muy sutil (apenas perceptible).
+          const lyy = AUTO_Y + 0.01 * Math.sin(autoPhaseL * 1.6);
+          const ryy = AUTO_Y + 0.01 * Math.sin(autoPhaseR * 1.15 + 0.8);
           pushSeg(prevLX, lx, lyy, AUTO_STR);
           pushSeg(prevRX, rx, ryy, AUTO_STR);
           prevLX = lx; prevRX = rx;
