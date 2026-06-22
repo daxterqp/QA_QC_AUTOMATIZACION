@@ -140,7 +140,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
   const lastUv = useRef({ x: 0.5, y: 0.5 });
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
-  const barridoRef = useRef({ active: false, y: 0 });   // una onda ancha que sube lento (entrada)
+  const barridoRef = useRef({ active: false, frame: 0 });   // un solo impulso que cruza la pantalla (entrada)
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -164,8 +164,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       lastUv.current = { x, y };
     },
     bigWave() {
-      // Una ÚNICA onda ancha que sube lento desde abajo.
-      barridoRef.current = { active: true, y: 0.06 };
+      // Un ÚNICO impulso con mucha masa: la onda viaja sola (rápida, poco atenuada) y cruza.
+      barridoRef.current = { active: true, frame: 0 };
     },
   }));
 
@@ -238,8 +238,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
-      // c2 = velocidad de onda (c²): más bajo = la onda se expande más lento.
-      const simStep = (flat: number[], strs: number[], count: number, c2 = 0.5) => {
+      // c2 = velocidad de onda (c²): más alto = se expande más rápido.
+      // damp = atenuación (cercano a 1 = casi no se apaga → la onda llega más lejos).
+      const simStep = (flat: number[], strs: number[], count: number, c2 = 0.5, damp = 0.99) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
         gl.viewport(0, 0, SIM_W, SIM_H);
         gl.useProgram(simP);
@@ -249,7 +250,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1i(gl.getUniformLocation(simP, 'uState'), 0);
         gl.uniform2f(gl.getUniformLocation(simP, 'uTexel'), texel[0], texel[1]);
         gl.uniform1f(gl.getUniformLocation(simP, 'uC2'), c2);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDamp'), 0.99);   // ondas vibran más (agua)
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDamp'), damp);   // ondas vibran más (agua)
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
         gl.uniform1fv(gl.getUniformLocation(simP, 'uDropStr'), strs);
@@ -262,16 +263,13 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
       const loop = () => {
         const em = emittersRef.current;
-        const barridoOn = barridoRef.current.active;   // onda más lenta solo durante el barrido
+        const barridoOn = barridoRef.current.active;   // régimen especial solo durante el barrido
         if (barridoRef.current.active) {
-          // BARRIDO: UN punto desde el centro, MUCHA masa. Sube LENTO y va acelerando,
-          // recorriendo de abajo hasta 2/3 de la pantalla (y≈0.667). Onda lenta (ver c2).
-          push(0.5, barridoRef.current.y, 3.4);            // más masa
-          const by = barridoRef.current.y;
-          const p = Math.min(1, (by - 0.06) / 0.607);      // 0 abajo → 1 en 2/3 (y≈0.667)
-          const v = 0.0007 + 0.009 * p;                    // más lento al subir
-          barridoRef.current.y += v;
-          if (barridoRef.current.y > 0.667) barridoRef.current.active = false;
+          // BARRIDO: UN SOLO impulso con mucha masa en el frame 0; la onda viaja sola,
+          // rápida y casi sin atenuarse (ver c2/damp abajo), y cruza hasta el otro lado.
+          if (barridoRef.current.frame === 0) push(0.5, 0.06, 7.0);   // un click, bastante masa
+          barridoRef.current.frame++;
+          if (barridoRef.current.frame > 90) barridoRef.current.active = false;
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
@@ -341,11 +339,13 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         while (strs.length < MAX_DROPS) strs.push(0);
 
         // 3 sub-pasos por frame → menos carga de GPU = framerate más fluido.
-        // Durante el barrido bajamos c2 → onda más lenta (no toca al resto: ocurre en la transición).
-        const c2 = barridoOn ? 0.26 : 0.5;
-        simStep(flat, strs, count, c2);
-        simStep(EMPTY, EMPTY_STR, 0, c2);
-        simStep(EMPTY, EMPTY_STR, 0, c2);
+        // Durante el barrido: onda RÁPIDA (c2 alto + más sub-pasos) y casi sin atenuar (damp↑)
+        // → un solo impulso cruza la pantalla. No toca al resto (ocurre en la transición).
+        const c2 = barridoOn ? 0.92 : 0.5;
+        const damp = barridoOn ? 0.997 : 0.99;
+        const sub = barridoOn ? 6 : 3;
+        simStep(flat, strs, count, c2, damp);
+        for (let i = 1; i < sub; i++) simStep(EMPTY, EMPTY_STR, 0, c2, damp);
 
         // ── Render a pantalla desde `a` ──
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
