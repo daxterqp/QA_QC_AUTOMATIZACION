@@ -211,7 +211,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
-    } catch {
+    } catch (err) {
+      console.warn('[WaterGL] no soportado / error:', (err as Error)?.message ?? err);
       onUnsupported?.();
     }
   };
