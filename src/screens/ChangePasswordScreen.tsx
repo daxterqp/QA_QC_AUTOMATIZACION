@@ -9,6 +9,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
+import { supabase } from '@config/supabase';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChangePassword'>;
 
@@ -31,19 +32,24 @@ export default function ChangePasswordScreen({ navigation }: Props) {
       return;
     }
 
-    // Verificar contraseña actual
-    const storedPassword = currentUser.password ?? currentUser.name;
-    if (current !== storedPassword) {
-      Alert.alert(t('changePass.errorTitle'), t('changePass.errorCurrentWrong'));
-      return;
-    }
-
     if (newPass.length < 4) {
       Alert.alert(t('changePass.errorTitle'), t('changePass.errorTooShort'));
       return;
     }
 
     setLoading(true);
+    // Verificar la contraseña ACTUAL re-autenticando contra Supabase Auth
+    // (ya no se compara contra el valor legacy de users.password).
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const email = authUser?.email ?? undefined;
+    const reauth = email
+      ? await supabase.auth.signInWithPassword({ email, password: current })
+      : { error: { message: 'no-email' } };
+    if (reauth.error) {
+      setLoading(false);
+      Alert.alert(t('changePass.errorTitle'), t('changePass.errorCurrentWrong'));
+      return;
+    }
     await changePassword(currentUser.id, newPass);
     setLoading(false);
 
