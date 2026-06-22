@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getServerUser } from '@lib/serverAuth';
+import { keyBelongsToAccessibleProject } from '../s3-shared/projectAccess';
 
 const s3 = new S3Client({
   region: process.env.NEXT_PUBLIC_AWS_REGION!,
@@ -16,6 +17,11 @@ export async function POST(req: NextRequest) {
 
   const { key } = await req.json();
   if (!key) return NextResponse.json({ error: 'Missing key' }, { status: 400 });
+
+  // Autorización horizontal (FAIL-CLOSED): solo se puede borrar dentro de
+  // `projects/<proyecto accesible>/...`. Assets globales NO son borrables acá.
+  const allowed = await keyBelongsToAccessibleProject(String(key), { allowGlobal: false });
+  if (!allowed) return new Response('Forbidden', { status: 403 });
 
   await s3.send(new DeleteObjectCommand({
     Bucket: process.env.NEXT_PUBLIC_AWS_BUCKET!,

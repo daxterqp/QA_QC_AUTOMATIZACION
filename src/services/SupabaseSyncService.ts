@@ -358,6 +358,21 @@ function isCodeUniqueViolation(error: { code?: string; message?: string; details
   return error.code === '23505' && txt.includes('protocols_code_uniq');
 }
 
+/** v47 — "El padre todavía no está en la nube / no es accesible".
+ *  Cubre DOS escenarios donde subir primero el padre y reintentar el hijo lo arregla:
+ *   1. FK violation (Postgres 23503 / mensaje "foreign key"): el padre aún no existe.
+ *   2. RLS DENEGADO (Postgres 42501, PostgREST PGRST301, o el mensaje de
+ *      "row-level security"): tras activar RLS estricto, las tablas hijas tienen
+ *      `with_check` que exige que el PADRE ya exista y sea accesible. Si el hijo
+ *      llega antes que el padre, RLS lo rechaza igual que una FK. */
+function isParentNotReadyError(error: { code?: string; message?: string; details?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const code = error.code ?? '';
+  if (code === '23503' || code === '42501' || code === 'PGRST301') return true;
+  const txt = `${error.message ?? ''} ${error.details ?? ''}`;
+  return /foreign key|row-level security|violates row-level security/i.test(txt);
+}
+
 // Mutex de módulo (promise-chain): el SyncWorker paraleliza ops del mismo tipo
 // — sin serializar, N protocolos en colisión consultarían el max remoto a la
 // vez y elegirían TODOS el mismo seq nuevo (volviendo a colisionar). Con el
@@ -1005,7 +1020,10 @@ export async function pushProtocolItemStrict(itemId: string): Promise<void> {
   // solo el item). Empujamos el padre y reintentamos UNA vez. Si el padre ya no existe
   // localmente (protocolo borrado), el item quedó huérfano → completamos la op para no
   // reintentar infinitamente (no se sube un item sin padre).
-  if (/foreign key|protocol_items_protocol_id_fkey/i.test(error.message ?? '')) {
+  // v47 — Mismo auto-saneo ante RLS denegado (42501/PGRST301/"row-level security"):
+  // el `with_check` de protocol_items exige que el protocolo padre ya exista y sea
+  // accesible; si el hijo llega primero, RLS lo rechaza igual que una FK.
+  if (isParentNotReadyError(error)) {
     const parentId = (item as any).protocolId ?? (item as any)._raw?.protocol_id;
     const parent = parentId ? await protocolsCollection.find(parentId).catch(() => null) : null;
     if (!parent || isLocalDeleted(parent)) return; // huérfano → no reintentar
@@ -1974,13 +1992,33 @@ export async function findProjectInSupabase(name: string): Promise<Record<string
  * Sincroniza usuarios globalmente (push local → cloud, pull cloud → local).
  * No requiere projectId porque los usuarios son globales.
  */
+/** v47 — Fila de `users` para upsert SOLO con columnas de perfil.
+ *  Tras activar RLS estricto, ya NO subimos `password`/`pin` (texto plano legacy:
+ *  la credencial vive en Supabase Auth, no en `public.users`). También quitamos
+ *  cualquier `auth_id`/`email` que pudiera colarse: NO existen en el _raw local
+ *  (los gestiona Auth/el CREADOR) y enviarlos pisaría/rompería el perfil remoto.
+ *  Allowlist explícita: id, name, apellido, role, signature_uri, is_active,
+ *  created_at, updated_at. */
+function toUserProfileRow(raw: any): any {
+  const row = toRow(raw);
+  const PROFILE_COLS = [
+    'id', 'name', 'apellido', 'role', 'signature_uri', 'is_active',
+    'created_at', 'updated_at',
+  ];
+  const out: Record<string, any> = {};
+  for (const c of PROFILE_COLS) {
+    if (c in row) out[c] = row[c];
+  }
+  return out;
+}
+
 export async function syncAllUsers(): Promise<void> {
   // Push todos los usuarios locales a Supabase
   const localUsers = await usersCollection.query().fetch();
   if (localUsers.length > 0) {
     await supabase
       .from('users')
-      .upsert(localUsers.map((u) => toRow((u as any)._raw)), { onConflict: 'id' });
+      .upsert(localUsers.map((u) => toUserProfileRow((u as any)._raw)), { onConflict: 'id' });
   }
 
   // Pull todos los usuarios de Supabase que no existan localmente
@@ -2054,9 +2092,10 @@ export async function restoreUserProjectsFromCloud(userId: string, role?: string
 export async function pushUserToSupabase(userId: string): Promise<void> {
   try {
     const user = await usersCollection.find(userId);
+    // v47 — Solo columnas de perfil (sin password/pin/auth_id/email): ver toUserProfileRow.
     await supabase
       .from('users')
-      .upsert([toRow((user as any)._raw)], { onConflict: 'id' });
+      .upsert([toUserProfileRow((user as any)._raw)], { onConflict: 'id' });
   } catch { /* usuario no encontrado, ignorar */ }
 }
 

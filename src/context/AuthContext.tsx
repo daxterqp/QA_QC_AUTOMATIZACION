@@ -85,7 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const { data: remoteUsers } = await supabase.from('users').select('*').order('created_at', { ascending: true });
           const remoteList = remoteUsers ?? [];
 
-          // Deduplicar: si hay dos usuarios con mismo name+apellido, quedarse con el más antiguo
+          // Deduplicar: si hay dos usuarios con mismo name+apellido, quedarse con el más antiguo.
+          // Dedupe SOLO local (la lista materializada en WatermelonDB). Ya NO se borra
+          // de Supabase: con RLS estricto el DELETE en `users` está denegado y el
+          // try/catch lo tragaba (escritura inoperante). Las filas remotas duplicadas
+          // las resuelve el CREADOR / la gestión de cuentas, no este sync de arranque.
           const seen = new Map<string, any>();
           const duplicateIds: string[] = [];
           for (const r of remoteList) {
@@ -95,10 +99,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } else {
               seen.set(key, r);
             }
-          }
-          // Borrar duplicados de Supabase
-          if (duplicateIds.length > 0) {
-            await supabase.from('users').delete().in('id', duplicateIds);
           }
           const dedupedList = remoteList.filter((r: any) => !duplicateIds.includes(r.id));
           const remoteIds = new Set(dedupedList.map((r: any) => r.id));

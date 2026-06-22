@@ -7,6 +7,32 @@ import type { User, UserRole } from '@/types';
 const supabase = createClient();
 const USERS_KEY = ['users'] as const;
 
+/**
+ * Invoca la Edge Function `admin-users` (alta/baja/edición de usuarios bajo RLS
+ * estricto: INSERT/DELETE directo a `users` está denegado para todos). El JWT del
+ * usuario lo adjunta automáticamente `functions.invoke`.
+ *
+ * Cuando la función responde con un código no-2xx, supabase-js arroja un
+ * `FunctionsHttpError` cuyo `.context` es el `Response`; extraemos el `{ error }`
+ * del body para propagar un mensaje legible en vez de "Edge Function returned a
+ * non-2xx status code".
+ */
+async function invokeAdminUsers<T = { ok: true; id?: string }>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let message = error.message ?? String(error);
+    const ctx = (error as { context?: unknown }).context;
+    if (ctx && typeof (ctx as Response).json === 'function') {
+      try {
+        const parsed = await (ctx as Response).json();
+        if (parsed?.error) message = parsed.error;
+      } catch { /* body no era JSON; conservamos el mensaje genérico */ }
+    }
+    throw new Error(message);
+  }
+  return data as T;
+}
+
 export function useUsers() {
   return useQuery<User[]>({
     queryKey: USERS_KEY,
@@ -23,34 +49,33 @@ export function useUsers() {
 }
 
 interface UserInput {
+  /** Login es por EMAIL → obligatorio en el alta. */
+  email: string;
   name: string;
   apellido: string | null;
   role: UserRole;
+  /** En el alta es la contraseña inicial (obligatoria); en edición, reset opcional. */
   password: string | null;
+  /** Accesos a proyectos a crear junto con el usuario (la Edge Function los inserta). */
+  projectIds?: string[];
 }
 
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: UserInput): Promise<User> => {
-      const now = Date.now();
-      const { data, error } = await supabase
-        .from('users')
-        .insert({
-          id: crypto.randomUUID(),
-          name: input.name.trim(),
-          apellido: input.apellido?.trim() || null,
-          role: input.role,
-          password: input.password?.trim() || null,
-          pin: null,
-          signature_uri: null,
-          created_at: now,
-          updated_at: now,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data as User;
+    // El alta NO es un INSERT directo (denegado por RLS): va por la Edge Function
+    // `admin-users` action 'create', que crea la cuenta de Auth + la fila en `users`.
+    mutationFn: async (input: UserInput): Promise<{ id: string }> => {
+      const res = await invokeAdminUsers<{ ok: true; id: string }>({
+        action: 'create',
+        email: input.email.trim(),
+        password: input.password?.trim() || '',
+        name: input.name.trim(),
+        apellido: input.apellido?.trim() || null,
+        role: input.role,
+        projectIds: input.projectIds ?? [],
+      });
+      return { id: res.id };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: USERS_KEY }),
   });
@@ -58,15 +83,18 @@ export function useCreateUser() {
 
 export function useUpdateUser() {
   const qc = useQueryClient();
+  // Edición vía Edge Function `admin-users` action 'update' (consistencia + reset de
+  // password/email tocan Supabase Auth, que requiere service_role).
   return useMutation({
     mutationFn: async ({ id, ...input }: { id: string } & Partial<UserInput>) => {
-      const patch: Record<string, unknown> = { updated_at: Date.now() };
-      if (input.name !== undefined)     patch.name = input.name.trim();
-      if (input.apellido !== undefined) patch.apellido = input.apellido?.trim() || null;
-      if (input.role !== undefined)     patch.role = input.role;
-      if (input.password !== undefined) patch.password = input.password?.trim() || null;
-      const { error } = await supabase.from('users').update(patch).eq('id', id);
-      if (error) throw error;
+      await invokeAdminUsers({
+        action: 'update',
+        userId: id,
+        ...(input.role !== undefined ? { role: input.role } : {}),
+        ...(input.email !== undefined ? { email: input.email?.trim() || undefined } : {}),
+        // password vacío = no resetear; solo enviamos si trae valor.
+        ...(input.password?.trim() ? { password: input.password.trim() } : {}),
+      });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: USERS_KEY }),
   });
@@ -74,10 +102,10 @@ export function useUpdateUser() {
 
 export function useDeleteUser() {
   const qc = useQueryClient();
+  // Baja = soft-delete (is_active=false) vía Edge Function (DELETE directo denegado por RLS).
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('users').delete().eq('id', id);
-      if (error) throw error;
+      await invokeAdminUsers({ action: 'delete', userId: id });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: USERS_KEY }),
   });

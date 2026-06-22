@@ -192,14 +192,15 @@ export default function UsersPage() {
           onClose={() => setShowCreate(false)}
           onSubmit={async ({ projectIds, ...input }) => {
             try {
-              const u = await create.mutateAsync(input);
-              if (u?.id && input.role !== 'CREATOR') await setAccess.mutateAsync({ userId: u.id, projectIds });
+              // La Edge Function crea la cuenta + inserta los accesos (projectIds)
+              // en una sola operación atómica.
+              await create.mutateAsync({ ...input, projectIds });
               setShowCreate(false);
             } catch (e: any) {
               alert(t('webMisc.createUserError', { error: e?.message ?? e }));
             }
           }}
-          isPending={create.isPending || setAccess.isPending}
+          isPending={create.isPending}
         />
       )}
 
@@ -234,18 +235,25 @@ function UserModal({ mode, initial, projects, initialProjectIds, onClose, onSubm
   projects: { id: string; name: string }[];
   initialProjectIds: string[];
   onClose: () => void;
-  onSubmit: (input: { name: string; apellido: string | null; role: UserRole; password: string | null; projectIds: string[] }) => void;
+  onSubmit: (input: { email: string; name: string; apellido: string | null; role: UserRole; password: string | null; projectIds: string[] }) => void;
   isPending: boolean;
 }) {
   const { t } = useI18n();
   const [name, setName] = useState(initial?.name ?? '');
   const [apellido, setApellido] = useState(initial?.apellido ?? '');
   const [role, setRole] = useState<UserRole>(initial?.role ?? 'OPERATOR');
+  // Login es por EMAIL → en el alta es obligatorio (lo necesita la cuenta de Auth).
+  // En edición permitimos cambiarlo (se propaga a Auth vía la Edge Function).
+  const [email, setEmail] = useState((initial as { email?: string } | undefined)?.email ?? '');
   const [password, setPassword] = useState(initial?.password ?? '');
   const [projIds, setProjIds] = useState<Set<string>>(new Set(initialProjectIds));
   const toggleProj = (id: string) => setProjIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const canSave = name.trim().length >= 2;
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  // En el alta exigimos email + password (ambos requeridos por la cuenta de Auth);
+  // en edición el email basta con que sea válido si se tocó, y la password es opcional (reset).
+  const canSave = name.trim().length >= 2
+    && (mode === 'create' ? (emailOk && password.trim().length >= 4) : (email.trim() === '' || emailOk));
 
   return (
     <div className="fixed inset-0 z-50 bg-navy/50 flex items-end sm:items-center justify-center p-4"
@@ -283,6 +291,20 @@ function UserModal({ mode, initial, projects, initialProjectIds, onClose, onSubm
               />
             </Field>
           </div>
+
+          <Field label={t('webMisc.emailLabel')}>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="usuario@correo.com"
+              autoComplete="off"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+            {email.trim() !== '' && !emailOk && (
+              <p className="text-[11px] text-danger mt-1">{t('webMisc.emailInvalid')}</p>
+            )}
+          </Field>
 
           <Field label={t('webMisc.roleLabel')}>
             <div className="grid grid-cols-2 gap-1.5">
@@ -353,10 +375,12 @@ function UserModal({ mode, initial, projects, initialProjectIds, onClose, onSubm
           <button
             disabled={!canSave || isPending}
             onClick={() => onSubmit({
+              email: email.trim(),
               name: name.trim(),
               apellido: apellido.trim() || null,
               role,
-              password: password.trim() || (mode === 'create' ? name.trim() : null),
+              // En el alta `canSave` ya exige password; en edición vacío = no resetear.
+              password: password.trim() || null,
               projectIds: Array.from(projIds),
             })}
             className="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 disabled:opacity-40"

@@ -21,6 +21,28 @@ import {
 
 const supabase = createClient();
 
+/**
+ * Invoca la Edge Function `admin-users` y propaga el `{ error }` del body cuando la
+ * respuesta es no-2xx (mismo patrón que hooks/useUsers.ts). El INSERT directo a
+ * `users` está denegado por RLS, así que el alta de usuarios nuevos durante el
+ * import histórico debe pasar por aquí.
+ */
+async function invokeAdminUsers<T = { ok: true; id?: string }>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let message = error.message ?? String(error);
+    const ctx = (error as { context?: unknown }).context;
+    if (ctx && typeof (ctx as Response).json === 'function') {
+      try {
+        const parsed = await (ctx as Response).json();
+        if (parsed?.error) message = parsed.error;
+      } catch { /* body no era JSON */ }
+    }
+    throw new Error(message);
+  }
+  return data as T;
+}
+
 /** Epoch ms → fecha local YYYY-MM-DD (para protocols.ensayo_date, v31). */
 function toYmd(ms: number): string {
   const d = new Date(ms);
@@ -167,18 +189,27 @@ export function useHistoricalImport(projectId: string, currentUserId: string) {
         continue;
       }
       if (res.action === 'create' && res.role) {
-        const id = crypto.randomUUID();
-        const now = Date.now();
-        const { error } = await supabase.from('users').insert({
-          id,
+        // INSERT directo a `users` denegado por RLS → alta vía Edge Function `admin-users`.
+        // El import histórico no trae email/password; el login es por EMAIL, así que
+        // generamos un placeholder + password temporal para satisfacer el alta de Auth.
+        // TODO: cuando el Excel histórico incluya email real, usarlo en vez del placeholder
+        // y permitir al CREATOR resetear la contraseña desde la gestión de usuarios.
+        const slug = `${res.name}${res.apellido ? '.' + res.apellido : ''}`
+          .toLowerCase().trim()
+          .normalize('NFD').replace(/[̀-ͯ]/g, '')   // sin acentos
+          .replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '') || 'usuario';
+        const email = `${slug}.${crypto.randomUUID().slice(0, 8)}@flowqc.local`;
+        const password = `Tmp-${crypto.randomUUID().slice(0, 12)}`;
+        const created = await invokeAdminUsers<{ ok: true; id: string }>({
+          action: 'create',
+          email,
+          password,
           name: res.name,
           apellido: res.apellido ?? null,
           role: res.role,
-          created_at: now,
-          updated_at: now,
-        });
-        if (error) throw new Error(`No se pudo crear user "${res.name}": ${error.message}`);
-        userMap.set(res.key, id);
+          projectIds: [],
+        }).catch((e) => { throw new Error(`No se pudo crear user "${res.name}": ${(e as Error).message}`); });
+        userMap.set(res.key, created.id);
         createdCount++;
       }
     }

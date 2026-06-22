@@ -75,6 +75,8 @@ export const STRINGS_WEB_MISC: Record<string, { es: string; en: string; pt: stri
     pt: 'Não foi possível atualizar:\n{error}',
   },
   'webMisc.editUser': { es: 'Editar usuario', en: 'Edit user', pt: 'Editar usuário' },
+  'webMisc.emailLabel': { es: 'Email *', en: 'Email *', pt: 'Email *' },
+  'webMisc.emailInvalid': { es: 'Email inválido', en: 'Invalid email', pt: 'Email inválido' },
   'webMisc.nameLabel': { es: 'Nombre *', en: 'First name *', pt: 'Nome *' },
   'webMisc.surnameLabel': { es: 'Apellido', en: 'Surname', pt: 'Sobrenome' },
   'webMisc.namePlaceholder': { es: 'Juan', en: 'John', pt: 'João' },

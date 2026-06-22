@@ -38,11 +38,16 @@ const usersMgmt: Record<string, { es: string; en: string; pt: string }> = {
   'usersMgmt.field.name': { es: 'Nombre', en: 'First name', pt: 'Nome' },
   'usersMgmt.field.lastName': { es: 'Apellido', en: 'Last name', pt: 'Sobrenome' },
   'usersMgmt.field.role': { es: 'Rol', en: 'Role', pt: 'Função' },
+  // v47 (RLS) — el alta ahora exige email + contraseña (login por email).
+  'usersMgmt.field.email': { es: 'Correo electrónico', en: 'Email', pt: 'E-mail' },
+  'usersMgmt.field.password': { es: 'Contraseña', en: 'Password', pt: 'Senha' },
   'usersMgmt.addModal.passwordHint': {
-    es: 'La primera contraseña será el nombre. El usuario podrá cambiarla luego.',
-    en: 'The initial password will be the first name. The user can change it later.',
-    pt: 'A primeira senha será o nome. O usuário poderá alterá-la depois.',
+    es: 'El usuario iniciará sesión con su correo y esta contraseña. Podrá cambiarla luego.',
+    en: 'The user will log in with their email and this password. They can change it later.',
+    pt: 'O usuário fará login com o e-mail e esta senha. Poderá alterá-la depois.',
   },
+  'usersMgmt.alert.missingEmailTitle': { es: 'Falta el correo', en: 'Missing email', pt: 'E-mail ausente' },
+  'usersMgmt.alert.missingEmailMessage': { es: 'Ingresa un correo y una contraseña.', en: 'Enter an email and a password.', pt: 'Informe um e-mail e uma senha.' },
   'usersMgmt.creating': { es: 'Creando…', en: 'Creating…', pt: 'Criando…' },
   'usersMgmt.createUser': { es: 'Crear usuario', en: 'Create user', pt: 'Criar usuário' },
 
@@ -124,6 +129,11 @@ const usersMgmt: Record<string, { es: string; en: string; pt: string }> = {
     pt: '\n\n⚠ Projetos não encontrados (ignorados): {projects}',
   },
   'usersMgmt.alert.importDoneTitle': { es: 'Importación completada', en: 'Import completed', pt: 'Importação concluída' },
+  'usersMgmt.alert.importErrors': {
+    es: '\n\n⚠ {count} fila(s) con error:\n{details}',
+    en: '\n\n⚠ {count} row(s) with errors:\n{details}',
+    pt: '\n\n⚠ {count} linha(s) com erro:\n{details}',
+  },
   'usersMgmt.alert.importUnexpected': {
     es: 'Error inesperado al importar.',
     en: 'Unexpected error while importing.',
@@ -135,9 +145,9 @@ const usersMgmt: Record<string, { es: string; en: string; pt: string }> = {
   'usersMgmt.alert.missingNameMessage': { es: 'Ingresa el nombre del usuario.', en: "Enter the user's name.", pt: 'Informe o nome do usuário.' },
   'usersMgmt.alert.userCreatedTitle': { es: 'Usuario creado', en: 'User created', pt: 'Usuário criado' },
   'usersMgmt.alert.userCreatedMessage': {
-    es: '{name} agregado. Su primera contraseña es su nombre.',
-    en: '{name} added. Their initial password is their name.',
-    pt: '{name} adicionado. A primeira senha é o nome.',
+    es: '{name} agregado. Iniciará sesión con el correo y la contraseña que ingresaste.',
+    en: '{name} added. They will log in with the email and password you entered.',
+    pt: '{name} adicionado. Fará login com o e-mail e a senha que você informou.',
   },
   'usersMgmt.alert.createUserFailed': { es: 'No se pudo crear el usuario.', en: 'Could not create the user.', pt: 'Não foi possível criar o usuário.' },
 
@@ -164,12 +174,19 @@ const usersMgmt: Record<string, { es: string; en: string; pt: string }> = {
   // Alerts: resetear contraseña
   'usersMgmt.alert.resetPasswordTitle': { es: 'Resetear contraseña', en: 'Reset password', pt: 'Redefinir senha' },
   'usersMgmt.alert.resetPasswordMessage': {
-    es: 'La contraseña de {name} volverá a ser su nombre.',
-    en: "{name}'s password will revert to their name.",
-    pt: 'A senha de {name} voltará a ser o nome.',
+    es: 'La contraseña de {name} volverá a ser su nombre. Podrá cambiarla luego.',
+    en: "{name}'s password will revert to their first name. They can change it later.",
+    pt: 'A senha de {name} voltará a ser o nome. Poderá alterá-la depois.',
   },
   'usersMgmt.alert.resetConfirm': { es: 'Resetear', en: 'Reset', pt: 'Redefinir' },
   'usersMgmt.alert.passwordReset': { es: 'Contraseña reseteada.', en: 'Password reset.', pt: 'Senha redefinida.' },
+
+  // v47 (RLS) — operaciones vía Edge Function admin-users
+  'usersMgmt.alert.opFailed': {
+    es: 'No se pudo completar la operación.',
+    en: 'Could not complete the operation.',
+    pt: 'Não foi possível concluir a operação.',
+  },
 };
 
 export default usersMgmt;

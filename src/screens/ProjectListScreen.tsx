@@ -327,20 +327,38 @@ export default function ProjectListScreen({ navigation }: Props) {
     if (!joinName.trim() || !joinPassword.trim() || !currentUser) return;
     setJoinLoading(true);
     try {
-      // Siempre verificar contraseña contra Supabase (fuente de verdad)
-      const remote = await findProjectInSupabase(joinName.trim());
-      if (!remote) {
-        Alert.alert(t('alerts.projectNotFoundTitle'), t('alerts.projectNotFoundMsg'));
-        setJoinLoading(false);
-        return;
-      }
-      if ((remote.password ?? '').toLowerCase().trim() !== joinPassword.toLowerCase().trim()) {
-        Alert.alert(t('alerts.wrongPasswordTitle'), t('alerts.wrongPasswordMsg'));
+      const name = joinName.trim();
+      // v47 (RLS): la validación de contraseña + el alta en `user_project_access`
+      // se hacen server-side por la RPC SECURITY DEFINER `join_project_with_password`
+      // (INSERT directo desde el cliente está denegado por RLS). La RPC valida nombre +
+      // contraseña y hace el self-insert del acceso.
+      const { error: rpcError } = await supabase.rpc('join_project_with_password', {
+        p_project_name: name,
+        p_password: joinPassword.trim(),
+      });
+      if (rpcError) {
+        const m = (rpcError.message ?? '').toLowerCase();
+        if (m.includes('not found') || m.includes('no encontrado') || m.includes('no existe')) {
+          Alert.alert(t('alerts.projectNotFoundTitle'), t('alerts.projectNotFoundMsg'));
+        } else if (m.includes('password') || m.includes('contraseña') || m.includes('incorrect') || m.includes('invalid')) {
+          Alert.alert(t('alerts.wrongPasswordTitle'), t('alerts.wrongPasswordMsg'));
+        } else {
+          Alert.alert(t('alerts.error'), t('alerts.joinProjectErrorMsg', { message: rpcError.message ?? '' }));
+        }
         setJoinLoading(false);
         return;
       }
 
-      // Buscar proyecto localmente (puede que restoreUserProjectsFromCloud ya lo haya descargado)
+      // El acceso ya existe en la nube. Resolver el id del proyecto (lectura ya
+      // permitida por RLS al tener acceso) para descargarlo localmente.
+      const remote = await findProjectInSupabase(name);
+      if (!remote) {
+        Alert.alert(t('alerts.error'), t('alerts.downloadProjectFailedMsg'));
+        setJoinLoading(false);
+        return;
+      }
+
+      // Buscar proyecto localmente (puede que ya esté descargado)
       const findLocal = async () => {
         const res = await projectsCollection.query(Q.where('id', remote.id)).fetch();
         return res.length > 0 ? res[0] : null;
@@ -364,7 +382,7 @@ export default function ProjectListScreen({ navigation }: Props) {
             await database.write(async () => {
               await projectsCollection.create((p: any) => {
                 p._raw.id = remote.id;
-                p.name = remote.name ?? joinName.trim();
+                p.name = remote.name ?? name;
                 p.status = remote.status ?? 'ACTIVE';
                 p.password = remote.password ?? null;
                 p.createdById = remote.created_by_id ?? null;
@@ -382,38 +400,20 @@ export default function ProjectListScreen({ navigation }: Props) {
         }
       }
 
-      // 3. Verificar si ya tiene acceso
+      // Asegurar el registro de acceso local (la fuente de verdad ya está en la nube
+      // gracias a la RPC; aquí solo reflejamos el acceso para la vista offline).
       const existing = await userProjectAccessCollection
         .query(Q.where('user_id', currentUser.id), Q.where('project_id', found.id))
         .fetch();
-      const alreadyHasAccess = existing.length > 0 || (found as any).createdById === currentUser.id;
-
-      if (alreadyHasAccess) {
-        // Si el proyecto estaba oculto, simplemente restaurarlo en la vista
-        if (hiddenProjectIds.has(found.id)) {
-          const newHidden = new Set(hiddenProjectIds);
-          newHidden.delete(found.id);
-          setHiddenProjectIds(newHidden);
-          AsyncStorage.setItem(`hidden_projects_${currentUser.id}`, JSON.stringify([...newHidden])).catch(() => {});
-          setJoinName(''); setJoinPassword(''); setShowJoin(false);
-          Alert.alert(t('alerts.projectRestoredTitle'), t('alerts.projectRestoredMsg', { name: found.name }));
-        } else {
-          Alert.alert(t('alerts.alreadyHasAccessTitle'), t('alerts.alreadyHasAccessMsg'));
-        }
-        setJoinLoading(false);
-        return;
-      }
-
-      // 4. Crear registro de acceso
-      const foundId = found!.id;
-      await database.write(async () => {
-        await userProjectAccessCollection.create((a: any) => {
-          a.userId = currentUser.id;
-          a.projectId = foundId;
+      const foundId = found.id;
+      if (existing.length === 0 && (found as any).createdById !== currentUser.id) {
+        await database.write(async () => {
+          await userProjectAccessCollection.create((a: any) => {
+            a.userId = currentUser.id;
+            a.projectId = foundId;
+          });
         });
-      });
-      // Push el registro de acceso a Supabase para que sea visible desde otros dispositivos
-      pushProjectToSupabase(foundId).catch(() => {});
+      }
 
       // Si estaba oculto (eliminado de vista), restaurarlo
       if (hiddenProjectIds.has(found.id)) {

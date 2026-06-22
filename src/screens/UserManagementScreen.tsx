@@ -11,9 +11,9 @@ import type { RootStackParamList } from '@navigation/types';
 import { database, usersCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { useNetwork } from '@context/NetworkContext';
-import { importUsersFromExcel, UserImportError } from '@services/UserExcelImporter';
-import { pushUserToSupabase } from '@services/SupabaseSyncService';
-import { loadAccessSnapshot, grantAccess, revokeAccess, syncUserAccess } from '@services/UserAccessService';
+import { importUsersFromExcel, bulkCreateUsersViaEdgeFunction, UserImportError } from '@services/UserExcelImporter';
+import { supabase } from '@config/supabase';
+import { loadAccessSnapshot, grantAccess, revokeAccess } from '@services/UserAccessService';
 import type User from '@models/User';
 import { useI18n, tx } from '@i18n/index';
 
@@ -37,11 +37,15 @@ export default function UserManagementScreen({ navigation }: Props) {
   const [users, setUsers] = useState<User[]>([]);
   const [importing, setImporting] = useState(false);
 
-  // Alta manual
+  // Alta manual — v47 (RLS): el alta ahora exige email + contraseña (login por email)
+  // y se realiza vía Edge Function `admin-users` (INSERT directo a users está denegado).
   const [showAdd, setShowAdd] = useState(false);
   const [fName, setFName] = useState('');
   const [fApellido, setFApellido] = useState('');
+  const [fEmail, setFEmail] = useState('');
+  const [fPassword, setFPassword] = useState('');
   const [fRole, setFRole] = useState<Role>('OPERATOR');
+  const [fProjectIds, setFProjectIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   // Editar rol
   const [roleEditUser, setRoleEditUser] = useState<User | null>(null);
@@ -56,6 +60,42 @@ export default function UserManagementScreen({ navigation }: Props) {
       setProjects(snap.projects);
       setAccessIdsByUser(snap.byUser);
     } catch { /* offline → tarjetas sin proyectos */ }
+  }, []);
+
+  // v47 (RLS) — Las altas/bajas/edición ahora las hace la Edge Function `admin-users`
+  // sobre la nube (INSERT/DELETE directo a `users` está denegado). Tras cada operación
+  // OK refrescamos la lista local desde Supabase (crea los nuevos, actualiza rol/is_active)
+  // para reflejar el cambio en la pantalla (la lista se observa desde WatermelonDB).
+  const refreshUsersFromCloud = useCallback(async () => {
+    const { data: remoteUsers, error } = await supabase.from('users').select('*');
+    if (error || !remoteUsers) return;
+    const local = await usersCollection.query().fetch();
+    const localById = new Map<string, User>(local.map((u) => [u.id, u]));
+    const rows = remoteUsers as any[];
+    await database.write(async () => {
+      // Crear los faltantes (nuevos usuarios dados de alta por la Edge Function).
+      const toCreate = rows.filter((r) => !localById.has(r.id));
+      if (toCreate.length > 0) {
+        await database.batch(
+          ...toCreate.map((r) => usersCollection.prepareCreate((u: any) => {
+            u._raw.id = r.id;
+            Object.assign(u._raw, r);
+            u._raw._status = 'synced';
+            u._raw._changed = '';
+          })),
+        );
+      }
+      // Actualizar rol / estado de los existentes (cambio de rol, soft-delete).
+      for (const r of rows) {
+        const existing = localById.get(r.id);
+        if (!existing) continue;
+        const remoteActive = r.is_active !== false;
+        const localActive = (existing as any).isActive !== false;
+        if (existing.role !== r.role || localActive !== remoteActive) {
+          await existing.update((u: any) => { u.role = r.role; u.isActive = remoteActive; });
+        }
+      }
+    });
   }, []);
 
   // v44 — Modales de gestión de accesos (asignar / quitar).
@@ -111,48 +151,31 @@ export default function UserManagementScreen({ navigation }: Props) {
     setImporting(true);
     try {
       const imported = await importUsersFromExcel();
-      const all = await usersCollection.query().fetch();
       // Proyectos por nombre (case-insensitive) para mapear la columna "Proyectos".
       const snap = await loadAccessSnapshot();
       const projByName: Record<string, string> = {};
       for (const p of snap.projects) projByName[p.name.trim().toLowerCase()] = p.id;
-
-      const pushIds: string[] = [];                                  // usuarios a empujar a la nube
-      const accessOps: { userId: string; projectIds: string[] }[] = []; // sync de accesos (Excel con Proyectos)
       const unmatched = new Set<string>();
+      const resolveProjectIds = (names: string[] | undefined): string[] => {
+        if (!names) return [];
+        return names
+          .map(n => { const id = projByName[n.trim().toLowerCase()]; if (!id) unmatched.add(n); return id; })
+          .filter(Boolean) as string[];
+      };
 
-      await database.write(async () => {
-        for (const u of imported) {
-          const exists = all.find(ex => ex.name.toLowerCase() === u.name.toLowerCase() && ex.apellido?.toLowerCase() === u.apellido.toLowerCase());
-          let userId: string;
-          if (!exists) {
-            const created = await usersCollection.create((newUser) => {
-              newUser.name = u.name; newUser.apellido = u.apellido; newUser.role = u.role;
-              newUser.password = u.name; newUser.pin = null; newUser.signatureUri = null;
-              (newUser as any).isActive = true;
-            });
-            userId = (created as any).id;
-          } else {
-            userId = exists.id;
-            if (exists.role !== u.role && exists.role !== 'CREATOR') await exists.update((x) => { x.role = u.role; });
-          }
-          pushIds.push(userId);
-          if (u.projects) {
-            const ids = u.projects.map(n => { const id = projByName[n.trim().toLowerCase()]; if (!id) unmatched.add(n); return id; }).filter(Boolean) as string[];
-            accessOps.push({ userId, projectIds: ids });
-          }
-        }
-      });
+      // v47 (RLS): el alta masiva va por la Edge Function `admin-users` (INSERT directo
+      // a users denegado). Acumula errores por fila sin romper todo el import.
+      const hadProjectsCol = imported.some(u => u.projects !== undefined);
+      const { created, errors } = await bulkCreateUsersViaEdgeFunction(imported, resolveProjectIds);
 
-      // Empujar usuarios a la nube (necesario para que existan y puedan tener accesos/login).
-      for (const id of pushIds) { try { await pushUserToSupabase(id); } catch { /* reintenta el sync */ } }
-      // Sincronizar accesos SOLO si el Excel traía columna Proyectos (agrega nuevos, revoca faltantes).
-      for (const op of accessOps) { try { await syncUserAccess(op.userId, op.projectIds); } catch { /* */ } }
+      // Reflejar los nuevos usuarios/accesos en la pantalla.
+      await refreshUsersFromCloud().catch(() => {});
       await loadAccess();
 
-      let msg = t('usersMgmt.alert.usersProcessed', { count: imported.length });
-      if (accessOps.length > 0) msg += t('usersMgmt.alert.projectAccessSynced');
+      let msg = t('usersMgmt.alert.usersProcessed', { count: created });
+      if (hadProjectsCol) msg += t('usersMgmt.alert.projectAccessSynced');
       if (unmatched.size > 0) msg += t('usersMgmt.alert.unmatchedProjects', { projects: [...unmatched].join(', ') });
+      if (errors.length > 0) msg += t('usersMgmt.alert.importErrors', { count: errors.length, details: errors.join('\n') });
       Alert.alert(t('usersMgmt.alert.importDoneTitle'), msg);
     } catch (err) {
       Alert.alert(t('usersMgmt.alert.error'), err instanceof UserImportError ? err.message : t('usersMgmt.alert.importUnexpected'));
@@ -162,16 +185,33 @@ export default function UserManagementScreen({ navigation }: Props) {
   const handleAddUser = async () => {
     if (saving) return;
     const name = fName.trim();
+    const email = fEmail.trim();
+    const password = fPassword;
     if (!name) { Alert.alert(t('usersMgmt.alert.missingNameTitle'), t('usersMgmt.alert.missingNameMessage')); return; }
+    if (!email || !password) { Alert.alert(t('usersMgmt.alert.missingEmailTitle'), t('usersMgmt.alert.missingEmailMessage')); return; }
     setSaving(true);
     try {
-      const created = await database.write(async () => usersCollection.create((u) => {
-        u.name = name; u.apellido = fApellido.trim() || null; u.role = fRole;
-        u.password = name; u.pin = null; u.signatureUri = null;
-        (u as any).isActive = true;
-      }));
-      pushUserToSupabase((created as any).id).catch(() => {});
-      setShowAdd(false); setFName(''); setFApellido(''); setFRole('OPERATOR');
+      // v47 (RLS): el alta se hace por la Edge Function `admin-users` (crea la cuenta Auth,
+      // la fila en `users` y los accesos). El SDK adjunta el JWT del usuario logueado.
+      const { error } = await supabase.functions.invoke('admin-users', {
+        body: {
+          action: 'create',
+          email,
+          password,
+          name,
+          apellido: fApellido.trim(),
+          role: fRole,
+          projectIds: [...fProjectIds],
+        },
+      });
+      if (error) {
+        Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.createUserFailed'));
+        return;
+      }
+      await refreshUsersFromCloud().catch(() => {});
+      await loadAccess();
+      setShowAdd(false);
+      setFName(''); setFApellido(''); setFEmail(''); setFPassword(''); setFRole('OPERATOR'); setFProjectIds(new Set());
       Alert.alert(t('usersMgmt.alert.userCreatedTitle'), t('usersMgmt.alert.userCreatedMessage', { name }));
     } catch (e: any) {
       Alert.alert(t('usersMgmt.alert.error'), e?.message ?? t('usersMgmt.alert.createUserFailed'));
@@ -181,12 +221,18 @@ export default function UserManagementScreen({ navigation }: Props) {
   const handleChangeRole = async (user: User, role: Role) => {
     setRoleEditUser(null);
     if (user.role === role) return;
-    await database.write(async () => { await user.update((u) => { u.role = role; }); });
-    pushUserToSupabase(user.id).catch(() => {});
+    // v47 (RLS): el cambio de rol se hace por la Edge Function `admin-users`.
+    const { error } = await supabase.functions.invoke('admin-users', {
+      body: { action: 'update', userId: user.id, role },
+    });
+    if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
+    await refreshUsersFromCloud().catch(() => {});
   };
 
   // v43 — Soft-delete: NO se borra de la base (conserva firmas/aprobaciones), solo
   // se marca inactivo (pierde acceso). Sigue visible, etiquetado "inactivo".
+  // v47 (RLS): activar/desactivar se hace por la Edge Function `admin-users`
+  // (`delete` = soft-delete is_active=false; `update` isActive=true para reactivar).
   const handleToggleActive = (user: User) => {
     if (user.id === currentUser?.id) { Alert.alert(t('usersMgmt.alert.notAllowedTitle'), t('usersMgmt.alert.cannotDeactivateSelf')); return; }
     const isActive = (user as any).isActive !== false;
@@ -200,8 +246,11 @@ export default function UserManagementScreen({ navigation }: Props) {
         {
           text: isActive ? t('usersMgmt.deactivate') : t('usersMgmt.reactivate'), style: isActive ? 'destructive' : 'default',
           onPress: async () => {
-            await database.write(async () => { await user.update((u) => { (u as any).isActive = !isActive; }); });
-            pushUserToSupabase(user.id).catch(() => {});
+            const { error } = isActive
+              ? await supabase.functions.invoke('admin-users', { body: { action: 'delete', userId: user.id } })
+              : await supabase.functions.invoke('admin-users', { body: { action: 'update', userId: user.id, isActive: true } });
+            if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
+            await refreshUsersFromCloud().catch(() => {});
           },
         },
       ],
@@ -214,8 +263,12 @@ export default function UserManagementScreen({ navigation }: Props) {
       {
         text: t('usersMgmt.alert.resetConfirm'),
         onPress: async () => {
-          await database.write(async () => { await user.update((u) => { u.password = u.name; }); });
-          pushUserToSupabase(user.id).catch(() => {});
+          // v47 (RLS): el reset de contraseña pasa por la Edge Function `admin-users`
+          // (no se puede escribir `users` directo). Temporal = el nombre del usuario.
+          const { error } = await supabase.functions.invoke('admin-users', {
+            body: { action: 'update', userId: user.id, password: user.name },
+          });
+          if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
           Alert.alert(t('usersMgmt.alert.done'), t('usersMgmt.alert.passwordReset'));
         },
       },
@@ -319,19 +372,42 @@ export default function UserManagementScreen({ navigation }: Props) {
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAdd(false)} />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{t('usersMgmt.addModal.title')}</Text>
-            <Text style={styles.fieldLabel}>{t('usersMgmt.field.name')}</Text>
-            <TextInput style={styles.input} value={fName} onChangeText={setFName} placeholder={t('usersMgmt.field.name')} placeholderTextColor="#bbb" autoCapitalize="words" />
-            <Text style={styles.fieldLabel}>{t('usersMgmt.field.lastName')}</Text>
-            <TextInput style={styles.input} value={fApellido} onChangeText={setFApellido} placeholder={t('usersMgmt.field.lastName')} placeholderTextColor="#bbb" autoCapitalize="words" />
-            <Text style={styles.fieldLabel}>{t('usersMgmt.field.role')}</Text>
-            <View style={styles.roleRow}>
-              {ASSIGNABLE_ROLES.map(r => (
-                <TouchableOpacity key={r} style={[styles.roleChip, fRole === r && { backgroundColor: ROLE_LABELS[r].color, borderColor: ROLE_LABELS[r].color }]} onPress={() => setFRole(r)}>
-                  <Text style={[styles.roleChipText, fRole === r && { color: '#fff' }]}>{ROLE_LABELS[r].label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.hint}>{t('usersMgmt.addModal.passwordHint')}</Text>
+            <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
+              <Text style={styles.fieldLabel}>{t('usersMgmt.field.name')}</Text>
+              <TextInput style={styles.input} value={fName} onChangeText={setFName} placeholder={t('usersMgmt.field.name')} placeholderTextColor="#bbb" autoCapitalize="words" />
+              <Text style={styles.fieldLabel}>{t('usersMgmt.field.lastName')}</Text>
+              <TextInput style={styles.input} value={fApellido} onChangeText={setFApellido} placeholder={t('usersMgmt.field.lastName')} placeholderTextColor="#bbb" autoCapitalize="words" />
+              {/* v47 (RLS) — email + contraseña obligatorios (login por email vía Edge Function). */}
+              <Text style={styles.fieldLabel}>{t('usersMgmt.field.email')}</Text>
+              <TextInput style={styles.input} value={fEmail} onChangeText={setFEmail} placeholder={t('usersMgmt.field.email')} placeholderTextColor="#bbb" autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
+              <Text style={styles.fieldLabel}>{t('usersMgmt.field.password')}</Text>
+              <TextInput style={styles.input} value={fPassword} onChangeText={setFPassword} placeholder={t('usersMgmt.field.password')} placeholderTextColor="#bbb" secureTextEntry autoCapitalize="none" />
+              <Text style={styles.fieldLabel}>{t('usersMgmt.field.role')}</Text>
+              <View style={styles.roleRow}>
+                {ASSIGNABLE_ROLES.map(r => (
+                  <TouchableOpacity key={r} style={[styles.roleChip, fRole === r && { backgroundColor: ROLE_LABELS[r].color, borderColor: ROLE_LABELS[r].color }]} onPress={() => setFRole(r)}>
+                    <Text style={[styles.roleChipText, fRole === r && { color: '#fff' }]}>{ROLE_LABELS[r].label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {/* v47 — selección opcional de proyectos (se pasa como projectIds a la Edge Function). */}
+              {projects.length > 0 && (
+                <>
+                  <Text style={styles.fieldLabel}>{t('usersMgmt.assignModal.projectsLabel', { count: fProjectIds.size })}</Text>
+                  <View style={styles.pickList}>
+                    <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                      {projects.map(p => (
+                        <TouchableOpacity key={p.id} style={styles.pickRow} onPress={() => toggleSet(setFProjectIds, p.id)}>
+                          <Ionicons name={fProjectIds.has(p.id) ? 'checkbox' : 'square-outline'} size={20} color={fProjectIds.has(p.id) ? Colors.primary : Colors.textMuted} />
+                          <Text style={styles.pickText} numberOfLines={1}>{p.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </>
+              )}
+              <Text style={styles.hint}>{t('usersMgmt.addModal.passwordHint')}</Text>
+            </ScrollView>
             <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={handleAddUser} disabled={saving}>
               <Text style={styles.saveBtnText}>{saving ? t('usersMgmt.creating') : t('usersMgmt.createUser')}</Text>
             </TouchableOpacity>

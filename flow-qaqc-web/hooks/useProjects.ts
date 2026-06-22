@@ -179,48 +179,19 @@ export function useJoinProject() {
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   return useMutation({
+    // Bajo RLS estricto, el self-insert en `user_project_access` está denegado.
+    // El alta de acceso se hace vía la RPC SECURITY DEFINER `join_project_with_password`,
+    // que busca el proyecto por nombre, valida la contraseña y hace el self-insert.
+    // Devuelve el project_id; lanza 'proyecto no encontrado' / 'contraseña incorrecta'.
     mutationFn: async ({ name, password }: { name: string; password: string }) => {
       if (!currentUser) throw new Error('No autenticado');
 
-      // 1. Find project by name (case-insensitive)
-      const { data: projects, error: findErr } = await supabase
-        .from('projects')
-        .select('*')
-        .ilike('name', name.trim());
-      if (findErr) throw findErr;
-      if (!projects || projects.length === 0) throw new Error('No existe un proyecto con ese nombre');
-
-      const project = projects[0];
-
-      // 2. Validate password
-      if ((project.password ?? '').toLowerCase().trim() !== password.toLowerCase().trim()) {
-        throw new Error('Contraseña incorrecta');
-      }
-
-      // 3. Check if already has access
-      const { data: existing } = await supabase
-        .from('user_project_access')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .eq('project_id', project.id)
-        .maybeSingle();
-
-      if (existing) throw new Error('Ya tienes acceso a este proyecto');
-
-      // 4. Create access record
-      const now = Date.now();
-      const { error: accessErr } = await supabase
-        .from('user_project_access')
-        .insert({
-          id: crypto.randomUUID(),
-          user_id: currentUser.id,
-          project_id: project.id,
-          created_at: now,
-          updated_at: now,
-        });
-      if (accessErr) throw accessErr;
-
-      return project;
+      const { data, error } = await supabase.rpc('join_project_with_password', {
+        p_project_name: name.trim(),
+        p_password: password,
+      });
+      if (error) throw new Error(error.message);
+      return data as string; // project_id
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['projects'] }),
   });

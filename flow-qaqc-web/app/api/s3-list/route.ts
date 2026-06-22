@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getServerUser } from '@lib/serverAuth';
+import { keyBelongsToAccessibleProject } from '../s3-shared/projectAccess';
 
 const s3 = new S3Client({
   region: process.env.NEXT_PUBLIC_AWS_REGION!,
@@ -16,6 +17,11 @@ export async function GET(req: NextRequest) {
 
   const prefix = req.nextUrl.searchParams.get('prefix');
   if (!prefix) return NextResponse.json({ keys: [] });
+
+  // Autorización horizontal (FAIL-CLOSED): el prefix debe empezar por
+  // `projects/<proyecto accesible>/...`. No se permite listar fuera de eso.
+  const allowed = await keyBelongsToAccessibleProject(prefix, { allowGlobal: false });
+  if (!allowed) return new Response('Forbidden', { status: 403 });
 
   const resp = await s3.send(new ListObjectsV2Command({
     Bucket: process.env.NEXT_PUBLIC_AWS_BUCKET!,
