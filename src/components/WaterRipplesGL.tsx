@@ -127,7 +127,8 @@ function program(gl: any, vs: string, fs: string) {
 const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>(({ onUnsupported }, ref) => {
   const queue = useRef<number[]>([]);              // cola de impactos en triplets (x, y, intensidad)
   const lastUv = useRef({ x: 0.5, y: 0.5 });
-  const sweep = useRef({ active: false, y: 0 });   // barrido fuerte abajo→arriba (entrar al login)
+  // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
+  const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -151,8 +152,12 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       lastUv.current = { x, y };
     },
     bigWave() {
-      // Arranca un BARRIDO de mucha masa que sube (como deslizar la pantalla hacia arriba).
-      sweep.current = { active: true, y: 0.0 };
+      // Barrido (réplica del gesto real): dos puntos cerca del centro-abajo, sostenidos
+      // ~1 s (se re-emiten cada frame) subiendo apenas → ola que crece y sube.
+      emittersRef.current.push(
+        { x: 0.43, y: 0.14, vx: 0, vy: 0.0011, life: 66, str: 0.95 },
+        { x: 0.62, y: 0.145, vx: 0, vy: 0.0011, life: 66, str: 0.95 },
+      );
     },
   }));
 
@@ -210,6 +215,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const EMPTY = new Array(MAX_DROPS * 2).fill(0);
       const EMPTY_STR = new Array(MAX_DROPS).fill(0);
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
+      let twinT = 180;    // cuenta regresiva para el próximo "twin" ambiental
       let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
       let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
@@ -241,29 +247,40 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const loop = () => {
-        // Animación por defecto: dos dedos en la parte baja, borde↔centro, sostenido y en bucle.
-        autoPhase += AUTO_SPEED;
-        const sL = (1 - Math.cos(autoPhase)) * 0.5;                  // izquierdo 0→1→0
-        const sR = (1 - Math.cos(autoPhase + AUTO_PHASE_OFF)) * 0.5; // derecho desfasado
-        const lx = 0.06 + 0.44 * sL;                     // izquierdo: borde izq → centro
-        const rx = 0.94 - 0.44 * sR;                     // derecho: borde der → centro
-        pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);           // interpolado → trazo continuo
-        pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
-        prevLX = lx; prevRX = rx;
+        // Dedos virtuales sostenidos (barrido de entrada / twin): re-emiten cada frame
+        // a fuerza alta. Mientras hay dedos virtuales, pausamos el resto del ambiente.
+        const em = emittersRef.current;
+        if (em.length > 0) {
+          for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
+          emittersRef.current = em.filter(f => f.life > 0);
+        } else {
+          // Dos dedos en la base, borde↔centro, sostenido y en bucle.
+          autoPhase += AUTO_SPEED;
+          const sL = (1 - Math.cos(autoPhase)) * 0.5;
+          const sR = (1 - Math.cos(autoPhase + AUTO_PHASE_OFF)) * 0.5;
+          const lx = 0.06 + 0.44 * sL;
+          const rx = 0.94 - 0.44 * sR;
+          pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);
+          pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
+          prevLX = lx; prevRX = rx;
 
-        // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
-        if (--ambient <= 0) {
-          push(Math.random(), Math.random(), 0.4);    // más marcadas pero menos que el toque
-          ambient = 45 + Math.floor(Math.random() * 90);
-        }
+          // Gotita ambiental aleatoria.
+          if (--ambient <= 0) {
+            push(Math.random(), Math.random(), 0.4);
+            ambient = 45 + Math.floor(Math.random() * 90);
+          }
 
-        // Barrido de entrada: 2 puntos FUERTES al centro que suben MUY lento (sostenido).
-        if (sweep.current.active) {
-          const sy = sweep.current.y;
-          const cxs = [0.46, 0.54];   // dos puntos pegados al centro
-          for (let i = 0; i < 2; i++) push(cxs[i], sy, 3.0);
-          sweep.current.y += 0.012;                                    // mucho más lento
-          if (sweep.current.y > 1.2) sweep.current.active = false;
+          // Twin ambiental: cada ~3-5 s, dos puntos separados SOSTENIDOS ~1 s (réplica del record).
+          if (--twinT <= 0) {
+            const cx = 0.30 + Math.random() * 0.40;
+            const cy = 0.45 + Math.random() * 0.30;     // zona media-alta (uv)
+            const gap = 0.12 + Math.random() * 0.05;
+            emittersRef.current.push(
+              { x: cx - gap, y: cy, vx: 0, vy: 0, life: 60, str: 0.85 },
+              { x: cx + gap, y: cy, vx: 0, vy: 0, life: 60, str: 0.85 },
+            );
+            twinT = 210 + Math.floor(Math.random() * 120);
+          }
         }
 
         const flat: number[] = [];
