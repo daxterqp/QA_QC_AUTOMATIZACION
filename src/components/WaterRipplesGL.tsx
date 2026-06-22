@@ -16,8 +16,8 @@ import { GLView } from 'expo-gl';
 
 export type WaterGLHandle = {
   drop: (xNorm: number, yNorm: number, isMove?: boolean) => void;
-  /** Arco que recorre la pantalla (transición intro → login). speedMult: 1 = normal. */
-  bigWave: (speedMult?: number) => void;
+  /** Arco entrópico que recorre la pantalla (transición intro → login). */
+  bigWave: () => void;
 };
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
@@ -141,7 +141,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
   // Arco que sube (entrada): cada punto lleva su propia y (ys) y fase de velocidad (vph) → entrópico.
-  const barridoRef = useRef({ active: false, speed: 1, t: 0, ys: [] as number[], vph: [] as number[] });
+  const barridoRef = useRef({ active: false, t: 0, ys: [] as number[], vph: [] as number[] });
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -164,7 +164,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       }
       lastUv.current = { x, y };
     },
-    bigWave(speedMult = 1) {
+    bigWave() {
       // Arco que sube desde abajo. Cada punto arranca en la curva del arco + jitter,
       // y con fase de velocidad propia → el frente se deforma (entrópico).
       const N = 15;
@@ -175,7 +175,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         ys.push(0.06 + 0.13 * Math.sin(Math.PI * x) + (Math.random() - 0.5) * 0.04);
         vph.push(Math.random() * Math.PI * 2);
       }
-      barridoRef.current = { active: true, speed: speedMult, t: 0, ys, vph };
+      barridoRef.current = { active: true, t: 0, ys, vph };
     },
   }));
 
@@ -282,7 +282,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
             const x = i / (N - 1);
             const pi = Math.min(1, bw.ys[i] / 0.667);                  // ramp lento→rápido propio
             const vvar = 1 + 0.6 * Math.sin(bw.t * 0.16 + bw.vph[i]);  // velocidad variable por punto (0.4–1.6×)
-            bw.ys[i] += (0.0011 + 0.0132 * pi) * bw.speed * vvar;
+            bw.ys[i] += (0.0022 + 0.0264 * pi) * vvar;                 // velocidad fija a 2× (calibrada)
             push(x, bw.ys[i], 0.85);
             if (bw.ys[i] > maxY) maxY = bw.ys[i];
           }
