@@ -248,7 +248,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         if (barridoRef.current.active) {
           // BARRIDO: UN solo punto desde el centro, con MUCHA masa, subiendo lento.
           push(0.5, barridoRef.current.y, 2.2);
-          barridoRef.current.y += 0.006;                 // sube lento
+          barridoRef.current.y += 0.002;                 // sube MUY lento
           if (barridoRef.current.y > 1.05) barridoRef.current.active = false;
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
@@ -272,16 +272,17 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
             ambient = 45 + Math.floor(Math.random() * 90);
           }
 
-          // Twin ambiental: dos puntos MUY JUNTOS + MÁS MASA, sostenidos ~1.1 s → ola que crece.
+          // Twin ambiental: dos puntos MUY JUNTOS que solo APARECEN (sin hold) + mucha masa.
+          // Más recurrentes (~1.3–2.5 s).
           if (--twinT <= 0) {
-            const cx = 0.30 + Math.random() * 0.40;
-            const cy = 0.45 + Math.random() * 0.30;     // zona media-alta (uv)
-            const gap = 0.04;                            // muy juntos
+            const cx = 0.28 + Math.random() * 0.44;
+            const cy = 0.42 + Math.random() * 0.34;     // zona media-alta (uv)
+            const gap = 0.028;                           // muy juntos
             emittersRef.current.push(
-              { x: cx - gap, y: cy, vx: 0, vy: 0, life: 70, str: 1.25 },
-              { x: cx + gap, y: cy, vx: 0, vy: 0, life: 70, str: 1.25 },
+              { x: cx - gap, y: cy, vx: 0, vy: 0, life: 3, str: 1.6 },
+              { x: cx + gap, y: cy, vx: 0, vy: 0, life: 3, str: 1.6 },
             );
-            twinT = 210 + Math.floor(Math.random() * 120);
+            twinT = 80 + Math.floor(Math.random() * 70);
           }
         }
 
