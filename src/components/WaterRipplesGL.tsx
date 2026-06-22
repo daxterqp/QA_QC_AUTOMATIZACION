@@ -246,10 +246,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const loop = () => {
         const em = emittersRef.current;
         if (barridoRef.current.active) {
-          // BARRIDO: una sola onda ANCHA (banda densa a lo ancho) que sube lento.
-          const by = barridoRef.current.y;
-          for (let i = 0; i < 10; i++) push(0.12 + (0.76 * i) / 9, by, 0.85);
-          barridoRef.current.y += 0.007;                 // sube lento
+          // BARRIDO: UN solo punto desde el centro, con MUCHA masa, subiendo lento.
+          push(0.5, barridoRef.current.y, 2.2);
+          barridoRef.current.y += 0.006;                 // sube lento
           if (barridoRef.current.y > 1.05) barridoRef.current.active = false;
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
