@@ -140,7 +140,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
   const lastUv = useRef({ x: 0.5, y: 0.5 });
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
-  const barridoRef = useRef({ active: false, y: 0, speed: 1 });   // arco que sube (entrada). speed = multiplicador
+  // Arco que sube (entrada): cada punto lleva su propia y (ys) y fase de velocidad (vph) → entrópico.
+  const barridoRef = useRef({ active: false, speed: 1, t: 0, ys: [] as number[], vph: [] as number[] });
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -164,8 +165,17 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       lastUv.current = { x, y };
     },
     bigWave(speedMult = 1) {
-      // Arco que sube desde abajo. speedMult permite calibrar la velocidad en vivo.
-      barridoRef.current = { active: true, y: 0.06, speed: speedMult };
+      // Arco que sube desde abajo. Cada punto arranca en la curva del arco + jitter,
+      // y con fase de velocidad propia → el frente se deforma (entrópico).
+      const N = 15;
+      const ys: number[] = [];
+      const vph: number[] = [];
+      for (let i = 0; i < N; i++) {
+        const x = i / (N - 1);
+        ys.push(0.06 + 0.13 * Math.sin(Math.PI * x) + (Math.random() - 0.5) * 0.04);
+        vph.push(Math.random() * Math.PI * 2);
+      }
+      barridoRef.current = { active: true, speed: speedMult, t: 0, ys, vph };
     },
   }));
 
@@ -262,19 +272,21 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const loop = () => {
         const em = emittersRef.current;
         if (barridoRef.current.active) {
-          // BARRIDO: un FRENTE en forma de ARCO (∩, centro más alto) a lo ancho de la
-          // pantalla, que sube → recorre como un arco (en vez del punto que dejaba una V).
-          const by = barridoRef.current.y;
-          const N = 14;                                    // puntos del arco a lo ancho
-          for (let i = 0; i <= N; i++) {
-            const x = i / N;
-            const yArc = by + 0.13 * Math.sin(Math.PI * x);  // arco: sube en el centro
-            push(x, yArc, 0.85);                             // masa repartida (no revienta)
+          // BARRIDO: frente en ARCO a lo ancho, pero cada punto sube con su PROPIA velocidad
+          // (variable + fase distinta) → el arco se desfasa y deforma, más orgánico/entrópico.
+          const bw = barridoRef.current;
+          bw.t++;
+          const N = bw.ys.length;
+          let maxY = 0;
+          for (let i = 0; i < N; i++) {
+            const x = i / (N - 1);
+            const pi = Math.min(1, bw.ys[i] / 0.667);                  // ramp lento→rápido propio
+            const vvar = 1 + 0.6 * Math.sin(bw.t * 0.16 + bw.vph[i]);  // velocidad variable por punto (0.4–1.6×)
+            bw.ys[i] += (0.0011 + 0.0132 * pi) * bw.speed * vvar;
+            push(x, bw.ys[i], 0.85);
+            if (bw.ys[i] > maxY) maxY = bw.ys[i];
           }
-          const p = Math.min(1, by / 0.667);               // 0 abajo → 1 en 2/3
-          const v = (0.0011 + 0.0132 * p) * barridoRef.current.speed;  // × multiplicador en vivo
-          barridoRef.current.y += v;
-          if (barridoRef.current.y > 0.667) barridoRef.current.active = false;
+          if (maxY > 0.78) bw.active = false;              // se apaga cuando el frente cruzó
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
