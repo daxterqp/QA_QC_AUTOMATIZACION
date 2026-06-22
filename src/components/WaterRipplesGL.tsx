@@ -25,7 +25,7 @@ const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/anim
 const AUTO_SPEED = 0.19;    // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
-const AUTO_PHASE_OFF = 1.1; // desfase entre los dos dedos (no van en lockstep)
+const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
 const Y_OFFSET = 0.045;
