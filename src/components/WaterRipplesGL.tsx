@@ -129,6 +129,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
   const lastUv = useRef({ x: 0.5, y: 0.5 });
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
+  const barridoRef = useRef({ active: false, y: 0 });   // una onda ancha que sube lento (entrada)
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -152,12 +153,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       lastUv.current = { x, y };
     },
     bigWave() {
-      // Barrido (réplica del gesto real): dos puntos cerca del centro-abajo, sostenidos
-      // ~1 s (se re-emiten cada frame) subiendo apenas → ola que crece y sube.
-      emittersRef.current.push(
-        { x: 0.43, y: 0.14, vx: 0, vy: 0.0011, life: 66, str: 0.95 },
-        { x: 0.62, y: 0.145, vx: 0, vy: 0.0011, life: 66, str: 0.95 },
-      );
+      // Una ÚNICA onda ancha que sube lento desde abajo.
+      barridoRef.current = { active: true, y: 0.06 };
     },
   }));
 
@@ -216,7 +213,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const EMPTY_STR = new Array(MAX_DROPS).fill(0);
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
       let twinT = 180;    // cuenta regresiva para el próximo "twin" ambiental
-      let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
+      let autoPhaseL = 0, autoPhaseR = AUTO_PHASE_OFF;  // fases (el derecho irá más lento)
       let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
@@ -247,17 +244,23 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const loop = () => {
-        // Dedos virtuales sostenidos (barrido de entrada / twin): re-emiten cada frame
-        // a fuerza alta. Mientras hay dedos virtuales, pausamos el resto del ambiente.
         const em = emittersRef.current;
-        if (em.length > 0) {
+        if (barridoRef.current.active) {
+          // BARRIDO: una sola onda ANCHA (banda densa a lo ancho) que sube lento.
+          const by = barridoRef.current.y;
+          for (let i = 0; i < 10; i++) push(0.12 + (0.76 * i) / 9, by, 0.85);
+          barridoRef.current.y += 0.007;                 // sube lento
+          if (barridoRef.current.y > 1.05) barridoRef.current.active = false;
+        } else if (em.length > 0) {
+          // Twin: puntos sostenidos re-emitidos cada frame.
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
           emittersRef.current = em.filter(f => f.life > 0);
         } else {
-          // Dos dedos en la base, borde↔centro, sostenido y en bucle.
-          autoPhase += AUTO_SPEED;
-          const sL = (1 - Math.cos(autoPhase)) * 0.5;
-          const sR = (1 - Math.cos(autoPhase + AUTO_PHASE_OFF)) * 0.5;
+          // Dos dedos en la base: el derecho va MÁS LENTO → se desfasan solos con el tiempo.
+          autoPhaseL += AUTO_SPEED;
+          autoPhaseR += AUTO_SPEED * 0.78;
+          const sL = (1 - Math.cos(autoPhaseL)) * 0.5;
+          const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.44 * sL;
           const rx = 0.94 - 0.44 * sR;
           pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);
@@ -270,14 +273,14 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
             ambient = 45 + Math.floor(Math.random() * 90);
           }
 
-          // Twin ambiental: cada ~3-5 s, dos puntos separados SOSTENIDOS ~1 s (réplica del record).
+          // Twin ambiental: dos puntos MUY JUNTOS + MÁS MASA, sostenidos ~1.1 s → ola que crece.
           if (--twinT <= 0) {
             const cx = 0.30 + Math.random() * 0.40;
             const cy = 0.45 + Math.random() * 0.30;     // zona media-alta (uv)
-            const gap = 0.12 + Math.random() * 0.05;
+            const gap = 0.04;                            // muy juntos
             emittersRef.current.push(
-              { x: cx - gap, y: cy, vx: 0, vy: 0, life: 60, str: 0.85 },
-              { x: cx + gap, y: cy, vx: 0, vy: 0, life: 60, str: 0.85 },
+              { x: cx - gap, y: cy, vx: 0, vy: 0, life: 70, str: 1.25 },
+              { x: cx + gap, y: cy, vx: 0, vy: 0, life: 70, str: 1.25 },
             );
             twinT = 210 + Math.floor(Math.random() * 120);
           }
