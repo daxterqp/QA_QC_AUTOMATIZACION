@@ -246,9 +246,11 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const loop = () => {
         const em = emittersRef.current;
         if (barridoRef.current.active) {
-          // BARRIDO: UN solo punto desde el centro, con MUCHA masa, subiendo lento.
+          // BARRIDO: UN punto desde el centro, mucha masa, subiendo con velocidad NO uniforme
+          // (acelera y frena) → la ola se forma más creíble.
           push(0.5, barridoRef.current.y, 2.2);
-          barridoRef.current.y += 0.002;                 // sube MUY lento
+          const v = 0.0045 * (0.4 + Math.abs(Math.sin(barridoRef.current.y * 9.0)));
+          barridoRef.current.y += v;
           if (barridoRef.current.y > 1.05) barridoRef.current.active = false;
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
