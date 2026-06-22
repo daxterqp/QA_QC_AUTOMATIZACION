@@ -22,7 +22,7 @@ export type WaterGLHandle = {
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
 // Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
-const AUTO_SPEED = 0.12;    // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_SPEED = 0.3;     // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 1.1; // desfase entre los dos dedos (no van en lockstep)
@@ -276,10 +276,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
         while (strs.length < MAX_DROPS) strs.push(0);
 
-        // 5 sub-pasos por frame → las ondas viajan más rápido (más parecido al agua).
+        // 3 sub-pasos por frame → menos carga de GPU = framerate más fluido.
         simStep(flat, strs, count);
-        simStep(EMPTY, EMPTY_STR, 0);
-        simStep(EMPTY, EMPTY_STR, 0);
         simStep(EMPTY, EMPTY_STR, 0);
         simStep(EMPTY, EMPTY_STR, 0);
 
