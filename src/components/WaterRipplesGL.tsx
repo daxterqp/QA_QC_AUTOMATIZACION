@@ -262,8 +262,11 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.44 * sL;
           const rx = 0.94 - 0.44 * sR;
-          pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);
-          pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
+          // Vaivén en Y (frecuencias distintas) → dinamismo, no se nota el patrón.
+          const lyy = AUTO_Y + 0.05 * Math.sin(autoPhaseL * 1.6);
+          const ryy = AUTO_Y + 0.05 * Math.sin(autoPhaseR * 1.15 + 0.8);
+          pushSeg(prevLX, lx, lyy, AUTO_STR);
+          pushSeg(prevRX, rx, ryy, AUTO_STR);
           prevLX = lx; prevRX = rx;
 
           // Gotita ambiental aleatoria.
@@ -277,7 +280,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           if (--twinT <= 0) {
             const cx = 0.28 + Math.random() * 0.44;
             const cy = 0.42 + Math.random() * 0.34;     // zona media-alta (uv)
-            const gap = 0.028;                           // muy juntos
+            const gap = 0.018;                           // muy muy juntos
             emittersRef.current.push(
               { x: cx - gap, y: cy, vx: 0, vy: 0, life: 3, str: 1.6 },
               { x: cx + gap, y: cy, vx: 0, vy: 0, life: 3, str: 1.6 },
