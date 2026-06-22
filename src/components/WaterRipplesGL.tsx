@@ -26,12 +26,6 @@ const AUTO_SPEED = 0.15;    // rad/frame (más alto = más rápido). Regular a g
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
-// "Twin": LÍNEA de puntos interpolados entre dos extremos aleatorios, REITERADA cada
-// frame durante el hold → se acumula una cresta y la ola crece (como tocar a mano).
-const TWIN_EVERY = 180;    // frames base entre apariciones (~3 s a 60fps)
-const TWIN_HOLD = 45;      // frames sostenidos reiterando el trazo (~0.75 s)
-const TWIN_STR = 0.3;      // intensidad por punto (se acumula → crece la ola)
-const TWIN_PTS = 8;        // puntos interpolados entre los dos extremos
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
 const Y_OFFSET = 0.045;
@@ -218,17 +212,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
       let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
       let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
-      let twinTimer = TWIN_EVERY;         // cuenta regresiva a la próxima aparición "twin"
-      let twinHold = 0;                   // frames restantes sosteniendo los dos puntos
-      let twinA = { x: 0.4, y: 0.5 }, twinB = { x: 0.6, y: 0.5 };
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
         const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
         for (let i = 1; i <= steps; i++) push(x0 + (x1 - x0) * (i / steps), y, str);
-      };
-      // Línea de puntos interpolados entre A y B (para el efecto twin reiterado).
-      const pushLine = (ax: number, ay: number, bx: number, by: number, str: number, n: number) => {
-        for (let i = 0; i <= n; i++) { const t = i / n; push(ax + (bx - ax) * t, ay + (by - ay) * t, str); }
       };
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
@@ -260,10 +247,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         const sR = (1 - Math.cos(autoPhase + AUTO_PHASE_OFF)) * 0.5; // derecho desfasado
         const lx = 0.06 + 0.44 * sL;                     // izquierdo: borde izq → centro
         const rx = 0.94 - 0.44 * sR;                     // derecho: borde der → centro
-        if (twinHold <= 0) {                             // pausa los dedos durante el twin
-          pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);         // interpolado → trazo continuo
-          pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
-        }
+        pushSeg(prevLX, lx, AUTO_Y, AUTO_STR);           // interpolado → trazo continuo
+        pushSeg(prevRX, rx, AUTO_Y, AUTO_STR);
         prevLX = lx; prevRX = rx;
 
         // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
@@ -279,20 +264,6 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           for (let i = 0; i < 2; i++) push(cxs[i], sy, 3.0);
           sweep.current.y += 0.012;                                    // mucho más lento
           if (sweep.current.y > 1.2) sweep.current.active = false;
-        }
-
-        // Twin: REITERA una línea de puntos interpolados entre A y B → la ola crece.
-        if (twinHold > 0) {
-          pushLine(twinA.x, twinA.y, twinB.x, twinB.y, TWIN_STR, TWIN_PTS);
-          twinHold--;
-        } else if (--twinTimer <= 0) {
-          const cx = 0.30 + Math.random() * 0.40;   // centro (evita bordes)
-          const cy = 0.30 + Math.random() * 0.45;   // zona media
-          const half = 0.07 + Math.random() * 0.08; // separación variable (pueden estar más lejos)
-          twinA = { x: cx - half, y: cy };
-          twinB = { x: cx + half, y: cy };
-          twinHold = TWIN_HOLD;
-          twinTimer = TWIN_EVERY + Math.floor(Math.random() * 90);
         }
 
         const flat: number[] = [];
