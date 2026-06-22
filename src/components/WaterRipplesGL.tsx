@@ -265,12 +265,12 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           ambient = 45 + Math.floor(Math.random() * 90);
         }
 
-        // Barrido de entrada: 3 puntos FUERTES PEGADOS AL CENTRO que suben lento.
+        // Barrido de entrada: 2 puntos FUERTES al centro que suben MUY lento (sostenido).
         if (sweep.current.active) {
           const sy = sweep.current.y;
-          const cxs = [0.42, 0.5, 0.58];   // pegados al centro
-          for (let i = 0; i < 3; i++) push(cxs[i], sy, 3.0);
-          sweep.current.y += 0.028;                                    // lento → sostenido
+          const cxs = [0.46, 0.54];   // dos puntos pegados al centro
+          for (let i = 0; i < 2; i++) push(cxs[i], sy, 3.0);
+          sweep.current.y += 0.012;                                    // mucho más lento
           if (sweep.current.y > 1.2) sweep.current.active = false;
         }
 
