@@ -1,17 +1,39 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ImageBackground, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet, Image, ImageBackground, Animated, Easing, Pressable, TouchableOpacity } from 'react-native';
+import {
+  useFonts, Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
+} from '@expo-google-fonts/montserrat';
 import { useAuth } from '@context/AuthContext';
-import { Colors, Radius } from '../theme/colors';
+import WaterRipples from '@components/WaterRipples';
+import { Colors } from '../theme/colors';
+
+const FF_SEMI = 'Montserrat_600SemiBold';
+const FF_BOLD = 'Montserrat_700Bold';
 
 /**
- * Pantalla de bloqueo de re-entrada: aparece cuando hay sesión guardada y el
- * usuario activó el ingreso por huella/rostro. Lanza el prompt al montar.
+ * Pantalla de desbloqueo (huella/rostro) — MISMO formato que el intro
+ * "toca para comenzar": gradiente + logo grande centrado + texto abajo + ondas.
+ * Solo desbloquea la sesión activa (no inicia sesión). Auto-lanza el prompt.
  */
 export default function BiometricLockScreen() {
   const { unlockBiometric, logout, currentUser } = useAuth();
+  const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
   const [busy, setBusy] = useState(false);
   const triedRef = useRef(false);
+
+  const breathe = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(breathe, { toValue: 1, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      Animated.timing(breathe, { toValue: 0, duration: 9000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    ])).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0, duration: 1100, useNativeDriver: true }),
+    ])).start();
+  }, [breathe, pulse]);
 
   const tryUnlock = async () => {
     if (busy) return;
@@ -27,39 +49,45 @@ export default function BiometricLockScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const hintOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
+
   return (
-    <ImageBackground source={require('../../assets/login-bg.png')} style={styles.bg} resizeMode="cover">
-      <View style={styles.center}>
-        <Image source={require('../../assets/logo-login.png')} style={styles.logo} resizeMode="contain" />
-        <Text style={styles.hello}>{currentUser?.name ? `Hola, ${currentUser.name}` : 'Bienvenido'}</Text>
+    <View style={styles.root}>
+      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
+        <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
+      </Animated.View>
 
-        <TouchableOpacity style={styles.unlockBtn} onPress={tryUnlock} disabled={busy} activeOpacity={0.85}>
-          {busy ? <ActivityIndicator color={Colors.white} /> : (
-            <>
-              <Ionicons name="finger-print" size={22} color={Colors.white} />
-              <Text style={styles.unlockText}>Desbloquear</Text>
-            </>
+      <WaterRipples>
+        <Pressable style={styles.center} onPress={tryUnlock}>
+          <Image source={require('../../assets/logo-login.png')} style={styles.logo} resizeMode="contain" />
+          {!!currentUser?.name && (
+            <Text style={[styles.hello, fontsLoaded && { fontFamily: FF_BOLD }]}>Hola, {currentUser.name}</Text>
           )}
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity onPress={() => logout()} style={styles.otherBtn}>
-          <Text style={styles.otherText}>Usar otra cuenta</Text>
+        <Animated.Text style={[styles.hint, fontsLoaded && { fontFamily: FF_SEMI }, { opacity: hintOpacity }]}>
+          Toca para desbloquear
+        </Animated.Text>
+
+        <TouchableOpacity style={styles.otherBtn} onPress={() => logout()}>
+          <Text style={[styles.otherText, fontsLoaded && { fontFamily: FF_SEMI }]}>Usar otra cuenta</Text>
         </TouchableOpacity>
-      </View>
-    </ImageBackground>
+      </WaterRipples>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bg: { flex: 1, backgroundColor: Colors.navy },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 16 },
-  logo: { width: 240, height: 150 },
-  hello: { color: Colors.white, fontSize: 16, fontWeight: '700', marginBottom: 6 },
-  unlockBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: Colors.primary, borderRadius: 26, paddingVertical: 15, paddingHorizontal: 36, minWidth: 220,
+  root: { flex: 1, backgroundColor: Colors.navy },
+  flex: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  logo: { width: 320, height: 200 },
+  hello: { color: Colors.white, fontSize: 17, fontWeight: '700' },
+  hint: {
+    position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center',
+    color: Colors.white, fontSize: 12.5, letterSpacing: 2, textTransform: 'uppercase',
   },
-  unlockText: { color: Colors.white, fontSize: 14, fontWeight: '700', letterSpacing: 1.5 },
-  otherBtn: { paddingVertical: 8 },
-  otherText: { color: Colors.light, fontSize: 13, textDecorationLine: 'underline' },
+  otherBtn: { position: 'absolute', bottom: 64, left: 0, right: 0, alignItems: 'center', paddingVertical: 8 },
+  otherText: { color: Colors.light, fontSize: 12.5, textDecorationLine: 'underline' },
 });

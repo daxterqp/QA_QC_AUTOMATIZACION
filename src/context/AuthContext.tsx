@@ -12,6 +12,7 @@ import type User from '@models/User';
 import { supabase } from '@config/supabase';
 import { registerPushToken, unregisterPushToken } from '@services/NotificationService';
 import { shouldLockOnLaunch, authenticateBiometric } from '@services/BiometricService';
+import { addRecentEmail } from '@services/RecentAccountsService';
 
 interface AuthContextValue {
   currentUser: User | null;
@@ -210,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setCurrentUser(user);
     registerPushToken(user.id).catch(() => {});
+    addRecentEmail(email).catch(() => {});
     return 'ok';
   }, []);
 
@@ -255,6 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!appUser) return 'no_account'; // el trigger crea la fila VIEWER; si está inactiva → sin acceso
       setCurrentUser(appUser);
       registerPushToken(appUser.id).catch(() => {});
+      if (authUser.email) addRecentEmail(authUser.email).catch(() => {});
       return 'ok';
     } catch {
       return 'error';
@@ -279,6 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Auto-confirm activo → entra directo (verá el estado "sin proyectos asignados").
       const user = await resolveAppUserByAuthId(data.user.id);
       if (user) { setCurrentUser(user); registerPushToken(user.id).catch(() => {}); }
+      addRecentEmail(email).catch(() => {});
       return 'ok';
     }
     // Sin sesión → Supabase requiere confirmación por correo.

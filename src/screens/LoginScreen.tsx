@@ -11,6 +11,8 @@ import {
 } from '@expo-google-fonts/montserrat';
 import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
+import WaterRipples from '@components/WaterRipples';
+import { getRecentEmails } from '@services/RecentAccountsService';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -44,6 +46,14 @@ export default function LoginScreen() {
   const [suPassword, setSuPassword] = useState('');
   const [signingUp, setSigningUp] = useState(false);
 
+  // Correos recordados en este dispositivo (acceso rápido en celular compartido).
+  const [recentEmails, setRecentEmails] = useState<string[]>([]);
+  useEffect(() => { getRecentEmails().then(setRecentEmails); }, []);
+
+  // Inactividad: tras 1 min en el login, vuelve al intro ("toca para comenzar").
+  const enteredRef = useRef(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const enterAnim = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
   const hintPulse = useRef(new Animated.Value(0)).current;
@@ -59,11 +69,28 @@ export default function LoginScreen() {
     ])).start();
   }, [breathe, hintPulse]);
 
+  const resetIdle = () => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => { if (enteredRef.current) goToIntro(); }, 60000);
+  };
+
   const enterApp = () => {
     if (entered) return;
     setEntered(true);
+    enteredRef.current = true;
     Animated.timing(enterAnim, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    resetIdle();
   };
+
+  const goToIntro = () => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    enteredRef.current = false;
+    setEntered(false);
+    setFocused(null);
+    Animated.timing(enterAnim, { toValue: 0, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }).start();
+  };
+
+  useEffect(() => () => { if (idleTimer.current) clearTimeout(idleTimer.current); }, []);
 
   const canContinue = /\S+@\S+\.\S+/.test(email.trim()) && password.length >= 1;
   const resetValid = /\S+@\S+\.\S+/.test(resetEmail.trim());
@@ -140,6 +167,7 @@ export default function LoginScreen() {
     <View style={styles.root}>
       {Background}
 
+      <WaterRipples onInteract={resetIdle}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" scrollEnabled={entered}>
 
@@ -192,6 +220,17 @@ export default function LoginScreen() {
                 />
               </View>
             </View>
+
+            {recentEmails.length > 0 && email.length === 0 && (
+              <View style={styles.recentRow}>
+                {recentEmails.map(re => (
+                  <TouchableOpacity key={re} style={styles.recentChip} onPress={() => setEmail(re)} activeOpacity={0.8}>
+                    <Ionicons name="person-circle-outline" size={14} color={Colors.primary} />
+                    <Text style={styles.recentChipText} numberOfLines={1}>{re}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <View style={styles.field}>
               <View style={styles.fieldLabelChip}><Text style={styles.fieldLabel}>{t('login.passwordLabel')}</Text></View>
@@ -262,6 +301,7 @@ export default function LoginScreen() {
 
       {/* Capa de toque del intro */}
       {!entered && <Pressable style={StyleSheet.absoluteFill} onPress={enterApp} accessibilityLabel={t('login.tapToStart')} />}
+      </WaterRipples>
 
       {/* Modal: olvidé mi contraseña */}
       <Modal visible={showReset} transparent animationType="fade" onRequestClose={() => setShowReset(false)}>
@@ -368,7 +408,7 @@ const styles = StyleSheet.create({
   scroll: { flexGrow: 1, justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 24, paddingTop: SCREEN_H * 0.07, paddingBottom: 32 },
 
   logoWrap: { alignItems: 'center', marginBottom: 0 },
-  logo: { width: 374, height: 230 },
+  logo: { width: 408, height: 250 },
 
   tapHint: {
     position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
@@ -401,14 +441,22 @@ const styles = StyleSheet.create({
 
   field: { position: 'relative' },
   fieldLabelChip: { position: 'absolute', top: -8, left: 14, zIndex: 2, backgroundColor: CARD_BG, paddingHorizontal: 6 },
-  fieldLabel: { fontFamily: FF_SEMI, fontSize: 11, color: Colors.textSecondary, letterSpacing: 0.3 },
+  fieldLabel: { fontFamily: FF_SEMI, fontSize: 9.5, color: Colors.textMuted, letterSpacing: 0.8 },
   fieldBox: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: 22,
     paddingHorizontal: 18, backgroundColor: Colors.white,
   },
   fieldBoxFocused: { borderColor: Colors.primary },
-  fieldInput: { flex: 1, paddingVertical: 14, fontSize: 15, color: Colors.textPrimary, fontFamily: FF_REG },
+  fieldInput: { flex: 1, paddingVertical: 13, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
+
+  recentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -4 },
+  recentChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 14,
+    paddingHorizontal: 9, paddingVertical: 4, backgroundColor: Colors.white,
+  },
+  recentChipText: { fontFamily: FF_REG, fontSize: 11, color: Colors.textSecondary, maxWidth: 200 },
 
   forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
   forgotText: { fontFamily: FF_SEMI, fontSize: 12.5, color: Colors.primary },
