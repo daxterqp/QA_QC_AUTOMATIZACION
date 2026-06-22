@@ -14,16 +14,111 @@ import {
   database,
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
+import { enqueue as enqueueSync } from '@services/SyncQueueService';
+import { createInstances } from '@services/ProtocolInstanceService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { Ionicons } from '@expo/vector-icons';
+import { useI18n, tx } from '@i18n/index';
 import type ProtocolTemplate from '@models/ProtocolTemplate';
 import type Protocol from '@models/Protocol';
 import type { ProtocolStatus } from '@models/Protocol';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'LocationProtocols'>;
+
+/**
+ * Reconciliación NO destructiva plantilla → instancia.
+ *
+ * Cuando la plantilla maestra cambia (p.ej. el usuario reimporta el Excel con una
+ * fila o columna nueva), las instancias ya creadas NO se actualizaban: sus
+ * `protocol_items` se copiaban una sola vez al abrir el protocolo. Resultado: la
+ * modificación no se reflejaba (y un protocolo que pasó a numérico seguía
+ * detectándose como subjetivo porque sus items quedaban con el método viejo).
+ *
+ * Esta función empareja por `partida_item` (fallback a descripción) y:
+ *   • AGREGA filas nuevas que aparecieron en la plantilla.
+ *   • ACTUALIZA campos de estructura (descripción, método de validación, sección)
+ *     cuando difieren.
+ *   • PRESERVA SIEMPRE las respuestas del usuario (is_compliant/is_na/has_answer/
+ *     comments) y nunca borra filas existentes.
+ *
+ * Seguridad: si la plantilla usa expansión paramétrica (`repeat-[...]`) NO se
+ * reconcilia (la instancia ya está expandida y un diff 1:1 la rompería). El caller
+ * sólo debe invocarla en protocolos editables (no bloqueados/aprobados).
+ *
+ * Devuelve los ids de los protocol_items creados/actualizados (vacío si nada
+ * cambió) — el caller los encola para push inmediato a la nube.
+ */
+async function reconcileInstanceItems(instanceId: string, templateId: string): Promise<string[]> {
+  const [templateItems, instanceItems] = await Promise.all([
+    protocolTemplateItemsCollection.query(Q.where('template_id', templateId)).fetch(),
+    protocolItemsCollection.query(Q.where('protocol_id', instanceId)).fetch(),
+  ]);
+  if (templateItems.length === 0) return [];
+
+  // No tocar protocolos paramétricos: la instancia ya está expandida.
+  const isParametric = templateItems.some((ti) => (ti.validationMethod ?? '').includes('repeat-['));
+  if (isParametric) return [];
+
+  const keyOf = (partida: string | null | undefined, desc: string): string => {
+    const p = (partida ?? '').trim();
+    return p !== '' ? `p:${p.toLowerCase()}` : `d:${(desc ?? '').trim().toLowerCase()}`;
+  };
+
+  const instanceByKey = new Map<string, any>();
+  for (const it of instanceItems) instanceByKey.set(keyOf((it as any).partidaItem, (it as any).itemDescription), it);
+
+  const toCreate: typeof templateItems = [];
+  const toUpdate: { item: any; desc: string; vm: string | null; section: string | null }[] = [];
+
+  for (const ti of templateItems) {
+    const existing = instanceByKey.get(keyOf(ti.partidaItem, ti.itemDescription));
+    const newDesc = ti.itemDescription;
+    const newVm = ti.validationMethod ?? null;
+    const newSection = ti.section ?? null;
+    if (!existing) {
+      toCreate.push(ti);
+    } else if (
+      existing.itemDescription !== newDesc ||
+      ((existing.validationMethod ?? null) !== newVm) ||
+      (((existing as any).section ?? null) !== newSection)
+    ) {
+      toUpdate.push({ item: existing, desc: newDesc, vm: newVm, section: newSection });
+    }
+  }
+
+  if (toCreate.length === 0 && toUpdate.length === 0) return [];
+
+  const changedIds: string[] = [];
+  await database.write(async () => {
+    for (const ti of toCreate) {
+      const created = await protocolItemsCollection.create((item) => {
+        item.protocolId = instanceId;
+        item.partidaItem = ti.partidaItem ?? null;
+        item.itemDescription = ti.itemDescription;
+        item.validationMethod = ti.validationMethod ?? null;
+        (item as any).section = ti.section ?? null;
+        item.isCompliant = false;
+        item.isNa = false;
+        item.hasAnswer = false;
+        item.comments = null;
+      });
+      changedIds.push(created.id);
+    }
+    for (const u of toUpdate) {
+      await u.item.update((item: any) => {
+        item.itemDescription = u.desc;
+        item.validationMethod = u.vm;
+        item.section = u.section;
+        // No se tocan is_compliant / is_na / has_answer / comments: se preservan.
+      });
+      changedIds.push(u.item.id);
+    }
+  });
+  return changedIds;
+}
 
 interface TemplateRow {
   template: ProtocolTemplate;
@@ -39,16 +134,17 @@ const STATUS_COLORS: Record<ProtocolStatus, string> = {
 };
 
 const STATUS_LABELS: Record<ProtocolStatus, string> = {
-  DRAFT: 'Pendiente',
-  IN_PROGRESS: 'En progreso',
-  SUBMITTED: 'Enviado',
-  APPROVED: 'Aprobado',
-  REJECTED: 'Rechazado',
+  DRAFT: tx('locProtos.status.inProgress'),
+  IN_PROGRESS: tx('locProtos.status.inProgress'),
+  SUBMITTED: tx('locProtos.status.inReview'),
+  APPROVED: tx('locProtos.status.approved'),
+  REJECTED: tx('locProtos.status.rejected'),
 };
 
 export default function LocationProtocolsScreen({ navigation, route }: Props) {
   const { locationId, locationName, projectId, projectName } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
 
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   // Tour refs
@@ -100,11 +196,15 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
         )
         .fetch();
 
-      // 4. Construir filas: template + su instancia (si existe)
-      const built: TemplateRow[] = matchingTemplates.map((tmpl) => ({
-        template: tmpl,
-        instance: existingInstances.find((p) => p.templateId === tmpl.id) ?? null,
-      }));
+      // 4. Construir filas: template + su instancia (si existe). v39 — un tipo
+      //    oculto solo aparece si YA tiene instancia (para no perder el registro);
+      //    si está oculto y sin instancia, no se muestra (no se crea uno nuevo).
+      const built: TemplateRow[] = matchingTemplates
+        .map((tmpl) => ({
+          template: tmpl,
+          instance: existingInstances.find((p) => p.templateId === tmpl.id) ?? null,
+        }))
+        .filter((row) => !(row.template as any).isHidden || row.instance != null);
 
       setRows(built);
     } finally {
@@ -122,42 +222,40 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
   const handleOpenProtocol = async (row: TemplateRow) => {
     let instanceId = row.instance?.id;
 
-    // Si no existe instancia, crearla copiando la plantilla
+    // Si no existe instancia, crearla copiando la plantilla.
+    // v31 — El flujo (expansión paramétrica + write + enqueue FIFO + código
+    // correlativo si está activo) vive en ProtocolInstanceService, compartido
+    // con los modos de llenado por sector/tipo/fecha.
     if (!instanceId) {
-      const templateItems = await protocolTemplateItemsCollection
-        .query(Q.where('template_id', row.template.id))
-        .fetch();
-
-      await database.write(async () => {
-        const protocol = await protocolsCollection.create((p) => {
-          p.projectId = projectId;
-          p.locationId = locationId;
-          p.templateId = row.template.id;
-          p.protocolNumber = row.template.name;
-          p.locationReference = locationName;
-          p.status = 'DRAFT';
-          p.isLocked = false;
-          p.correctionsAllowed = false;
-          p.uploadStatus = 'PENDING';
-          p.latitude = null;
-          p.longitude = null;
-          p.templateId = row.template.id;
-        });
-
-        for (const tmplItem of templateItems) {
-          await protocolItemsCollection.create((item) => {
-            item.protocolId = protocol.id;
-            item.partidaItem = tmplItem.partidaItem ?? null;
-            item.itemDescription = tmplItem.itemDescription;
-            item.validationMethod = tmplItem.validationMethod ?? null;
-            (item as any).section = (tmplItem as any).section ?? null;
-            item.isCompliant = false;
-            item.comments = null;
-          });
-        }
-
-        instanceId = protocol.id;
+      const { ids } = await createInstances({
+        projectId,
+        template: { id: row.template.id, name: row.template.name, idProtocolo: (row.template as any).idProtocolo ?? null },
+        locationId,
+        locationName,
       });
+      instanceId = ids[0];
+    } else if (row.instance) {
+      // La instancia ya existía: reconciliar con la plantilla por si fue modificada
+      // (fila/columna nueva, método actualizado). Solo en protocolos editables — no
+      // tocamos protocolos bloqueados/enviados/aprobados.
+      const st = row.instance.status;
+      const editable = !row.instance.isLocked && (st === 'DRAFT' || st === 'IN_PROGRESS' || st === 'REJECTED');
+      if (editable) {
+        try {
+          const changedIds = await reconcileInstanceItems(instanceId!, row.template.id);
+          if (changedIds.length > 0) {
+            // v32 — Subir la reconciliación a la nube de inmediato (no esperar al
+            // próximo sync manual). Ancla de orden: primero el protocolo (no-op si
+            // ya está synced; upsert completo si era offline-created), luego items.
+            enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: instanceId!, projectId }).catch(() => {});
+            for (const itemId of changedIds) {
+              enqueueSync({ opType: 'PUSH_PROTOCOL_ITEM', entityId: itemId, projectId }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('[reconcile] fallo al reconciliar instancia con plantilla:', e);
+        }
+      }
     }
 
     // Navegar según rol
@@ -191,7 +289,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
         <View style={styles.cardLeft}>
           <Text style={styles.templateName}>{item.template.name}</Text>
           <Text style={styles.templateId}>ID: {item.template.idProtocolo}</Text>
-          {canFill && <Text style={styles.fillHint}>Toca para rellenar ›</Text>}
+          {canFill && <Text style={styles.fillHint}>{t('locProtos.fillHint')}</Text>}
         </View>
         <View style={styles.cardRight}>
           {status ? (
@@ -200,7 +298,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
             </View>
           ) : (
             <View style={[styles.statusBadge, { backgroundColor: Colors.border }]}>
-              <Text style={[styles.statusText, { color: Colors.textMuted }]}>Sin iniciar</Text>
+              <Text style={[styles.statusText, { color: Colors.textMuted }]}>{t('locProtos.status.notStarted')}</Text>
             </View>
           )}
           <Text style={styles.chevron}>›</Text>
@@ -213,7 +311,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       <AppHeader
         title={locationName}
-        subtitle="Protocolos requeridos"
+        subtitle={t('locProtos.subtitle')}
         onBack={() => navigation.goBack()}
         rightContent={
           <TouchableOpacity onPress={() => jumpToStep('protocol_row')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -235,8 +333,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
-                Esta ubicación no tiene protocolos vinculados.{'\n'}
-                Revisa la columna ID_Protocolos en el Excel de ubicaciones.
+                {t('locProtos.empty')}
               </Text>
             </View>
           }

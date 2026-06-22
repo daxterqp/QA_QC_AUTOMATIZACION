@@ -16,6 +16,7 @@ import { Q } from '@nozbe/watermelondb';
 import type PhoneContact from '@models/PhoneContact';
 import { useAuth } from '@context/AuthContext';
 import { pushPhoneContact, deletePhoneContactRemote, pullPhoneContacts } from '@services/SupabaseSyncService';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhoneContacts'>;
 
@@ -29,6 +30,7 @@ const EMPTY_FORM: ContactForm = { name: '', phone: '', role: '' };
 
 export default function PhoneContactsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
 
@@ -100,12 +102,12 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
 
   const deleteContact = (contact: PhoneContact) => {
     Alert.alert(
-      'Eliminar contacto',
-      `¿Eliminar a ${contact.name}?`,
+      t('contacts.delete.title'),
+      t('contacts.delete.message', { name: contact.name }),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('contacts.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar', style: 'destructive',
+          text: t('contacts.delete.confirm'), style: 'destructive',
           onPress: async () => {
             const id = contact.id;
             await database.write(async () => { await contact.destroyPermanently(); });
@@ -118,7 +120,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
 
   const callContact = (phone: string) => {
     Linking.openURL(`tel:${phone}`).catch(() => {
-      Alert.alert('Error', 'No se puede abrir el marcador en este dispositivo.');
+      Alert.alert(t('contacts.error'), t('contacts.call.error'));
     });
   };
 
@@ -152,7 +154,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       const dataRows = rows.filter(r => r.length >= 1 && String(r[0] ?? '').trim() !== '');
 
       if (dataRows.length === 0) {
-        Alert.alert('Sin datos', 'El archivo no contiene filas válidas.');
+        Alert.alert(t('contacts.import.noDataTitle'), t('contacts.import.noDataMessage'));
         return;
       }
 
@@ -186,12 +188,20 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       // Subir a Supabase en background
       for (const c of created) pushPhoneContact(c).catch(() => {});
 
+      const importedMsg = imported === 1
+        ? t('contacts.import.doneOne', { imported })
+        : t('contacts.import.doneMany', { imported });
+      const skippedMsg = skipped > 0
+        ? (skipped === 1
+            ? t('contacts.import.skippedOne', { skipped })
+            : t('contacts.import.skippedMany', { skipped }))
+        : '';
       Alert.alert(
-        'Importación completada',
-        `${imported} contacto${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''}.${skipped > 0 ? ` (${skipped} fila${skipped !== 1 ? 's' : ''} omitida${skipped !== 1 ? 's' : ''} por datos incompletos)` : ''}`,
+        t('contacts.import.doneTitle'),
+        `${importedMsg}${skippedMsg}`,
       );
     } catch (err) {
-      Alert.alert('Error', `No se pudo importar el archivo.\n${String(err)}`);
+      Alert.alert(t('contacts.error'), t('contacts.import.error', { error: String(err) }));
     } finally {
       setImporting(false);
     }
@@ -200,7 +210,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Contactos"
+        title={t('contacts.title')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
@@ -231,17 +241,19 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         ListHeaderComponent={
           contacts.length === 0 ? null : (
             <Text style={styles.hint}>
-              Toca <Ionicons name="document-text-outline" size={12} /> para importar desde Excel · Columnas: Nombre | Rol | Prefijo | Teléfono
+              {t('contacts.hint').split('{icon}')[0]}
+              <Ionicons name="document-text-outline" size={12} />
+              {t('contacts.hint').split('{icon}')[1]}
             </Text>
           )
         }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="call-outline" size={40} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>Sin contactos aún.</Text>
-            <Text style={styles.emptyHint}>Toca + para agregar manualmente</Text>
-            <Text style={styles.emptyHint}>o 📄 para importar desde Excel.</Text>
-            <Text style={styles.excelFormat}>Formato Excel:{'\n'}Col A: Nombre y Apellido{'\n'}Col B: Rol / Cargo{'\n'}Col C: Prefijo (ej: +51){'\n'}Col D: Número de celular</Text>
+            <Text style={styles.emptyText}>{t('contacts.empty.title')}</Text>
+            <Text style={styles.emptyHint}>{t('contacts.empty.addHint')}</Text>
+            <Text style={styles.emptyHint}>{t('contacts.empty.importHint')}</Text>
+            <Text style={styles.excelFormat}>{t('contacts.empty.excelFormat')}</Text>
           </View>
         }
         renderItem={({ item }) => (
@@ -274,46 +286,46 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={closeModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingContact ? 'Editar contacto' : 'Nuevo contacto'}</Text>
+            <Text style={styles.modalTitle}>{editingContact ? t('contacts.modal.editTitle') : t('contacts.modal.newTitle')}</Text>
 
-            <Text style={styles.fieldLabel}>Nombre *</Text>
+            <Text style={styles.fieldLabel}>{t('contacts.field.name')}</Text>
             <TextInput
               style={styles.input}
               value={form.name}
               onChangeText={v => setForm(f => ({ ...f, name: v }))}
-              placeholder="Ej: Juan Pérez"
+              placeholder={t('contacts.field.namePlaceholder')}
               placeholderTextColor={Colors.textMuted}
             />
 
-            <Text style={styles.fieldLabel}>Teléfono * (con prefijo)</Text>
+            <Text style={styles.fieldLabel}>{t('contacts.field.phone')}</Text>
             <TextInput
               style={styles.input}
               value={form.phone}
               onChangeText={v => setForm(f => ({ ...f, phone: v }))}
-              placeholder="+51 9 XXXX XXXX"
+              placeholder={t('contacts.field.phonePlaceholder')}
               placeholderTextColor={Colors.textMuted}
               keyboardType="phone-pad"
             />
 
-            <Text style={styles.fieldLabel}>Cargo / Rol</Text>
+            <Text style={styles.fieldLabel}>{t('contacts.field.role')}</Text>
             <TextInput
               style={styles.input}
               value={form.role}
               onChangeText={v => setForm(f => ({ ...f, role: v }))}
-              placeholder="Ej: Jefe de Obra"
+              placeholder={t('contacts.field.rolePlaceholder')}
               placeholderTextColor={Colors.textMuted}
             />
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
-                <Text style={styles.cancelBtnText}>Cancelar</Text>
+                <Text style={styles.cancelBtnText}>{t('contacts.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.saveBtn, (!form.name.trim() || !form.phone.trim() || saving) && styles.saveBtnDisabled]}
                 onPress={saveContact}
                 disabled={!form.name.trim() || !form.phone.trim() || saving}
               >
-                <Text style={styles.saveBtnText}>{saving ? 'Guardando…' : 'Guardar'}</Text>
+                <Text style={styles.saveBtnText}>{saving ? t('contacts.saving') : t('contacts.save')}</Text>
               </TouchableOpacity>
             </View>
           </View>

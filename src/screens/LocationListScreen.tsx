@@ -14,11 +14,14 @@ import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'LocationList'>;
 
 export default function LocationListScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+
+  const { t } = useI18n();
 
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
 
@@ -123,7 +126,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
         <View style={styles.cardLeft}>
           <Text style={styles.locationName}>{item.name}</Text>
           {item.referencePlan ? (
-            <Text style={styles.referencePlan}>Plano: {item.referencePlan}</Text>
+            <Text style={styles.referencePlan}>{t('locList.referencePlan', { plan: item.referencePlan })}</Text>
           ) : null}
         </View>
         <View style={styles.cardRight}>
@@ -138,11 +141,11 @@ export default function LocationListScreen({ navigation, route }: Props) {
                 </Text>
               </View>
               <Text style={styles.progressLabel}>
-                {allDone ? 'Completo' : 'Pendientes'}
+                {allDone ? t('locList.complete') : t('locList.pending')}
               </Text>
             </>
           ) : (
-            <Text style={styles.noTemplates}>Sin protocolos</Text>
+            <Text style={styles.noTemplates}>{t('locList.noProtocols')}</Text>
           )}
           <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
         </View>
@@ -154,7 +157,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       <AppHeader
         title={projectName}
-        subtitle={syncing ? 'Sincronizando...' : `${filtered.length} ubicacion${filtered.length !== 1 ? 'es' : ''}`}
+        subtitle={syncing ? t('locList.syncing') : t(filtered.length === 1 ? 'locList.locationCount_one' : 'locList.locationCount_other', { count: filtered.length })}
         onBack={() => navigation.goBack()}
         rightContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -171,7 +174,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
         <Ionicons name="search-outline" size={16} color={Colors.textMuted} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar..."
+          placeholder={t('locList.searchPlaceholder')}
           placeholderTextColor={Colors.textMuted}
           value={search}
           onChangeText={setSearch}
@@ -194,12 +197,12 @@ export default function LocationListScreen({ navigation, route }: Props) {
           <View style={styles.slicerLeft}>
             <View style={styles.slicerLabelRow}>
               <Ionicons name="layers-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.slicerLabel}>Ubicación</Text>
+              <Text style={styles.slicerLabel}>{t('locList.locationLabel')}</Text>
             </View>
             {filterLocation ? (
               <Text style={styles.slicerValue}>{filterLocation}</Text>
             ) : (
-              <Text style={styles.slicerPlaceholder}>Todas</Text>
+              <Text style={styles.slicerPlaceholder}>{t('locList.all')}</Text>
             )}
           </View>
           <View style={styles.slicerRight}>
@@ -224,7 +227,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
               style={[styles.chip, !filterLocation && styles.chipActive]}
               onPress={() => { setFilterLocation(''); setExpandLocation(false); }}
             >
-              <Text style={[styles.chipTxt, !filterLocation && styles.chipTxtActive]}>Todas</Text>
+              <Text style={[styles.chipTxt, !filterLocation && styles.chipTxtActive]}>{t('locList.all')}</Text>
             </TouchableOpacity>
             {uniqueLocations.map(val => (
               <TouchableOpacity
@@ -249,12 +252,12 @@ export default function LocationListScreen({ navigation, route }: Props) {
           <View style={styles.slicerLeft}>
             <View style={styles.slicerLabelRow}>
               <Ionicons name="construct-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.slicerLabel}>Especialidad</Text>
+              <Text style={styles.slicerLabel}>{t('locList.specialtyLabel')}</Text>
             </View>
             {filterSpecialty ? (
               <Text style={styles.slicerValue}>{filterSpecialty}</Text>
             ) : (
-              <Text style={styles.slicerPlaceholder}>Todas</Text>
+              <Text style={styles.slicerPlaceholder}>{t('locList.all')}</Text>
             )}
           </View>
           <View style={styles.slicerRight}>
@@ -279,7 +282,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
               style={[styles.chip, !filterSpecialty && styles.chipActive]}
               onPress={() => { setFilterSpecialty(''); setExpandSpecialty(false); }}
             >
-              <Text style={[styles.chipTxt, !filterSpecialty && styles.chipTxtActive]}>Todas</Text>
+              <Text style={[styles.chipTxt, !filterSpecialty && styles.chipTxtActive]}>{t('locList.all')}</Text>
             </TouchableOpacity>
             {uniqueSpecialties.map(val => (
               <TouchableOpacity
@@ -300,7 +303,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
             onPress={() => { setFilterLocation(''); setFilterSpecialty(''); }}
           >
             <Ionicons name="filter-circle-outline" size={14} color={Colors.primary} />
-            <Text style={styles.clearAllTxt}>Limpiar {activeFilters} filtro{activeFilters > 1 ? 's' : ''}</Text>
+            <Text style={styles.clearAllTxt}>{t(activeFilters > 1 ? 'locList.clearFilters_other' : 'locList.clearFilters_one', { count: activeFilters })}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -328,8 +331,8 @@ export default function LocationListScreen({ navigation, route }: Props) {
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
                 {locations.length === 0
-                  ? 'No hay ubicaciones cargadas.\nImporta el Excel de ubicaciones desde el menú del proyecto.'
-                  : 'No se encontraron resultados.'}
+                  ? t('locList.emptyNoLocations')
+                  : t('locList.emptyNoResults')}
               </Text>
             </View>
           }

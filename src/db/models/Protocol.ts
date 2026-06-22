@@ -32,7 +32,39 @@ export default class Protocol extends Model {
   @field('filled_at') filledAt!: number | null;
   @field('submitted_at') submittedAt!: number | null;
   @field('rejection_reason') rejectionReason!: string | null;
+  @field('general_comment') generalComment!: string | null;
+  @field('approval_reason') approvalReason!: string | null; // v33: motivo al aprobar fuera de rango
+  // v21 — soporte de carga histórica
+  @field('external_id') externalId!: string | null;
+  @field('imported_at') importedAt!: number | null;
+  @field('imported_by_id') importedById!: string | null;
+  @field('is_historical') isHistorical!: boolean;
   @field('upload_status') uploadStatus!: UploadStatus;
+  // v26 — Módulo GIS
+  @field('coord_captured_at') coordCapturedAt!: number | null;
+  @field('coord_captured_by_id') coordCapturedById!: string | null;
+  @field('coord_accuracy_m') coordAccuracyM!: number | null;
+  // v35 — captura de precisión por promediado de waypoints
+  @field('coord_method') coordMethod!: string | null;            // 'single' | 'averaged' | 'rtk'
+  @field('coord_sample_count') coordSampleCount!: number | null;
+  @field('coord_precision_m') coordPrecisionM!: number | null;
+  @field('coord_backup_lat') coordBackupLat!: number | null;
+  @field('coord_backup_lng') coordBackupLng!: number | null;
+  @field('coord_backup_captured_at') coordBackupCapturedAt!: number | null;
+  @field('sector_id') sectorId!: string | null;
+  @field('sector_assigned_manually') sectorAssignedManually!: boolean;
+  // v31 — modos de llenado + codificación correlativa (Partes D+E)
+  /** Código correlativo del ensayo (p.ej. PR-260032). Único por proyecto. */
+  @field('protocol_code') protocolCode!: string | null;
+  /** Fecha del ENSAYO (YYYY-MM-DD; ≠ fecha de carga) — modo "por fecha". */
+  @field('ensayo_date') ensayoDate!: string | null;
+  /** v32 — Hora de INICIO del ensayo (HH:MM, editable al crear). */
+  @field('ensayo_time') ensayoTime!: string | null;
+  /** v43 — Muestra física vinculada (módulo "ensayos por muestra"). */
+  @field('sample_id') sampleId!: string | null;
+  /** v42 — Snapshot JSON de los llamados entre ensayos (@código.celda) congelado
+   *  al ENVIAR: {"código.celda":{sourceId,sourceUpdatedAt,value,status}}. */
+  @field('xref_snapshot_json') xrefSnapshotJson!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

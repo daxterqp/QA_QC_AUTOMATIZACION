@@ -4,9 +4,11 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert, Image, Modal,
 } from 'react-native';
 import { useAuth } from '@context/AuthContext';
+import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 export default function LoginScreen() {
+  const { t } = useI18n();
   const { login, loginDemo } = useAuth();
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [demoPassword, setDemoPassword] = useState('');
@@ -25,7 +27,7 @@ export default function LoginScreen() {
       setDemoPassword('');
       loginDemo();
     } else {
-      Alert.alert('Contraseña incorrecta', 'La contraseña de demo no es correcta.');
+      Alert.alert(t('login.wrongPasswordTitle'), t('login.wrongPasswordMsg'));
     }
   };
 
@@ -37,8 +39,8 @@ export default function LoginScreen() {
 
     if (result !== 'ok') {
       Alert.alert(
-        'Error de acceso',
-        'Nombre o contraseña incorrectos. La primera vez, su contraseña es su nombre.'
+        t('login.accessErrorTitle'),
+        t('login.accessErrorMsg')
       );
     }
   };
@@ -56,23 +58,23 @@ export default function LoginScreen() {
 
         <View style={styles.formCard}>
           <View style={styles.formTitleRow}>
-            <Text style={styles.formTitle}>INICIAR SESIÓN</Text>
+            <Text style={styles.formTitle}>{t('login.title')}</Text>
             <TouchableOpacity
               style={[styles.demoBadge, demoExpired && styles.demoBadgeExpired]}
               onPress={() => { if (!demoExpired) setShowDemoModal(true); }}
               activeOpacity={demoExpired ? 1 : 0.7}
             >
               <Text style={styles.demoBadgeText}>
-                {demoExpired ? 'Demo expirada' : 'Ver demo'}
+                {demoExpired ? t('login.demoExpired') : t('login.viewDemo')}
               </Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>NOMBRE</Text>
+            <Text style={styles.label}>{t('login.nameLabel')}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ingrese su nombre"
+              placeholder={t('login.namePlaceholder')}
               placeholderTextColor={Colors.textMuted}
               value={name}
               onChangeText={setName}
@@ -82,11 +84,11 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>CONTRASEÑA</Text>
+            <Text style={styles.label}>{t('login.passwordLabel')}</Text>
             <View style={styles.passwordRow}>
               <TextInput
                 style={[styles.input, styles.passwordInput]}
-                placeholder="Ingrese su contraseña"
+                placeholder={t('login.passwordPlaceholder')}
                 placeholderTextColor={Colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
@@ -99,14 +101,14 @@ export default function LoginScreen() {
                 onPress={() => setShowPassword(!showPassword)}
               >
                 <Text style={styles.toggleBtnText}>
-                  {showPassword ? 'Ocultar' : 'Mostrar'}
+                  {showPassword ? t('login.hide') : t('login.show')}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
 
           <Text style={styles.hint}>
-            Primera vez: su contraseña es su nombre
+            {t('login.firstTimeHint')}
           </Text>
 
           <TouchableOpacity
@@ -115,20 +117,20 @@ export default function LoginScreen() {
             disabled={!canContinue || loading}
           >
             <Text style={styles.btnText}>
-              {loading ? 'Verificando...' : 'INGRESAR'}
+              {loading ? t('login.verifying') : t('login.submit')}
             </Text>
           </TouchableOpacity>
 
         </View>
 
         <Text style={styles.footer}>
-          Para solicitar acceso, contacte al administrador del sistema.
+          {t('login.footer')}
         </Text>
         <TouchableOpacity onPress={() => {
           const { Linking } = require('react-native');
           Linking.openURL('https://docs.google.com/document/d/e/2PACX-1vSFl7nP_Va4GvTQsMAdTaQ_85f_UEYZjQk7R7VrYskfprVCjUTHuKceMQTFyuuXcA/pub');
         }}>
-          <Text style={styles.privacyLink}>Política de Privacidad</Text>
+          <Text style={styles.privacyLink}>{t('login.privacyPolicy')}</Text>
         </TouchableOpacity>
 
       </ScrollView>
@@ -137,11 +139,11 @@ export default function LoginScreen() {
       <Modal visible={showDemoModal} transparent animationType="fade" onRequestClose={() => { setShowDemoModal(false); setDemoPassword(''); }}>
         <View style={styles.demoOverlay}>
           <View style={styles.demoCard}>
-            <Text style={styles.demoCardTitle}>Acceso Demo</Text>
-            <Text style={styles.demoCardSubtitle}>Ingresa la contraseña de demostración</Text>
+            <Text style={styles.demoCardTitle}>{t('login.demoModalTitle')}</Text>
+            <Text style={styles.demoCardSubtitle}>{t('login.demoModalSubtitle')}</Text>
             <TextInput
               style={styles.demoInput}
-              placeholder="Contraseña demo"
+              placeholder={t('login.demoPasswordPlaceholder')}
               placeholderTextColor={Colors.textMuted}
               value={demoPassword}
               onChangeText={setDemoPassword}
@@ -152,10 +154,10 @@ export default function LoginScreen() {
             />
             <View style={styles.demoActions}>
               <TouchableOpacity onPress={() => { setShowDemoModal(false); setDemoPassword(''); }}>
-                <Text style={styles.demoCancelText}>Cancelar</Text>
+                <Text style={styles.demoCancelText}>{t('login.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.demoConfirmBtn} onPress={handleDemoAccess}>
-                <Text style={styles.demoConfirmText}>Entrar</Text>
+                <Text style={styles.demoConfirmText}>{t('login.enter')}</Text>
               </TouchableOpacity>
             </View>
           </View>

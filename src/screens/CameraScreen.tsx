@@ -9,17 +9,24 @@ import {
 } from 'react-native';
 import { Camera } from 'react-native-vision-camera';
 import { useCamera } from '@hooks/useCamera';
-import { database, annotationCommentPhotosCollection, evidencesCollection } from '@db/index';
-import { uploadAnnotationCommentPhoto, uploadEvidencePhoto } from '@services/S3PhotoService';
+import { database, annotationCommentPhotosCollection, evidencesCollection, protocolItemsCollection, protocolsCollection } from '@db/index';
+import { uploadAnnotationCommentPhoto, uploadEvidencePhoto, uploadExtraPhoto } from '@services/S3PhotoService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { compressImage } from '@services/ImageCompressor';
 import { applyPhotoStamps } from '@services/PhotoStampService';
 import { getProjectSettings, type ProjectStampSettings } from '@services/ProjectSettings';
 import { downloadFromS3, s3FileExists } from '@services/S3Service';
 import * as FileSystem from 'expo-file-system';
+import { useI18n } from '@i18n/index';
 
 interface CameraScreenProps {
   protocolItemId?: string;
   annotationCommentId?: string;
+  /** v32 — Modo "evidencia fotográfica EXTRA" del protocolo: la foto se procesa
+   *  con el MISMO pipeline (compresión + estampado de logo/fecha/hora) y se
+   *  guarda en la lista de fotos extra del protocolo (AsyncStorage + S3). */
+  extraPhotoProtocolId?: string;
   projectId?: string;
   onClose: () => void;
   onPhotoSaved?: (id: string) => void;
@@ -28,10 +35,12 @@ interface CameraScreenProps {
 export default function CameraScreen({
   protocolItemId,
   annotationCommentId,
+  extraPhotoProtocolId,
   projectId,
   onClose,
   onPhotoSaved,
 }: CameraScreenProps) {
+  const { t } = useI18n();
   const { cameraRef, device, hasPermission, isLoading, requestPermission, takePhoto } =
     useCamera();
 
@@ -138,7 +147,22 @@ export default function CameraScreen({
         });
         onPhotoSaved?.(evidenceId);
 
-        // Background: comprimir → stamp → update DB → upload S3
+        // v25 — Enqueue UPLOAD_PHOTO. Si projectId no fue pasado como prop,
+        // resolvemos via item→protocol (H4: evita que la op quede con
+        // projectId='' y los filtros per-proyecto la omitan).
+        let resolvedPid = projectId ?? '';
+        if (!resolvedPid) {
+          try {
+            const item = await protocolItemsCollection.find(protocolItemId);
+            if ((item as any).protocolId) {
+              const proto = await protocolsCollection.find((item as any).protocolId);
+              resolvedPid = (proto as any).projectId ?? '';
+            }
+          } catch { /* dejarlo vacío como fallback */ }
+        }
+        enqueueSync({ opType: 'UPLOAD_PHOTO', entityId: evidenceId, projectId: resolvedPid }).catch(() => {});
+
+        // Background: comprimir → stamp → update DB → upload S3 (intento inline)
         (async () => {
           try {
             const { uri: compressed } = await compressImage(rawUri);
@@ -150,9 +174,30 @@ export default function CameraScreen({
               await r2.update((ev) => { ev.localUri = finalUri; });
             });
             await uploadEvidencePhoto(evidenceId, finalUri);
+            // Éxito inline: el worker verá uploadStatus='SYNCED' y limpiará la cola.
           } catch (err) {
-            console.warn('[CameraScreen] procesamiento protocolo falló:', err);
-            uploadEvidencePhoto(evidenceId, rawUri).catch(() => {});
+            console.warn('[CameraScreen] procesamiento protocolo falló (queda en cola):', err);
+            // No reintentamos aquí — el worker lo hace con backoff.
+          }
+        })();
+      } else if (extraPhotoProtocolId) {
+        // ── v32: Foto EXTRA del protocolo ──────────────────────────────────
+        // Mismo pipeline de los ensayos tradicionales (compresión + estampado
+        // de logo/fecha/hora); la foto entra a la lista de evidencias extra
+        // (AsyncStorage, misma key que usa ProtocolFillScreen) y sube a S3.
+        (async () => {
+          try {
+            const { uri: compressed } = await compressImage(rawUri);
+            const finalUri = settings.stampEnabled
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
+              : compressed;
+            const key = `protocol_extra_photos_${extraPhotoProtocolId}`;
+            const prev: string[] = JSON.parse((await AsyncStorage.getItem(key)) ?? '[]');
+            const updated = [...prev, finalUri];
+            await AsyncStorage.setItem(key, JSON.stringify(updated));
+            uploadExtraPhoto(extraPhotoProtocolId, finalUri, updated.length).catch(() => {});
+          } catch (err) {
+            console.warn('[CameraScreen] foto extra falló:', err);
           }
         })();
       }
@@ -161,7 +206,7 @@ export default function CameraScreen({
     }
   }, [
     isTaking, takePhoto,
-    protocolItemId, annotationCommentId, onPhotoSaved,
+    protocolItemId, annotationCommentId, extraPhotoProtocolId, onPhotoSaved,
     settings,
   ]);
 
@@ -170,7 +215,7 @@ export default function CameraScreen({
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#fff" />
-        <Text style={styles.label}>Solicitando permisos de camara...</Text>
+        <Text style={styles.label}>{t('camera.requestingPermission')}</Text>
       </View>
     );
   }
@@ -178,12 +223,12 @@ export default function CameraScreen({
   if (!hasPermission) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.label}>Camara sin permisos</Text>
+        <Text style={styles.label}>{t('camera.noPermission')}</Text>
         <TouchableOpacity style={styles.btn} onPress={requestPermission}>
-          <Text style={styles.btnText}>Conceder permiso</Text>
+          <Text style={styles.btnText}>{t('camera.grantPermission')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={onClose}>
-          <Text style={styles.btnText}>Volver</Text>
+          <Text style={styles.btnText}>{t('camera.back')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -193,14 +238,14 @@ export default function CameraScreen({
     return (
       <View style={styles.centered}>
         <Text style={styles.label}>
-          No se encontró cámara trasera.{'\n'}
-          Verifica que la app tenga permiso de Cámara en Ajustes del dispositivo.
+          {t('camera.noRearCamera')}{'\n'}
+          {t('camera.checkPermission')}
         </Text>
         <TouchableOpacity style={styles.btn} onPress={requestPermission}>
-          <Text style={styles.btnText}>Reintentar permisos</Text>
+          <Text style={styles.btnText}>{t('camera.retryPermission')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={onClose}>
-          <Text style={styles.btnText}>Volver</Text>
+          <Text style={styles.btnText}>{t('camera.back')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -223,11 +268,11 @@ export default function CameraScreen({
           <Text style={styles.closeBtnText}>X</Text>
         </TouchableOpacity>
         <View style={styles.counter}>
-          <Text style={styles.counterText}>{photoCount} foto{photoCount !== 1 ? 's' : ''}</Text>
+          <Text style={styles.counterText}>{photoCount !== 1 ? t('camera.photoCountPlural', { count: photoCount }) : t('camera.photoCountSingular', { count: photoCount })}</Text>
         </View>
         {settings.stampEnabled && (
           <View style={styles.stampBadge}>
-            <Text style={styles.stampBadgeText}>STAMP</Text>
+            <Text style={styles.stampBadgeText}>{t('camera.stampBadge')}</Text>
           </View>
         )}
       </View>

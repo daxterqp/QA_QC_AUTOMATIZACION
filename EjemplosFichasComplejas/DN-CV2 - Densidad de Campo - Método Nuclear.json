@@ -1,0 +1,1488 @@
+{
+  "referencia": "DN-CV2 - Densidad de Campo - Método Nuclear",
+  "tipoEnsaio": {
+    "_id": "6baabb5da1c4e7f2d910005d",
+    "nome": "Densidad de Campo - Método Nuclear CV2",
+    "categoria": "Caracterización",
+    "sigla": "DN-CV2",
+    "unidade": "Ensaio",
+    "normasReferencia": [],
+    "versaoAtual": "6baabb5ea1c4e7f2d910005e",
+    "ultimaVersaoAprovada": "6baabb5fa1c4e7f2d910005f",
+    "habilitadoParaCampo": true,
+    "permiteCriacaoExclusaoCpDuranteExecucao": false,
+    "investigacaoGeotecnica": false,
+    "arquivado": false,
+    "__v": 0,
+    "ultimaVersaoPublicada": "6baabb60a1c4e7f2d9100060"
+  },
+  "workflow": {
+    "_id": "6baabb5ea1c4e7f2d910005e",
+    "tipoEnsaio": "6baabb5da1c4e7f2d910005d",
+    "versao": 1,
+    "publicada": false,
+    "atividades": [
+      {
+        "atributosProcedimento": {
+          "sequencialTipo": 1,
+          "possuiAnexos": false,
+          "possuiFotos": false,
+          "ehObrigatorioFotos": false,
+          "fotosPorLinha": 4,
+          "possuiDocumentos": false,
+          "dependencias": []
+        },
+        "atributosGrupo": {
+          "tipo": "Simples",
+          "titulo": "Datos Iniciales",
+          "possuiEstagios": null,
+          "graficos": [],
+          "atividades": [
+            {
+              "atributosProcedimento": {
+                "tipo": "6baabb00a1c4e7f2d9100000",
+                "versao": "6baabb01a1c4e7f2d9100001",
+                "sequencialTipo": 1,
+                "titulo": "Datos Iniciales",
+                "identificador": "dn-datos-iniciales-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": []
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6baabb02a1c4e7f2d9100002"
+            }
+          ]
+        },
+        "tipo": "Grupo",
+        "nivel": 0,
+        "_id": "6baabb4fa1c4e7f2d910004f"
+      },
+      {
+        "atributosProcedimento": {
+          "sequencialTipo": 1,
+          "possuiAnexos": false,
+          "possuiFotos": false,
+          "ehObrigatorioFotos": false,
+          "fotosPorLinha": 4,
+          "possuiDocumentos": false,
+          "dependencias": []
+        },
+        "atributosGrupo": {
+          "tipo": "Simples",
+          "titulo": "Ensayo",
+          "possuiEstagios": null,
+          "graficos": [],
+          "atividades": [
+            {
+              "atributosProcedimento": {
+                "tipo": "6baabb03a1c4e7f2d9100003",
+                "versao": "6baabb04a1c4e7f2d9100004",
+                "sequencialTipo": 1,
+                "titulo": "Datos Generales",
+                "identificador": "dn-datos-generales-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": []
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6baabb05a1c4e7f2d9100005"
+            },
+            {
+              "atributosProcedimento": {
+                "tipo": "6baabb06a1c4e7f2d9100006",
+                "versao": "6baabb07a1c4e7f2d9100007",
+                "sequencialTipo": 1,
+                "titulo": "Densidad y Contenido de Humedad con Densímetro Nuclear (ASTM D6938)",
+                "identificador": "dn-densidad-humedad-densimetro-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": [
+                  {
+                    "referencia": "6baabb09a1c4e7f2d9100009",
+                    "nome": "DN - Contenido de Humedad en Laboratorio (ASTM D2216) CV2",
+                    "identificador": "dn-contenido-humedad-laboratorio-cv2",
+                    "mesmoCP": false,
+                    "mesmoEstagio": false,
+                    "atividade": "6baabb0ba1c4e7f2d910000b",
+                    "_id": "6baabb50a1c4e7f2d9100050"
+                  }
+                ]
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6baabb08a1c4e7f2d9100008"
+            },
+            {
+              "atributosProcedimento": {
+                "tipo": "6baabb09a1c4e7f2d9100009",
+                "versao": "6baabb0aa1c4e7f2d910000a",
+                "sequencialTipo": 1,
+                "titulo": "Contenido de Humedad en Laboratorio (ASTM D2216)",
+                "identificador": "dn-contenido-humedad-laboratorio-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": []
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6baabb0ba1c4e7f2d910000b"
+            },
+            {
+              "atributosProcedimento": {
+                "tipo": "6baabb0ca1c4e7f2d910000c",
+                "versao": "6baabb0da1c4e7f2d910000d",
+                "sequencialTipo": 1,
+                "titulo": "Evaluación de Compactación",
+                "identificador": "dn-evaluacion-de-compactacion-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": [
+                  {
+                    "referencia": "6baabb06a1c4e7f2d9100006",
+                    "nome": "DN - Densidad y Contenido de Humedad con Densímetro Nuclear (ASTM D6938) CV2",
+                    "identificador": "dn-densidad-humedad-densimetro-cv2",
+                    "mesmoCP": false,
+                    "mesmoEstagio": false,
+                    "atividade": "6baabb08a1c4e7f2d9100008",
+                    "_id": "6baabb51a1c4e7f2d9100051"
+                  }
+                ]
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6baabb0ea1c4e7f2d910000e"
+            }
+          ]
+        },
+        "tipo": "Grupo",
+        "nivel": 0,
+        "_id": "6baabb52a1c4e7f2d9100052"
+      }
+    ],
+    "telaResultados": [
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Datos Iniciales",
+            "largura": 100,
+            "atividade": "6baabb02a1c4e7f2d9100002",
+            "_id": "6baabb53a1c4e7f2d9100053"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6baabb54a1c4e7f2d9100054",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Datos Generales",
+            "largura": 100,
+            "atividade": "6baabb05a1c4e7f2d9100005",
+            "_id": "6baabb55a1c4e7f2d9100055"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6baabb56a1c4e7f2d9100056",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Densidad y Contenido de Humedad con Densímetro Nuclear (ASTM D6938)",
+            "largura": 100,
+            "atividade": "6baabb08a1c4e7f2d9100008",
+            "_id": "6baabb57a1c4e7f2d9100057"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6baabb58a1c4e7f2d9100058",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Contenido de Humedad en Laboratorio (ASTM D2216)",
+            "largura": 100,
+            "atividade": "6baabb0ba1c4e7f2d910000b",
+            "_id": "6baabb59a1c4e7f2d9100059"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6baabb5aa1c4e7f2d910005a",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": true,
+          "campanha": true
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Evaluación de Compactación",
+            "largura": 100,
+            "atividade": "6baabb0ea1c4e7f2d910000e",
+            "_id": "6baabb5ba1c4e7f2d910005b"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6baabb5ca1c4e7f2d910005c",
+        "linhas": []
+      }
+    ],
+    "investigacaoGeotecnica": false,
+    "__v": 0
+  },
+  "tiposProcedimentosPublicados": [
+    {
+      "_id": "6baabb01a1c4e7f2d9100001",
+      "nome": "DN - Datos Iniciales CV2",
+      "identificador": "dn-datos-iniciales-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Norma",
+          "identificador": "norma",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb0fa1c4e7f2d910000f",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "\"ASTM D6938\""
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "1",
+                "_id": "6baabb10a1c4e7f2d9100010"
+              },
+              {
+                "item": "2",
+                "_id": "6baabb11a1c4e7f2d9100011"
+              },
+              {
+                "item": "3",
+                "_id": "6baabb12a1c4e7f2d9100012"
+              },
+              {
+                "item": "4",
+                "_id": "6baabb13a1c4e7f2d9100013"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Guardia QC N°",
+          "identificador": "guardia-qc-n",
+          "ordem": 1,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb14a1c4e7f2d9100014",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Fecha",
+          "identificador": "fecha",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Data",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb15a1c4e7f2d9100015",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "A",
+                "_id": "6baabb16a1c4e7f2d9100016"
+              },
+              {
+                "item": "B",
+                "_id": "6baabb17a1c4e7f2d9100017"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Turno",
+          "identificador": "turno",
+          "ordem": 3,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb18a1c4e7f2d9100018",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código de fecha",
+          "identificador": "codigo-de-fecha",
+          "ordem": 4,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb19a1c4e7f2d9100019",
+          "validacoes": [],
+          "exibirTelaResultados": false,
+          "exibirTelaExecucao": true,
+          "documentacao": "6 dígitos AAMMDD (ej: 260319) para el Reporte N°. SimpleLab no extrae año/mes/día de una fecha."
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Reporte N°",
+          "identificador": "reporte-n",
+          "ordem": 5,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb1aa1c4e7f2d910001a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"codigo-de-fecha\"])), NOT(EMPTY(p[\"turno\"]))), CONCAT(\"CV-DRE-QC-RDN-\", p[\"codigo-de-fecha\"], \"-\", p[\"turno\"]))"
+          },
+          "documentacao": "Concatenado: CV-DRE-QC-RDN- + código de fecha + turno"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "Brian Fernandez",
+                "_id": "6baabb1ba1c4e7f2d910001b"
+              },
+              {
+                "item": "Francisco Vilcapaza",
+                "_id": "6baabb1ca1c4e7f2d910001c"
+              },
+              {
+                "item": "Guillermo Torres",
+                "_id": "6baabb1da1c4e7f2d910001d"
+              },
+              {
+                "item": "Gustavo Muñoz",
+                "_id": "6baabb1ea1c4e7f2d910001e"
+              },
+              {
+                "item": "Juan Carlos Marín",
+                "_id": "6baabb1fa1c4e7f2d910001f"
+              },
+              {
+                "item": "Robert Salas",
+                "_id": "6baabb20a1c4e7f2d9100020"
+              },
+              {
+                "item": "Sergio Zapana",
+                "_id": "6baabb21a1c4e7f2d9100021"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Supervisor",
+          "identificador": "supervisor",
+          "ordem": 6,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb22a1c4e7f2d9100022",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6baabb00a1c4e7f2d9100000",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6baabb04a1c4e7f2d9100004",
+      "nome": "DN - Datos Generales CV2",
+      "identificador": "dn-datos-generales-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código de ensayo",
+          "identificador": "codigo-de-ensayo",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb23a1c4e7f2d9100023",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Cancha - Zona",
+          "identificador": "cancha-zona",
+          "ordem": 1,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb24a1c4e7f2d9100024",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Spool - Pórtico",
+          "identificador": "spool-portico",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb25a1c4e7f2d9100025",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Progresiva de presa (E-O)",
+          "identificador": "progresiva-de-presa-e-o",
+          "ordem": 3,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb26a1c4e7f2d9100026",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Distancia a eje de presa S-N",
+          "identificador": "distancia-a-eje-de-presa-s-n",
+          "ordem": 4,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb27a1c4e7f2d9100027",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Cota de elevación (msnm)",
+          "identificador": "cota-de-elevacion-msnm",
+          "ordem": 5,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb28a1c4e7f2d9100028",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Equipo utilizado",
+          "identificador": "equipo-utilizado",
+          "ordem": 6,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb29a1c4e7f2d9100029",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "\"D6R+B6T\""
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Número de pasadas",
+          "identificador": "numero-de-pasadas",
+          "ordem": 7,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb2aa1c4e7f2d910002a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "8"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Número total de Ciclos",
+          "identificador": "numero-total-de-ciclos",
+          "ordem": 8,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb2ba1c4e7f2d910002b",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "4"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Profundidad de fuente",
+          "identificador": "profundidad-de-fuente",
+          "ordem": 9,
+          "unidade": "m",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb2ca1c4e7f2d910002c",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "referencia": {
+              "_id": "6a175ba10bc7679c4f71e3c4",
+              "nome": "Densimetro",
+              "identificador": "equipamento_densimetro"
+            },
+            "valorDefault": false
+          },
+          "nome": "Número de densímetro",
+          "identificador": "numero-de-densimetro",
+          "ordem": 10,
+          "unidade": "s/u",
+          "categoria": "Entrada",
+          "tipo": "Referência",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb2da1c4e7f2d910002d",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Valor de corrección para humedad (K)",
+          "identificador": "valor-de-correccion-para-humedad-k",
+          "ordem": 11,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb2ea1c4e7f2d910002e",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "p[\"numero-de-densimetro\"][\"k\"]"
+          }
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6baabb03a1c4e7f2d9100003",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6baabb07a1c4e7f2d9100007",
+      "nome": "DN - Densidad y Contenido de Humedad con Densímetro Nuclear (ASTM D6938) CV2",
+      "identificador": "dn-densidad-humedad-densimetro-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [
+        {
+          "referencia": "6baabb09a1c4e7f2d9100009",
+          "nome": "DN - Contenido de Humedad en Laboratorio (ASTM D2216) CV2",
+          "identificador": "dn-contenido-humedad-laboratorio-cv2",
+          "_id": "6baabb4da1c4e7f2d910004d"
+        }
+      ],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Conteo estándar de densidad",
+          "identificador": "conteo-estandar-de-densidad",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb2fa1c4e7f2d910002f",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Corrección conteo estándar de densidad",
+          "identificador": "correccion-conteo-estandar-de-densidad",
+          "ordem": 1,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb30a1c4e7f2d9100030",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Conteo estándar de humedad",
+          "identificador": "conteo-estandar-de-humedad",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb31a1c4e7f2d9100031",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Corrección conteo estándar de humedad",
+          "identificador": "correccion-conteo-estandar-de-humedad",
+          "ordem": 3,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb32a1c4e7f2d9100032",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Conteo de densidad (DC)",
+          "identificador": "conteo-de-densidad-dc",
+          "ordem": 4,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb33a1c4e7f2d9100033",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Conteo de humedad (MC)",
+          "identificador": "conteo-de-humedad-mc",
+          "ordem": 5,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb34a1c4e7f2d9100034",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Densidad suelo húmedo",
+          "identificador": "densidad-suelo-humedo",
+          "ordem": 6,
+          "unidade": "g/cm³",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 3,
+          "aceitaNegativo": false,
+          "_id": "6baabb35a1c4e7f2d9100035",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Densidad suelo seco",
+          "identificador": "densidad-suelo-seco",
+          "ordem": 7,
+          "unidade": "g/cm³",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 3,
+          "aceitaNegativo": false,
+          "_id": "6baabb36a1c4e7f2d9100036",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Valor directo de lectura del densímetro nuclear"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Contenido de humedad con densímetro",
+          "identificador": "contenido-de-humedad-con-densimetro",
+          "ordem": 8,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb37a1c4e7f2d9100037",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"densidad-suelo-humedo\"])), NOT(EMPTY(p[\"densidad-suelo-seco\"])), GT(p[\"densidad-suelo-seco\"], 0)), p[\"densidad-suelo-humedo\"] / p[\"densidad-suelo-seco\"] - 1)"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Contenido de humedad en horno",
+          "identificador": "contenido-de-humedad-en-horno",
+          "ordem": 9,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb38a1c4e7f2d9100038",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "PARAMETRO(\"dn-contenido-humedad-laboratorio-cv2\", \"contenido-de-humedad\")"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Densidad suelo seco corregida",
+          "identificador": "densidad-suelo-seco-corregida",
+          "ordem": 10,
+          "unidade": "g/cm³",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 3,
+          "aceitaNegativo": false,
+          "_id": "6baabb39a1c4e7f2d9100039",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"densidad-suelo-humedo\"])), NOT(EMPTY(p[\"contenido-de-humedad-en-horno\"]))), p[\"densidad-suelo-humedo\"] / (1 + p[\"contenido-de-humedad-en-horno\"]))"
+          }
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6baabb06a1c4e7f2d9100006",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6baabb0aa1c4e7f2d910000a",
+      "nome": "DN - Contenido de Humedad en Laboratorio (ASTM D2216) CV2",
+      "identificador": "dn-contenido-humedad-laboratorio-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "referencia": {
+              "_id": "6a175c470bc7679c4f71e4fb",
+              "nome": "Tara",
+              "identificador": "equipamento_tara"
+            },
+            "valorDefault": false
+          },
+          "nome": "Tara N°",
+          "identificador": "tara-n",
+          "ordem": 0,
+          "unidade": "s/u",
+          "categoria": "Entrada",
+          "tipo": "Referência",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb3aa1c4e7f2d910003a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso muestra húmeda + tara",
+          "identificador": "peso-muestra-humeda-tara",
+          "ordem": 1,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb3ba1c4e7f2d910003b",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso muestra seca + tara",
+          "identificador": "peso-muestra-seca-tara",
+          "ordem": 2,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb3ca1c4e7f2d910003c",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso de la tara",
+          "identificador": "peso-de-la-tara",
+          "ordem": 3,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb3da1c4e7f2d910003d",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "p[\"tara-n\"][\"peso\"]"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Agua contenida",
+          "identificador": "agua-contenida",
+          "ordem": 4,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb3ea1c4e7f2d910003e",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"peso-muestra-humeda-tara\"])), NOT(EMPTY(p[\"peso-muestra-seca-tara\"]))), p[\"peso-muestra-humeda-tara\"] - p[\"peso-muestra-seca-tara\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso de la muestra seca",
+          "identificador": "peso-de-la-muestra-seca",
+          "ordem": 5,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6baabb3fa1c4e7f2d910003f",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"peso-muestra-seca-tara\"])), NOT(EMPTY(p[\"peso-de-la-tara\"]))), p[\"peso-muestra-seca-tara\"] - p[\"peso-de-la-tara\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Contenido de humedad",
+          "identificador": "contenido-de-humedad",
+          "ordem": 6,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb40a1c4e7f2d9100040",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"agua-contenida\"])), NOT(EMPTY(p[\"peso-de-la-muestra-seca\"])), GT(p[\"peso-de-la-muestra-seca\"], 0)), p[\"agua-contenida\"] / p[\"peso-de-la-muestra-seca\"])"
+          }
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6baabb09a1c4e7f2d9100009",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6baabb0da1c4e7f2d910000d",
+      "nome": "DN - Evaluación de Compactación CV2",
+      "identificador": "dn-evaluacion-de-compactacion-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [
+        {
+          "referencia": "6baabb06a1c4e7f2d9100006",
+          "nome": "DN - Densidad y Contenido de Humedad con Densímetro Nuclear (ASTM D6938) CV2",
+          "identificador": "dn-densidad-humedad-densimetro-cv2",
+          "_id": "6baabb4ea1c4e7f2d910004e"
+        }
+      ],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código Curva Proctor",
+          "identificador": "codigo-curva-proctor",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb41a1c4e7f2d9100041",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Ej: 'PR-260046'"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Máxima densidad seca de la curva",
+          "identificador": "maxima-densidad-seca-de-la-curva",
+          "ordem": 1,
+          "unidade": "g/cm³",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 3,
+          "aceitaNegativo": false,
+          "_id": "6baabb42a1c4e7f2d9100042",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Del Proctor de referencia (entrada manual)"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Contenido de humedad óptimo",
+          "identificador": "contenido-de-humedad-optimo",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb43a1c4e7f2d9100043",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Del Proctor de referencia (entrada manual)"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Próctor asignado al densímetro",
+          "identificador": "proctor-asignado-al-densimetro",
+          "ordem": 3,
+          "unidade": "g/cm³",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 3,
+          "aceitaNegativo": false,
+          "_id": "6baabb44a1c4e7f2d9100044",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Porcentaje de compactación",
+          "identificador": "porcentaje-de-compactacion",
+          "ordem": 4,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb45a1c4e7f2d9100045",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(PARAMETRO(\"dn-densidad-humedad-densimetro-cv2\", \"densidad-suelo-seco\"))), NOT(EMPTY(p[\"proctor-asignado-al-densimetro\"])), GT(p[\"proctor-asignado-al-densimetro\"], 0)), PARAMETRO(\"dn-densidad-humedad-densimetro-cv2\", \"densidad-suelo-seco\") / p[\"proctor-asignado-al-densimetro\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Porcentaje de compactación corregido",
+          "identificador": "porcentaje-de-compactacion-corregido",
+          "ordem": 5,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb46a1c4e7f2d9100046",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(NOT(EMPTY(PARAMETRO(\"dn-densidad-humedad-densimetro-cv2\", \"densidad-suelo-seco-corregida\"))), IF(AND(NOT(EMPTY(p[\"maxima-densidad-seca-de-la-curva\"])), GT(p[\"maxima-densidad-seca-de-la-curva\"], 0)), PARAMETRO(\"dn-densidad-humedad-densimetro-cv2\", \"densidad-suelo-seco-corregida\") / p[\"maxima-densidad-seca-de-la-curva\"], IF(AND(NOT(EMPTY(p[\"proctor-asignado-al-densimetro\"])), GT(p[\"proctor-asignado-al-densimetro\"], 0)), PARAMETRO(\"dn-densidad-humedad-densimetro-cv2\", \"densidad-suelo-seco-corregida\") / p[\"proctor-asignado-al-densimetro\"])))"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Compactación específica mínima",
+          "identificador": "compactacion-especifica-minima",
+          "ordem": 6,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6baabb47a1c4e7f2d9100047",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "0.98"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Diferencia humedad CHO - Punto próctor",
+          "identificador": "diferencia-humedad-cho-punto-proctor",
+          "ordem": 7,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6baabb48a1c4e7f2d9100048",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Entrada manual (no se halló su fórmula en el Excel)."
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Pasó/Falló",
+          "identificador": "paso-fallo",
+          "ordem": 8,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb49a1c4e7f2d9100049",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(NOT(EMPTY(p[\"porcentaje-de-compactacion-corregido\"])), IF(GTE(p[\"porcentaje-de-compactacion-corregido\"], p[\"compactacion-especifica-minima\"]), \"Paso\", \"Fallo\"))"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código ensayo de cono de arena asociado",
+          "identificador": "codigo-ensayo-de-cono-de-arena-asociado",
+          "ordem": 9,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb4aa1c4e7f2d910004a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Observación 1",
+          "identificador": "observacion-1",
+          "ordem": 10,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb4ba1c4e7f2d910004b",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "\"La densidad máxima seca asignada al densímetro corresponde al último ensayo proctor.\""
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Observación 2",
+          "identificador": "observacion-2",
+          "ordem": 11,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6baabb4ca1c4e7f2d910004c",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6baabb0ca1c4e7f2d910000c",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    }
+  ]
+}

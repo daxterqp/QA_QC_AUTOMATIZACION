@@ -12,6 +12,7 @@ import type Protocol from '@models/Protocol';
 import type Location from '@models/Location';
 import type { ProtocolStatus } from '@models/Protocol';
 import { Colors, Radius, Shadow } from '../theme/colors';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProtocolList'>;
 
@@ -23,17 +24,18 @@ const STATUS_COLORS: Record<ProtocolStatus, string> = {
   REJECTED: Colors.danger,
 };
 
-const STATUS_LABELS: Record<ProtocolStatus, string> = {
-  DRAFT: 'Pendiente',
-  IN_PROGRESS: 'En progreso',
-  SUBMITTED: 'Enviado',
-  APPROVED: 'Aprobado',
-  REJECTED: 'Rechazado',
+const STATUS_LABEL_KEYS: Record<ProtocolStatus, string> = {
+  DRAFT: 'protoList.status.inProgress',
+  IN_PROGRESS: 'protoList.status.inProgress',
+  SUBMITTED: 'protoList.status.inReview',
+  APPROVED: 'protoList.status.approved',
+  REJECTED: 'protoList.status.rejected',
 };
 
 export default function ProtocolListScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [locations, setLocations] = useState<Map<string, Location>>(new Map());
   const [search, setSearch] = useState('');
@@ -93,7 +95,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       <AppHeader
         title={projectName}
-        subtitle={`${filtered.length} protocolo${filtered.length !== 1 ? 's' : ''}`}
+        subtitle={t(filtered.length !== 1 ? 'protoList.subtitle.other' : 'protoList.subtitle.one', { count: filtered.length })}
         onBack={() => navigation.goBack()}
       />
 
@@ -101,7 +103,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
       <View style={styles.searchBar}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar por protocolo o ubicacion..."
+          placeholder={t('protoList.searchPlaceholder')}
           value={search}
           onChangeText={setSearch}
           clearButtonMode="while-editing"
@@ -123,7 +125,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
               styles.filterChipText,
               filterStatus === status && styles.filterChipTextActive,
             ]}>
-              {status === 'ALL' ? 'Todos' : STATUS_LABELS[status]}
+              {status === 'ALL' ? t('protoList.filter.all') : t(STATUS_LABEL_KEYS[status])}
             </Text>
           </TouchableOpacity>
         ))}
@@ -134,7 +136,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text style={styles.empty}>No hay protocolos con ese filtro.</Text>
+          <Text style={styles.empty}>{t('protoList.empty')}</Text>
         }
         renderItem={({ item }) => {
           const loc = item.locationId ? locations.get(item.locationId) : null;
@@ -146,9 +148,9 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
           return (
             <TouchableOpacity style={styles.card} onPress={() => handlePress(item)}>
               <View style={styles.cardTop}>
-                <Text style={styles.cardNumber}>{item.protocolNumber}</Text>
+                <Text style={styles.cardNumber}>{(item as any).protocolCode ? `${(item as any).protocolCode} · ` : ''}{item.protocolNumber}</Text>
                 <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.status] }]}>
-                  <Text style={styles.badgeText}>{STATUS_LABELS[item.status]}</Text>
+                  <Text style={styles.badgeText}>{t(STATUS_LABEL_KEYS[item.status])}</Text>
                 </View>
               </View>
               {loc && (
@@ -158,7 +160,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
                 {new Date(item.createdAt).toLocaleString('es-PE')}
               </Text>
               {canFill && (
-                <Text style={styles.fillHint}>Toca para rellenar ›</Text>
+                <Text style={styles.fillHint}>{t('protoList.fillHint')}</Text>
               )}
             </TouchableOpacity>
           );

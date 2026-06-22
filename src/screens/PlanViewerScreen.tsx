@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -31,6 +31,8 @@ import { downloadFromS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { notifyNewAnnotation, notifyNewReply } from '@services/NotificationService';
 import AppHeader from '@components/AppHeader';
+import { PriorityChip, PrioritySelector, PriorityPickerModal, Priority } from '@components/PriorityChip';
+import { useI18n } from '@i18n/index';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const PDF_H_BASE = 440;
@@ -48,6 +50,7 @@ interface PreSavedAnn { annotationId: string; commentId: string; }
 export default function PlanViewerScreen({ navigation, route }: Props) {
   const { planId: initialPlanId, planName: initialPlanName, protocolId, annotationId: highlightAnnotationId, locationId } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour, unregisterMeasure } = useTour();
   const mainScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
@@ -57,6 +60,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const { ref: annotationListRef, onLayout: annotationListLayout } = useTourStepWithLayout('plan_viewer_annotation_list');
   const { ref: zoomBarRef, onLayout: zoomBarLayout } = useTourStepWithLayout('plan_zoom_options');
   const dwgBtnRef = useTourStep('plan_dwg_btn');
+  const measurementBtnRef = useTourStep('plan_measurement_btn');
   const planSelectorRef = useTourStep('plan_selector');
   const annotationExpandRef = useTourStep('plan_annotation_expand');
   const { ref: planHeaderRef, onLayout: planHeaderLayout } = useTourStepWithLayout('plan_header_info');
@@ -75,7 +79,13 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [locationOnly, setLocationOnly] = useState<string | null>(null);
   const [specialty, setSpecialty] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<PlanAnnotation[]>([]);
-  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfLoading, setPdfLoadingState] = useState(true);
+  const pdfLoadingRef = useRef(true);
+  // Setter base (sincroniza ref + state)
+  const setPdfLoading = useCallback((v: boolean) => {
+    pdfLoadingRef.current = v;
+    setPdfLoadingState(v);
+  }, []);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [fileReady, setFileReady] = useState<boolean | null>(null); // null=verificando, true=existe, false=falta
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -85,6 +95,32 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [pendingDot, setPendingDot] = useState<PendingDot | null>(null);
   const [comment, setComment] = useState('');
   const [showCommentModal, setShowCommentModal] = useState(false);
+  const [priority, setPriority] = useState<Priority | null>(null);
+  const [priorityPickerForAnnId, setPriorityPickerForAnnId] = useState<string | null>(null);
+
+  const updateAnnotationPriority = useCallback(async (annId: string, newPriority: Priority | null) => {
+    // Guard: solo aceptamos valores válidos. Un valor inválido haría que el upsert a Supabase
+    // fallara silencioso contra el CHECK constraint (priority IN 'low'|'medium'|'high'|null).
+    if (newPriority !== null && !['low', 'medium', 'high'].includes(newPriority)) {
+      console.warn('[Annotation] priority inválido, ignorando:', newPriority);
+      return;
+    }
+    try {
+      let projectIdForSync: string | null = null;
+      await database.write(async () => {
+        const ann = await planAnnotationsCollection.find(annId);
+        await ann.update((a: any) => { a.priority = newPriority; });
+        // Resolver projectId vía el plano para sincronizar después.
+        try {
+          const pl = await plansCollection.find((ann as any).planId);
+          projectIdForSync = (pl as any).projectId ?? null;
+        } catch { /* ignore */ }
+      });
+      if (projectIdForSync) {
+        pushProjectToSupabase(projectIdForSync).catch(() => {});
+      }
+    } catch (e) { console.warn('[Annotation] priority update error:', e); }
+  }, []);
 
   const hScrollRef = useRef(0); // scroll horizontal offset del PDF
   const hScrollViewRef = useRef<ScrollView>(null); // ref al ScrollView horizontal
@@ -97,12 +133,51 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
 
   const startPos = useRef({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<ZoomLevel>(1);
+  // pendingZoom = lo que el usuario acaba de elegir (feedback visual inmediato).
+  // El zoom real (que recarga el PDF) se aplica cuando pasan 400ms sin más toques
+  // Y el PDF anterior terminó de cargar (onLoadComplete + 200ms de margen).
+  // pendingZoom = feedback visual inmediato. El zoom real se aplica después de
+  // 2 s desde la última aplicación (la primera vez arranca con el load inicial).
+  // Durante la ventana, los clicks siguen actualizando pendingZoom; al final
+  // solo se commitea el ÚLTIMO valor seleccionado.
+  const [pendingZoom, setPendingZoom] = useState<ZoomLevel>(1);
+  const pendingZoomRef = useRef<ZoomLevel | null>(null);
+  const zoomCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAppliedAtRef = useRef<number>(Date.now());
+  const zoomRefCurrent = useRef<ZoomLevel>(1);
+  useEffect(() => { zoomRefCurrent.current = zoom; }, [zoom]);
+
+  const scheduleZoomCommit = useCallback(() => {
+    if (zoomCommitTimerRef.current) clearTimeout(zoomCommitTimerRef.current);
+    const elapsed = Date.now() - lastAppliedAtRef.current;
+    // Mínimo 2 s desde la última aplicación. Si el usuario sigue tocando,
+    // 300 ms como ventana de debounce para capturar la elección final.
+    const delay = Math.max(2000 - elapsed, 300);
+    zoomCommitTimerRef.current = setTimeout(() => {
+      zoomCommitTimerRef.current = null;
+      const target = pendingZoomRef.current;
+      pendingZoomRef.current = null;
+      if (target != null && target !== zoomRefCurrent.current) {
+        lastAppliedAtRef.current = Date.now();
+        setZoom(target);
+      }
+    }, delay);
+  }, []);
+
+  const handleZoomChange = useCallback((z: ZoomLevel) => {
+    setPendingZoom(z);
+    setIsDrawing(false);
+    pendingZoomRef.current = z;
+    scheduleZoomCommit();
+  }, [scheduleZoomCommit]);
+
+  useEffect(() => () => {
+    if (zoomCommitTimerRef.current) clearTimeout(zoomCommitTimerRef.current);
+  }, []);
   const [pageAspect, setPageAspect] = useState<number>(PDF_H_BASE / SCREEN_W);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [pageChanging, setPageChanging] = useState(false); // cooldown visual entre cambios de página
-  const pageChangingRef = useRef(false); // guard síncrono (setState es async, ref no)
-  const planChangingRef = useRef(true); // cooldown para cambio de plano PDF (true al inicio)
+  const planChangingRef = useRef(true); // cooldown inicial para cambio de plano PDF
   // Liberar cooldown inicial al montar la pantalla
   useEffect(() => {
     const t = setTimeout(() => { planChangingRef.current = false; }, 3000);
@@ -184,7 +259,19 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
     plansCollection
       .query(Q.where('location_id', locationId))
       .fetch()
-      .then(setLocationPlans)
+      .then((plans) => {
+        // Deduplicar: mismo s3_key (o mismo name si no hay key) = mismo plano.
+        // Mantenemos el más reciente por updatedAt.
+        const byKey = new Map<string, Plan>();
+        for (const p of plans) {
+          const key = (p as any).s3Key || `name:${p.name}`;
+          const prev = byKey.get(key);
+          if (!prev || ((p as any).updatedAt ?? 0) > ((prev as any).updatedAt ?? 0)) {
+            byKey.set(key, p);
+          }
+        }
+        setLocationPlans(Array.from(byKey.values()));
+      })
       .catch(() => {});
   }, [locationId]);
 
@@ -240,7 +327,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
       });
     } catch {
-      Alert.alert('No se pudo abrir el archivo DWG', 'Asegúrate de tener una app compatible instalada.');
+      Alert.alert(t('planViewer.dwg.errorTitle'), t('planViewer.dwg.errorMsg'));
     }
   };
 
@@ -261,7 +348,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
       setFileReady(true);
       setPdfLoading(true);
     } catch {
-      setPdfError('No se pudo descargar el plano desde la nube.');
+      setPdfError(t('planViewer.download.cloudError'));
     } finally {
       setDownloadingPdf(false);
     }
@@ -294,68 +381,9 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   useEffect(() => { preSavedAnnRef.current = preSavedAnn; }, [preSavedAnn]);
   useEffect(() => { replyPreSavedRef.current = replyPreSaved; }, [replyPreSaved]);
 
-  // ── Pinch-to-zoom (salta entre niveles fijos) ─────────────────────────────
+  // Zoom controlado únicamente por los botones de la barra (sin pinch-to-zoom)
   const zoomRef = useRef<ZoomLevel>(1);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  const pinchBaseRef = useRef(0);
-  const pinchFiredRef = useRef(false);
-  const pinchCenterXRef = useRef(0); // centro X del pellizco relativo al PDF
-
-  const pinchResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_e, gs) => {
-        return gs.numberActiveTouches >= 2 && !isDrawingRef.current;
-      },
-      onPanResponderGrant: (e) => {
-        if (e.nativeEvent.touches.length >= 2) {
-          const t = e.nativeEvent.touches;
-          pinchBaseRef.current = Math.sqrt((t[1].pageX - t[0].pageX) ** 2 + (t[1].pageY - t[0].pageY) ** 2);
-          // Centro del pellizco en pantalla + scroll = posición en el PDF
-          pinchCenterXRef.current = ((t[0].locationX + t[1].locationX) / 2) + hScrollRef.current;
-          pinchFiredRef.current = false;
-        }
-      },
-      onPanResponderMove: (e) => {
-        if (pinchFiredRef.current || !e.nativeEvent.touches || e.nativeEvent.touches.length < 2) return;
-        const t = e.nativeEvent.touches;
-        const dist = Math.sqrt((t[1].pageX - t[0].pageX) ** 2 + (t[1].pageY - t[0].pageY) ** 2);
-        const ratio = dist / pinchBaseRef.current;
-        const threshold = 1.25;
-
-        let newZoomLevel: ZoomLevel | null = null;
-        const cur = zoomRef.current;
-        const idx = ZOOM_LEVELS.indexOf(cur);
-
-        if (ratio > threshold && idx < ZOOM_LEVELS.length - 1) {
-          newZoomLevel = ZOOM_LEVELS[idx + 1];
-        } else if (ratio < 1 / threshold && idx > 0) {
-          newZoomLevel = ZOOM_LEVELS[idx - 1];
-        }
-
-        if (newZoomLevel) {
-          pinchFiredRef.current = true;
-          // Calcular el % del PDF donde está el centro del pellizco
-          const oldPdfW = SCREEN_W * cur;
-          const pctX = pinchCenterXRef.current / oldPdfW;
-          // Nuevo ancho del PDF
-          const newPdfW = SCREEN_W * newZoomLevel;
-          // Posición del centro del pellizco en pantalla (sin scroll)
-          const screenX = pinchCenterXRef.current - hScrollRef.current;
-          // Nuevo scroll para que el mismo punto del PDF quede bajo el dedo
-          const newScrollX = Math.max(0, Math.min(pctX * newPdfW - screenX, newPdfW - SCREEN_W));
-
-          setZoom(newZoomLevel);
-          // Scroll después del re-render
-          setTimeout(() => {
-            hScrollViewRef.current?.scrollTo({ x: newScrollX, animated: false });
-            hScrollRef.current = newScrollX;
-          }, 50);
-        }
-      },
-      onPanResponderRelease: () => { pinchFiredRef.current = false; },
-    })
-  ).current;
 
   // ── PanResponder ─────────────────────────────────────────────────────────
   const isDrawingRef = useRef(false);
@@ -402,10 +430,13 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const saveAnnotation = async () => {
     if (!currentUser) return;
     if (preSavedAnn) {
-      // Ya pre-guardada — solo actualizar el texto del comentario
+      // Ya pre-guardada — actualizar texto y prioridad
       await database.write(async () => {
         const ann = await planAnnotationsCollection.find(preSavedAnn.annotationId);
-        await ann.update((a) => { a.comment = comment.trim() || null; });
+        await ann.update((a) => {
+          a.comment = comment.trim() || null;
+          (a as any).priority = priority ?? null;
+        });
         const c = await annotationCommentsCollection.find(preSavedAnn.commentId);
         await c.update((cm: any) => { cm.content = comment.trim() || null; });
       });
@@ -436,6 +467,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
           a.isOk = false;
           (a as any).status = 'OPEN';
           (a as any).page = currentPage;
+          (a as any).priority = priority ?? null;
           a.createdById = currentUser.id;
         });
       });
@@ -443,6 +475,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
     setPendingRect(null); setPendingDot(null);
     setComment(''); setShowCommentModal(false);
     setPreSavedAnn(null); setPendingModalPhotos([]);
+    setPriority(null);
     if (plan?.projectId) {
       pushProjectToSupabase(plan.projectId).catch(() => {});
       notifyNewAnnotation(plan.projectId, projectName, locationOnly, specialty, comment.trim() || null);
@@ -516,6 +549,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
       setPreSavedAnn(null); setPendingModalPhotos([]);
     }
     setShowCommentModal(false); setPendingRect(null); setPendingDot(null); setComment('');
+    setPriority(null);
   };
 
 
@@ -530,11 +564,11 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
 
   const deleteAnnotation = (ann: PlanAnnotation) => {
     Alert.alert(
-      'Eliminar viñeta',
-      `¿Estás seguro de eliminar la viñeta ${ann.sequenceNumber}? Se eliminarán también todos sus comentarios y fotos.`,
+      t('planViewer.deleteAnn.title'),
+      t('planViewer.deleteAnn.message', { n: ann.sequenceNumber }),
       [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Eliminar', style: 'destructive', onPress: async () => {
+        { text: t('planViewer.common.cancel'), style: 'cancel' },
+        { text: t('planViewer.common.delete'), style: 'destructive', onPress: async () => {
           await database.write(async () => {
             const comments = await annotationCommentsCollection
               .query(Q.where('annotation_id', ann.id))
@@ -678,9 +712,9 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   };
 
   const deletePhoto = (photo: AnnotationCommentPhoto, _commentId: string, isThread: boolean) => {
-    Alert.alert('Eliminar foto', '¿Eliminar esta foto?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => {
+    Alert.alert(t('planViewer.deletePhoto.title'), t('planViewer.deletePhoto.message'), [
+      { text: t('planViewer.common.cancel'), style: 'cancel' },
+      { text: t('planViewer.common.delete'), style: 'destructive', onPress: async () => {
         const photoId = photo.id;
         await database.write(async () => { await photo.destroyPermanently(); });
         // Eliminar de Supabase (el archivo S3 se conserva para mantener secuencia)
@@ -722,13 +756,42 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
 
   const renderAnnotation = (ann: PlanAnnotation) => {
     const highlighted = highlightAnnotationId === ann.id;
-    const color = ann.isOk ? Colors.success : Colors.danger;
+    // Color: si está cerrada → verde; si tiene prioridad → color de la prioridad; si no → rojo (pendiente).
+    const priorityColor = (() => {
+      const p = (ann as any).priority;
+      if (p === 'low') return '#1976d2';
+      if (p === 'medium') return '#e67e22';
+      if (p === 'high') return '#c0392b';
+      return null;
+    })();
+    const color = ann.isOk ? Colors.success : (priorityColor ?? Colors.danger);
     if (isDot(ann)) {
-      const cx = (ann.rectX / 100) * pdfW - 9;
-      const cy = (ann.rectY / 100) * pdfH - 9;
+      // Pin de ubicación: el tip del pin cae sobre el punto marcado.
+      const PIN_SIZE = 30;
+      const cx = (ann.rectX / 100) * pdfW - PIN_SIZE / 2;
+      const cy = (ann.rectY / 100) * pdfH - PIN_SIZE;
+      // Disco de color del mismo tono que el pin, centrado sobre el agujero
+      // del icono (≈ 35% desde arriba). Tapa el hueco blanco del glifo.
+      const BADGE_SIZE = PIN_SIZE * 0.46;
+      const BADGE_TOP = PIN_SIZE * 0.2;
       return (
-        <View key={ann.id} style={[styles.dotMarker, { left: cx, top: cy, borderColor: color }]}>
-          <Text style={[styles.dotLabel, { color }]}>{String(ann.sequenceNumber)}</Text>
+        <View key={ann.id} style={[styles.pinMarker, { left: cx, top: cy, width: PIN_SIZE, height: PIN_SIZE }]}>
+          <Ionicons name="location" size={PIN_SIZE} color={color} />
+          <View
+            style={[
+              styles.pinNumberBadge,
+              {
+                width: BADGE_SIZE,
+                height: BADGE_SIZE,
+                borderRadius: BADGE_SIZE / 2,
+                top: BADGE_TOP,
+                left: (PIN_SIZE - BADGE_SIZE) / 2,
+                backgroundColor: color,
+              },
+            ]}
+          >
+            <Text style={styles.pinNumberText}>{String(ann.sequenceNumber)}</Text>
+          </View>
         </View>
       );
     }
@@ -767,17 +830,9 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         subtitle={protocolId && protocolLocation ? protocolLocation : undefined}
         onBack={() => navigation.goBack()}
         rightContent={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {hasDwg && (
-              <TouchableOpacity ref={dwgBtnRef} style={styles.dwgBtn} onPress={openDwg} activeOpacity={0.75}>
-                <Ionicons name="layers-outline" size={14} color={Colors.white} />
-                <Text style={styles.dwgBtnText}>DWG</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={() => jumpToStep('plan_viewer_draw_toggle')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity onPress={() => jumpToStep('plan_viewer_draw_toggle')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
         }
       />
       </View>
@@ -790,7 +845,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
             onPress={() => setShowPlanDropdown((v) => !v)}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.planSelectorLabel}>PLANO ACTIVO</Text>
+              <Text style={styles.planSelectorLabel}>{t('planViewer.selector.activeLabel')}</Text>
               <Text style={styles.planSelectorName} numberOfLines={1}>{activePlanName}</Text>
             </View>
             <Text style={styles.planSelectorChevron}>{showPlanDropdown ? '▴' : '▾'}</Text>
@@ -803,11 +858,14 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                   style={[styles.planDropdownItem, activePlanId === p.id && styles.planDropdownItemActive]}
                   disabled={pdfLoading}
                   onPress={() => {
-                    if (activePlanId !== p.id && !pdfLoading && !planChangingRef.current) {
+                    // Ignora si no han pasado 2 s desde la última aplicación
+                    if (activePlanId === p.id) { setShowPlanDropdown(false); return; }
+                    if (Date.now() - lastAppliedAtRef.current < 2000) { setShowPlanDropdown(false); return; }
+                    if (!planChangingRef.current) {
                       planChangingRef.current = true;
                       setTimeout(() => { planChangingRef.current = false; }, 5000);
+                      lastAppliedAtRef.current = Date.now();
                       setAnnotations([]);
-                      setPageChanging(false);
                       setPdfLoading(true);
                       setPdfError(null);
                       setSelectedAnn(null);
@@ -836,24 +894,50 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* Toolbar */}
+      {/* Toolbar — todo en una sola cinta */}
       {canAnnotate && (
         <View style={styles.floatingToolbar}>
           <View style={styles.toolbarRow}>
             <View ref={zoomBarRef} onLayout={zoomBarLayout} style={styles.zoomBtnGroup}>
               {ZOOM_LEVELS.map((z) => (
-                <TouchableOpacity key={z} style={[styles.zoomBtn, zoom === z && styles.zoomBtnActive]} onPress={() => { setZoom(z); setIsDrawing(false); }}>
-                  <Text style={[styles.zoomBtnText, zoom === z && styles.zoomBtnTextActive]}>
-                    {`${z}x`}
-                  </Text>
+                <TouchableOpacity
+                  key={z}
+                  style={[styles.zoomBtn, pendingZoom === z && styles.zoomBtnActive]}
+                  onPress={() => handleZoomChange(z)}
+                >
+                  <Text style={[styles.zoomBtnText, pendingZoom === z && styles.zoomBtnTextActive]}>{`${z}x`}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={styles.measureBtn} onPress={() => navigation.navigate('Measurement', { planId: activePlanId, planName: activePlanName })}>
-              <Ionicons name="resize-outline" size={18} color={Colors.white} />
-            </TouchableOpacity>
-            <TouchableOpacity ref={drawToggleRef} style={[styles.drawBtn, isDrawing && styles.drawBtnActive, { flex: 1 }]} onPress={() => { setIsDrawing(!isDrawing); setPendingRect(null); setPendingDot(null); }}>
-              <Text style={styles.drawBtnText}>{isDrawing ? 'Dibujando — toca o arrastra' : '+ Anotar plano'}</Text>
+
+            {hasDwg && (
+              <View style={styles.toolSlot}>
+                <TouchableOpacity ref={dwgBtnRef} style={styles.toolIcon} onPress={openDwg} activeOpacity={0.75}>
+                  <Ionicons name="layers-outline" size={20} color={Colors.navy} />
+                </TouchableOpacity>
+                <Text style={styles.toolLabel}>DWG</Text>
+              </View>
+            )}
+            <View style={styles.toolSlot}>
+              <TouchableOpacity
+                ref={measurementBtnRef}
+                style={styles.toolIcon}
+                onPress={() => navigation.navigate('Measurement', { planId: activePlanId, planName: activePlanName })}
+              >
+                <MaterialCommunityIcons name="tape-measure" size={20} color={Colors.navy} />
+              </TouchableOpacity>
+              <Text style={styles.toolLabel}>{t('planViewer.toolbar.measure')}</Text>
+            </View>
+
+            <TouchableOpacity
+              ref={drawToggleRef}
+              style={[styles.observacionBtn, isDrawing && styles.observacionBtnActive]}
+              onPress={() => { setIsDrawing(!isDrawing); setPendingRect(null); setPendingDot(null); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.observacionBtnText} numberOfLines={1}>
+                {isDrawing ? t('planViewer.toolbar.drawing') : t('planViewer.toolbar.addObservation')}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -874,14 +958,20 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                     style={[StyleSheet.absoluteFill, { opacity: pg === currentPage ? 1 : 0 }]}
                     onLoadComplete={(pages, _pa, { width, height }) => {
                       if (pg === 1) {
-                        setPdfLoading(false); setPdfError(null);
+                        setPdfError(null);
                         if (width > 0) setPageAspect(height / width);
                         setTotalPages(pages);
-                        setPageChanging(false);
+                        // Dejar 200ms de margen para asegurar que el render se estabilizó
+                        setTimeout(() => {
+                          setPdfLoading(false);
+                          // Reiniciar el reloj del cooldown: la próxima acción ya puede
+                          // commitear tras 2 s de ESTA carga real (no de la anterior).
+                          lastAppliedAtRef.current = Date.now();
+                        }, 200);
                       }
                     }}
                     onError={() => {
-                      if (pg === 1) { setPdfLoading(false); setPdfError('No se pudo cargar el PDF.'); }
+                      if (pg === 1) { setPdfLoading(false); setPdfError(t('planViewer.pdf.loadError')); }
                     }}
                     enablePaging={false} horizontal={false} fitPolicy={0} minScale={1} maxScale={1} scrollEnabled={false}
                   />
@@ -889,11 +979,11 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
               ) : (
                 <View style={styles.pdfPlaceholder}>
                   <Text style={styles.pdfPlaceholderText}>
-                    {fileReady === false ? 'Plano no descargado en este dispositivo.' : 'Sin plano cargado'}
+                    {fileReady === false ? t('planViewer.pdf.notDownloaded') : t('planViewer.pdf.noPlan')}
                   </Text>
                   {fileReady === false && projectName && !downloadingPdf && (
                     <TouchableOpacity style={styles.downloadBtn} onPress={handleDownloadPdf}>
-                      <Text style={styles.downloadBtnText}>⬇ Descargar plano</Text>
+                      <Text style={styles.downloadBtnText}>{t('planViewer.pdf.downloadBtn')}</Text>
                     </TouchableOpacity>
                   )}
                   {downloadingPdf && (
@@ -907,18 +997,16 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                   <View style={[styles.annotRect, { left: pendingRect.x, top: pendingRect.y, width: pendingRect.width, height: pendingRect.height, borderColor: Colors.primary, borderStyle: 'dashed' }]} />
                 )}
                 {pendingDot && (
-                  <View style={[styles.dotMarker, { left: pendingDot.x - 9, top: pendingDot.y - 9, borderColor: Colors.primary, opacity: 0.7 }]} />
+                  <View style={[styles.pinMarker, { left: pendingDot.x - 15, top: pendingDot.y - 30, width: 30, height: 30, opacity: 0.7 }]}>
+                    <Ionicons name="location" size={30} color={Colors.primary} />
+                  </View>
                 )}
               </View>
-              {/* Pinch-to-zoom overlay — solo activo cuando no se dibuja */}
-              {!isDrawing && (
-                <View style={[StyleSheet.absoluteFill, { zIndex: 1.5 }]} {...pinchResponder.panHandlers} />
-              )}
               {isDrawing && <View style={[StyleSheet.absoluteFill, { zIndex: 2 }]} {...panResponder.panHandlers} />}
               {pdfLoading && pdfSource && (
                 <View style={[StyleSheet.absoluteFill, styles.loadingOverlay, { zIndex: 3 }]}>
                   <ActivityIndicator size="large" color={Colors.primary} />
-                  <Text style={styles.loadingText}>Cargando plano...</Text>
+                  <Text style={styles.loadingText}>{t('planViewer.pdf.loading')}</Text>
                 </View>
               )}
               {pdfError && !downloadingPdf && (
@@ -926,7 +1014,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                   <Text style={styles.errorText}>{pdfError}</Text>
                   {projectName && (
                     <TouchableOpacity style={styles.downloadBtn} onPress={handleDownloadPdf}>
-                      <Text style={styles.downloadBtnText}>⬇ Descargar plano</Text>
+                      <Text style={styles.downloadBtnText}>{t('planViewer.pdf.downloadBtn')}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -934,44 +1022,41 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
               {downloadingPdf && (
                 <View style={[StyleSheet.absoluteFill, styles.loadingOverlay, { zIndex: 3 }]}>
                   <ActivityIndicator size="large" color={Colors.primary} />
-                  <Text style={styles.loadingText}>Descargando plano...</Text>
+                  <Text style={styles.loadingText}>{t('planViewer.pdf.downloading')}</Text>
                 </View>
               )}
             </View>
           </ScrollView>
-          {canAnnotate && <Text style={styles.hint}>Activa "Anotar plano": toca un punto o arrastra una zona.</Text>}
+          {canAnnotate && <Text style={styles.hint}>{t('planViewer.pdf.hint')}</Text>}
 
           {/* Navegación de páginas */}
           {totalPages > 1 && (
             <View style={styles.pageNav}>
               <TouchableOpacity
-                style={[styles.pageNavBtn, (currentPage === 1 || pageChanging) && styles.btnDisabled]}
-                disabled={currentPage === 1 || pageChanging}
+                style={[styles.pageNavBtn, currentPage === 1 && styles.btnDisabled]}
+                disabled={currentPage === 1}
                 onPress={() => {
-                  if (pageChangingRef.current) return;
-                  pageChangingRef.current = true;
-                  setPageChanging(true);
+                  // Ignora el click si aún no pasaron 2s desde la última aplicación
+                  if (Date.now() - lastAppliedAtRef.current < 2000) return;
+                  lastAppliedAtRef.current = Date.now();
                   setCurrentPage((p) => Math.max(1, p - 1));
                   setSelectedAnn(null); setThreadComments([]); setThreadPhotos({}); setShowReplyForm(false);
-                  setTimeout(() => { pageChangingRef.current = false; setPageChanging(false); }, 800);
                 }}
               >
-                <Text style={styles.pageNavBtnText}>◀ Anterior</Text>
+                <Text style={styles.pageNavBtnText}>{t('planViewer.page.prev')}</Text>
               </TouchableOpacity>
-              <Text style={styles.pageNavText}>Pág. {currentPage} / {totalPages}</Text>
+              <Text style={styles.pageNavText}>{t('planViewer.page.indicator', { current: currentPage, total: totalPages })}</Text>
               <TouchableOpacity
-                style={[styles.pageNavBtn, (currentPage === totalPages || pageChanging) && styles.btnDisabled]}
-                disabled={currentPage === totalPages || pageChanging}
+                style={[styles.pageNavBtn, currentPage === totalPages && styles.btnDisabled]}
+                disabled={currentPage === totalPages}
                 onPress={() => {
-                  if (pageChangingRef.current) return;
-                  pageChangingRef.current = true;
-                  setPageChanging(true);
+                  if (Date.now() - lastAppliedAtRef.current < 2000) return;
+                  lastAppliedAtRef.current = Date.now();
                   setCurrentPage((p) => Math.min(totalPages, p + 1));
                   setSelectedAnn(null); setThreadComments([]); setThreadPhotos({}); setShowReplyForm(false);
-                  setTimeout(() => { pageChangingRef.current = false; setPageChanging(false); }, 800);
                 }}
               >
-                <Text style={styles.pageNavBtnText}>Siguiente ▶</Text>
+                <Text style={styles.pageNavBtnText}>{t('planViewer.page.next')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -980,18 +1065,18 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         {/* Lista observaciones — todas las páginas agrupadas */}
         <View ref={annotationListRef} onLayout={annotationListLayout} style={styles.listSection}>
           {annotations.length === 0 ? (
-            <Text style={styles.empty}>Sin observaciones en este plano.</Text>
+            <Text style={styles.empty}>{t('planViewer.list.empty')}</Text>
           ) : (
             annGroups.map(({ page, anns }, groupIdx) => (
               <View key={page}>
                 {/* Encabezado de página: solo si el PDF tiene más de 1 página */}
                 {totalPages > 1 && (
                   <Text style={styles.sectionLabel}>
-                    OBSERVACIONES — PÁG. {page} ({anns.length})
+                    {t('planViewer.list.sectionPage', { page, count: anns.length })}
                   </Text>
                 )}
                 {totalPages === 1 && page === annGroups[0].page && (
-                  <Text style={styles.sectionLabel}>OBSERVACIONES ({anns.length})</Text>
+                  <Text style={styles.sectionLabel}>{t('planViewer.list.section', { count: anns.length })}</Text>
                 )}
                 {anns.map((ann, annIdx) => {
               const isExpanded = selectedAnn?.id === ann.id;
@@ -1002,28 +1087,47 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                     ref={groupIdx === 0 && annIdx === 0 ? annotationExpandRef : undefined}
                     style={styles.annHeaderRow}
                     onPress={() => toggleExpand(ann)}
+                    onLongPress={() => {
+                      if (ann.isOk) return;
+                      if (!(isJefe || canAnnotate)) return;
+                      setPriorityPickerForAnnId(ann.id);
+                    }}
+                    delayLongPress={350}
                     activeOpacity={0.75}
                   >
                     <View style={[styles.numBadge, { backgroundColor: ann.isOk ? Colors.success : Colors.danger }]}>
                       <Text style={styles.numBadgeText}>{String(ann.sequenceNumber)}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.annComment}>{ann.comment || 'Sin comentario'}</Text>
+                      <Text style={styles.annComment}>{ann.comment || t('planViewer.list.noComment')}</Text>
                       <Text style={styles.annDate}>{new Date(ann.createdAt).toLocaleString('es-CL')}</Text>
-                      <View style={[styles.statusChip, { backgroundColor: ann.isOk ? Colors.success : Colors.danger }]}>
-                        <Text style={styles.statusChipText}>{ann.isOk ? 'CERRADO' : 'PENDIENTE'}</Text>
-                      </View>
+                      {ann.isOk ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <View style={[styles.statusChip, { backgroundColor: Colors.success, marginTop: 0 }]}>
+                            <Text style={styles.statusChipText}>{t('planViewer.list.closed')}</Text>
+                          </View>
+                          {(ann as any).priority ? (
+                            <PriorityChip value={(ann as any).priority} size="sm" />
+                          ) : null}
+                        </View>
+                      ) : (
+                        (ann as any).priority ? (
+                          <View style={{ marginTop: 4 }}>
+                            <PriorityChip value={(ann as any).priority} size="sm" />
+                          </View>
+                        ) : null
+                      )}
                     </View>
                     {(isJefe || canAnnotate) && (
                       <View style={styles.annActions}>
                         {isJefe && !ann.isOk && (
                           <TouchableOpacity style={styles.okBtn} onPress={() => markOk(ann)}>
-                            <Text style={styles.okBtnText}>Completado</Text>
+                            <Text style={styles.okBtnText}>{t('planViewer.list.completed')}</Text>
                           </TouchableOpacity>
                         )}
                         {canAnnotate && (
                           <TouchableOpacity style={styles.delBtn} onPress={() => deleteAnnotation(ann)}>
-                            <Text style={styles.delBtnText}>Eliminar</Text>
+                            <Text style={styles.delBtnText}>{t('planViewer.common.delete')}</Text>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -1037,7 +1141,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                       {threadLoading ? (
                         <ActivityIndicator size="small" color={Colors.primary} style={{ margin: 12 }} />
                       ) : threadComments.length === 0 ? (
-                        <Text style={styles.threadEmptyText}>Sin comentarios aún.</Text>
+                        <Text style={styles.threadEmptyText}>{t('planViewer.thread.empty')}</Text>
                       ) : (
                         threadComments.map((c, idx) => {
                           const cAny = c as any;
@@ -1047,13 +1151,13 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                             <View key={c.id} style={[styles.commentBubble, isFirst && styles.commentBubbleFirst]}>
                               <View style={styles.commentMeta}>
                                 <Text style={styles.commentAuthor}>{threadUserNames[cAny.authorId] || cAny.authorId}</Text>
-                                {isFirst && <Text style={styles.firstLabel}>INICIO</Text>}
+                                {isFirst && <Text style={styles.firstLabel}>{t('planViewer.thread.start')}</Text>}
                                 <Text style={styles.commentDate}>{new Date(c.createdAt).toLocaleString('es-CL')}</Text>
                               </View>
                               {cAny.content ? (
                                 <Text style={styles.commentContent}>{cAny.content}</Text>
                               ) : (
-                                <Text style={styles.commentContentEmpty}>(solo fotos)</Text>
+                                <Text style={styles.commentContentEmpty}>{t('planViewer.thread.photosOnly')}</Text>
                               )}
                               {photos.length > 0 && renderPhotoRow(photos, true, c.id)}
                             </View>
@@ -1070,7 +1174,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                         >
                           <TextInput
                             style={styles.replyFormInput}
-                            placeholder="Escribe un comentario..."
+                            placeholder={t('planViewer.thread.replyPlaceholder')}
                             placeholderTextColor={Colors.textMuted}
                             value={replyText}
                             onChangeText={setReplyText}
@@ -1097,10 +1201,10 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                               }
                               setShowReplyForm(false); setReplyText('');
                             }}>
-                              <Text style={styles.cancelBtnText}>Cancelar</Text>
+                              <Text style={styles.cancelBtnText}>{t('planViewer.common.cancel')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.saveBtn} onPress={sendReply}>
-                              <Text style={styles.saveBtnText}>Enviar</Text>
+                              <Text style={styles.saveBtnText}>{t('planViewer.thread.send')}</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -1114,7 +1218,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                             if (tourActive && tourStep?.id === 'plan_reply_btn') tourNextStep();
                           }}
                         >
-                          <Text style={styles.replyBtnText}>+ Responder</Text>
+                          <Text style={styles.replyBtnText}>{t('planViewer.thread.reply')}</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1132,27 +1236,58 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
       <Modal visible={showCommentModal} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>
-              Observación {preSavedAnn ? '(guardada)' : String(nextSeq)}
-            </Text>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalHeaderTitle}>
+                {t('planViewer.modal.title')}
+              </Text>
+              <View style={styles.modalSeqBadge}>
+                <Text style={styles.modalSeqBadgeText}>
+                  {t('planViewer.modal.seqBadge', { value: preSavedAnn ? '—' : String(nextSeq) })}
+                </Text>
+              </View>
+            </View>
+
+            {/* Sección: Descripción */}
             <TextInput
               style={styles.commentInput}
-              placeholder="Descripcion de la observacion (opcional)"
+              placeholder={t('planViewer.modal.descPlaceholder')}
               placeholderTextColor={Colors.textMuted}
               value={comment} onChangeText={setComment}
               multiline numberOfLines={3} autoFocus
             />
-            {/* Fotos del modal de creación */}
-            {pendingModalPhotos.length > 0 && renderPhotoRow(pendingModalPhotos, false, preSavedAnn?.commentId ?? '')}
-            <TouchableOpacity style={styles.cameraModalBtn} onPress={handleCreationCamera}>
-              <Ionicons name="camera-outline" size={20} color={Colors.navy} />
-            </TouchableOpacity>
+
+            <View style={styles.modalDivider} />
+
+            {/* Sección: Adjuntos y prioridad — dos cajas lado a lado */}
+            <View style={styles.modalDualRow}>
+              <View style={styles.modalDualBox}>
+                <Text style={styles.modalDualLabel}>{t('planViewer.modal.attachments')}</Text>
+                <TouchableOpacity style={styles.modalCameraBtn} onPress={handleCreationCamera} activeOpacity={0.75}>
+                  <Ionicons name="camera-outline" size={16} color={Colors.navy} />
+                  <Text style={styles.modalCameraBtnText}>{t('planViewer.modal.photo')}</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.modalDualBox, { flex: 1 }]}>
+                <Text style={styles.modalDualLabel}>{t('planViewer.modal.priority')}</Text>
+                <PrioritySelector value={priority} onChange={setPriority} compact />
+              </View>
+            </View>
+            {pendingModalPhotos.length > 0 && (
+              <View style={{ marginTop: 8 }}>
+                {renderPhotoRow(pendingModalPhotos, false, preSavedAnn?.commentId ?? '')}
+              </View>
+            )}
+
+            <View style={styles.modalDivider} />
+
+            {/* Acciones */}
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.cancelBtn} onPress={cancelModal}>
-                <Text style={styles.cancelBtnText}>Cancelar</Text>
+                <Text style={styles.cancelBtnText}>{t('planViewer.common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={saveAnnotation}>
-                <Text style={styles.saveBtnText}>Guardar</Text>
+                <Text style={styles.saveBtnText}>{t('planViewer.modal.save')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1166,6 +1301,18 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
           {fullscreenPhoto && <Image source={{ uri: fullscreenPhoto }} style={styles.photoFullscreen} resizeMode="contain" />}
         </TouchableOpacity>
       </Modal>
+
+      {/* ── Selector de prioridad (long-press en tarjeta) ─────────────────── */}
+      <PriorityPickerModal
+        visible={!!priorityPickerForAnnId}
+        value={priorityPickerForAnnId
+          ? ((annotations.find((a) => a.id === priorityPickerForAnnId) as any)?.priority ?? null)
+          : null}
+        onSelect={(p) => {
+          if (priorityPickerForAnnId) updateAnnotationPriority(priorityPickerForAnnId, p);
+        }}
+        onClose={() => setPriorityPickerForAnnId(null)}
+      />
     </View>
   );
 }
@@ -1178,7 +1325,28 @@ const styles = StyleSheet.create({
   sectionLabel: { fontSize: 10, fontWeight: '700', color: Colors.textSecondary, letterSpacing: 1.5, marginBottom: 6 },
   hint: { fontSize: 11, color: Colors.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 16 },
   floatingToolbar: { backgroundColor: Colors.white, paddingHorizontal: 14, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: Colors.border, ...Shadow.card },
-  toolbarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toolbarRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  toolSlot: { alignItems: 'center', gap: 2 },
+  toolIcon: {
+    width: 30, height: 30, borderRadius: Radius.md,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.surface,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  toolIconActive: { backgroundColor: Colors.warning, borderColor: Colors.warning },
+  toolLabel: { fontSize: 9, fontWeight: '700', color: Colors.textSecondary, textAlign: 'center' },
+  observacionBtn: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    minWidth: 100,
+    backgroundColor: Colors.danger,
+    borderRadius: Radius.md,
+    paddingHorizontal: 8, height: 30,
+    alignItems: 'center', justifyContent: 'center',
+    ...Shadow.subtle,
+  },
+  observacionBtnActive: { backgroundColor: Colors.warning },
+  observacionBtnText: { color: Colors.white, fontWeight: '800', fontSize: 11, letterSpacing: 0.2 },
   pdfSection: { margin: 16, gap: 8 },
   undoBar: { },
   btnDisabled: { opacity: 0.35 },
@@ -1192,6 +1360,15 @@ const styles = StyleSheet.create({
   drawBtnActive: { backgroundColor: Colors.warning },
   drawBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
   measureBtn: { backgroundColor: Colors.navy, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 13, alignItems: 'center' },
+  toolbarTopRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  topActionBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 8, paddingHorizontal: 14,
+    borderRadius: Radius.md, backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border,
+    ...Shadow.subtle,
+  },
+  topActionBtnText: { fontSize: 12, fontWeight: '700', color: Colors.navy, letterSpacing: 0.3 },
   pdfContainer: { borderRadius: Radius.md, overflow: 'hidden', backgroundColor: '#f0f0f0', ...Shadow.card, borderWidth: 1, borderColor: Colors.border },
   pdfPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pdfPlaceholderText: { color: Colors.textMuted, fontSize: 13 },
@@ -1206,6 +1383,74 @@ const styles = StyleSheet.create({
   badgeText: { color: Colors.white, fontSize: 10, fontWeight: '900' },
   dotMarker: { position: 'absolute', width: 18, height: 18, borderRadius: 9, borderWidth: 2, backgroundColor: 'rgba(255,255,255,0.85)', alignItems: 'center', justifyContent: 'center' },
   dotLabel: { fontSize: 8, fontWeight: '900' },
+  pinMarker: {
+    position: 'absolute',
+    alignItems: 'center', justifyContent: 'flex-start',
+  },
+  pinNumberBadge: {
+    position: 'absolute',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  pinNumberText: {
+    color: '#ffffff',
+    fontSize: 10, fontWeight: '900',
+    lineHeight: 12,
+  },
+  priorityLabel: {
+    fontSize: 11, fontWeight: '700', color: Colors.textSecondary,
+    letterSpacing: 0.3, marginTop: 4, marginBottom: 4,
+  },
+
+  // Creation modal
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+    marginBottom: 12,
+  },
+  modalHeaderTitle: {
+    flex: 1,
+    fontSize: 16, fontWeight: '800', color: Colors.navy,
+    letterSpacing: 0.3,
+  },
+  modalSeqBadge: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 10, backgroundColor: Colors.navy,
+  },
+  modalSeqBadgeText: { color: Colors.white, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  modalSectionLabel: {
+    fontSize: 10, fontWeight: '800', color: Colors.textMuted,
+    letterSpacing: 1.2, textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  modalDivider: {
+    height: 1, backgroundColor: Colors.divider,
+    marginVertical: 12,
+  },
+  modalDualRow: {
+    flexDirection: 'row', alignItems: 'stretch', gap: 10,
+  },
+  modalDualBox: {
+    backgroundColor: '#f7f9fc',
+    borderRadius: Radius.md,
+    paddingHorizontal: 10, paddingVertical: 10,
+    borderWidth: 1, borderColor: Colors.border,
+    overflow: 'hidden',
+    gap: 8,
+  },
+  modalDualLabel: {
+    fontSize: 10, fontWeight: '800', color: Colors.textMuted,
+    letterSpacing: 1, textTransform: 'uppercase',
+    marginTop: 2,
+  },
+  modalCameraBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1.5, borderColor: Colors.navy,
+    backgroundColor: 'transparent',
+  },
+  modalCameraBtnText: { color: Colors.navy, fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
   listSection: { marginHorizontal: 16, marginBottom: 32, gap: 8 },
   empty: { color: Colors.textMuted, textAlign: 'center', padding: 24, fontSize: 13 },
   annItem: { backgroundColor: Colors.white, borderRadius: Radius.md, borderLeftWidth: 3, borderLeftColor: Colors.danger, ...Shadow.subtle, overflow: 'hidden' },

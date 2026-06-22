@@ -87,6 +87,17 @@ export async function uploadEvidencePhoto(evidenceId: string, localUri: string):
   const protocolSegment = sanitizeSegment(protocol.protocolNumber || protocol.id);
   const s3Key = `${prefix}/photos/${protocolSegment}-${locationSegment}-F${seq(position)}.jpg`;
 
+  // H3: Marcar UPLOADING antes del upload. Si la app crashea entre upload y
+  // markSYNCED, la siguiente apertura ve UPLOADING y debe asumir que el upload
+  // PUDO haber subido — chequea S3 antes de re-uploadear (el worker hace este
+  // chequeo en S3PhotoUploader.ts) o simplemente re-sube con la misma key
+  // (idempotente porque la position es determinística por orden de creación).
+  await evidencesCollection.database.write(async () => {
+    await evidence.update((ev) => {
+      ev.uploadStatus = 'UPLOADING';
+    });
+  });
+
   // Subir a S3
   await uploadToS3(localUri, s3Key, 'image/jpeg');
 

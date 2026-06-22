@@ -89,4 +89,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns {Promise<string>} ruta temporal del HTML
    */
   openHtmlInBrowser: (html, filename) => ipcRenderer.invoke('open-html-in-browser', html, filename),
+
+  /**
+   * Abre un diálogo nativo para elegir una ortofoto y devuelve su ruta local.
+   * El archivo (de varios GB) se procesa en la PC leyendo del disco; nunca se
+   * sube entero — solo la versión liviana resultante va a S3.
+   * @returns {Promise<{ path: string, sizeBytes: number, name: string } | null>}
+   */
+  pickOrthophoto: () => ipcRenderer.invoke('pick-orthophoto'),
 });

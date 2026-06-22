@@ -2,7 +2,8 @@
   "expo": {
     "name": "Flow-QA/QC",
     "slug": "scua-qaqc",
-    "version": "2.0.0",
+    "version": "2.0.2",
+    "scheme": "flow",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,14 +14,35 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.vxp.scua"
+      "bundleIdentifier": "com.vxp.scua",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Flow QA/QC necesita acceso al GPS para registrar la ubicación de ensayos y trazabilidad operacional.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Flow QA/QC necesita acceso continuo al GPS (incluso en background) para registrar la trazabilidad operacional de equipos durante toda la jornada de trabajo.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.vxp.scua"
+      "package": "com.vxp.scua",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ],
+      "softwareKeyboardLayoutMode": "resize",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBJbqP-2rHM5SOqdw2SLbjPviP858pBf9s"
+        }
+      }
     },
     "plugins": [
       [

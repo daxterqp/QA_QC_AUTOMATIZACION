@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Sha256 } from '@aws-crypto/sha256-js';
@@ -62,6 +63,19 @@ export async function downloadFromS3(s3Key: string, localUri: string): Promise<v
 }
 
 /**
+ * Borra un objeto de S3. Best-effort: ignora claves vacías/URLs http y no lanza
+ * si falla (usado en la limpieza tras eliminar un ensayo; la BD ya está limpia).
+ */
+export async function deleteFromS3(s3Key: string | null | undefined): Promise<void> {
+  if (!s3Key || s3Key.startsWith('http')) return;
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: AWS_CONFIG.bucketName, Key: s3Key }));
+  } catch (e) {
+    console.warn('[S3Service] deleteFromS3 falló:', s3Key, e);
+  }
+}
+
+/**
  * Retorna true si el objeto existe en S3.
  */
 export async function s3FileExists(s3Key: string): Promise<boolean> {
@@ -71,6 +85,18 @@ export async function s3FileExists(s3Key: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** URL pública (sin firmar) — el bucket está configurado como public-read en la convención
+ *  de este proyecto, igual que se usa en el endpoint /api/s3-image del web. */
+export function s3PublicUrl(s3Key: string): string {
+  return `https://${AWS_CONFIG.bucketName}.s3.${AWS_CONFIG.region}.amazonaws.com/${s3Key}`;
+}
+
+/** Devuelve una URL firmada (presigned) válida 5 min — útil para abrir un PDF
+ *  en un visor o un browser externo cuando el bucket NO sea público. */
+export async function getSignedReadUrl(s3Key: string, expiresInSec = 300): Promise<string> {
+  return getSignedUrl(s3, new GetObjectCommand({ Bucket: AWS_CONFIG.bucketName, Key: s3Key }), { expiresIn: expiresInSec });
 }
 
 /**

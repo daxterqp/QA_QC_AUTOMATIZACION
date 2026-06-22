@@ -36,6 +36,10 @@ interface ElectronAPI {
   }>>;
   /** Abre el HTML en el navegador del sistema. */
   openHtmlInBrowser(html: string, filename: string): Promise<string>;
+
+  /** Diálogo nativo para elegir una ortofoto. Devuelve su ruta local + tamaño.
+   *  El archivo (varios GB) se procesa leyendo del disco; no se sube entero. */
+  pickOrthophoto(): Promise<{ path: string; sizeBytes: number; name: string } | null>;
 }
 
 declare global {

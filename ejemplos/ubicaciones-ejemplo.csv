@@ -1,0 +1,6 @@
+Ubicación,Ubicación_Sola,Especialidad_Sola,PLANO DE REFERENCIA,ID_Protocolos
+Edificio-A · Piso 1 · Patio · ARQ,Patio,Arquitectura,Plano-A-01,ARQ-PISOS
+Laboratorio · Sala Concreto · LAB,Sala Concreto,Laboratorio,,LAB-CONCRETO-RC
+Laboratorio · Sala Suelos · LAB,Sala Suelos,Laboratorio,,LAB-SUELOS-GRAN
+Mina · Frente Norte · GEO,Frente Norte,Geología,,MIN-LEY-CU
+Mina · Frente Sur · GEO,Frente Sur,Geología,,MIN-LEY-CU

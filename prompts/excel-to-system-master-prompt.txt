@@ -1,0 +1,267 @@
+===================================================================
+PROMPT MAESTRO — CONVERSIÓN DE EXCEL DE LABORATORIO A EXCEL DEL SISTEMA
+Versión 1.0 · Propiedad privada · No distribuir
+===================================================================
+
+INSTRUCCIONES DE USO (para el operador humano, NO para la IA):
+
+1. Abre una sesión con un modelo de IA capaz (Claude Sonnet/Opus, GPT-4o/o1, Gemini Pro o
+   equivalente). NO uses modelos pequeños — la conversión requiere razonamiento profundo
+   sobre fórmulas Excel.
+2. Pega TODO el contenido entre los marcadores "===INICIO PROMPT===" y "===FIN PROMPT==="
+   como primer mensaje a la IA.
+3. Adjunta el Excel del laboratorio (.xlsx) como archivo en el mismo mensaje. Si la IA
+   no acepta archivos, pega una transcripción estructurada del Excel (filas, valores,
+   fórmulas, validaciones de datos) que puedes obtener con cualquier herramienta.
+4. La IA producirá el Excel final con la estructura que importa el sistema, más un
+   reporte de las celdas que no pudo mapear (para que las completes a mano).
+5. Sube el Excel final a la pestaña "Actividades" en /file-upload. Si el sistema
+   reporta warnings, revisa el reporte de la IA y corrige.
+
+===================================================================
+===INICIO PROMPT===
+
+Eres un experto en sistemas de control de calidad de laboratorios y en sintaxis de
+Excel. Tu tarea es convertir el Excel adjunto (formato propio del laboratorio) a un
+Excel con la estructura específica que requiere el sistema Flow QA/QC.
+
+## CONTEXTO DEL SISTEMA OBJETIVO
+
+El sistema Flow QA/QC usa una sintaxis de "validation methods" donde cada celda de
+un protocolo de laboratorio se describe con un string. El Excel final que debes
+producir tiene EXACTAMENTE estas columnas en una sola hoja:
+
+| ID_Protocolo | Protocolo | PartidaItem | Actividad realizada | Método de validación | Sección |
+
+- ID_Protocolo: código corto único del protocolo (ej: "LAB-CONCRETO-RC").
+- Protocolo: nombre legible (ej: "Ensayo de Resistencia a la Compresión - Concreto").
+- PartidaItem: identificador único de la fila DENTRO del protocolo. Usa números
+  correlativos ("1", "2", "3", ...) salvo para filas auto-gestionadas (ver más abajo).
+- Actividad realizada: descripción legible de la fila.
+- Método de validación: sintaxis estricta del sistema (ver "SINTAXIS" abajo).
+- Sección: agrupación visual opcional (ej: "PESAJE INICIAL", "RESULTADOS").
+
+## SINTAXIS DEL "MÉTODO DE VALIDACIÓN"
+
+### Una sola celda por fila (cells simples)
+
+| Tipo                       | Sintaxis                                                         | Ejemplo                                                  |
+|----------------------------|------------------------------------------------------------------|----------------------------------------------------------|
+| Manual numérico con rango  | `numerico-[min:max]`                                             | `numerico-[18:50]`                                       |
+| Fórmula sin rango          | `numerico-fx[expr]`                                              | `numerico-fx[#1+#2]`                                     |
+| Fórmula con rango          | `numerico-fx[expr]:[min:max]`                                    | `numerico-fx[PROMEDIO(#1,#2,#3)]:[21:50]`                |
+| Gráfico (línea recta)      | `numerico-gr1[x:refs-y:refs]`                                    | `numerico-gr1[x:#1A:#5A-y:#1B:#5B]`                      |
+| Gráfico (curva Bézier)     | `numerico-gr2[x:refs-y:refs]`                                    | `numerico-gr2[x:#1A:#5A-y:#1B:#5B]`                      |
+| Lista inline (dropdown)    | `list-[opt1, opt2, opt3]`                                        | `list-[Alto, Medio, Bajo]`                               |
+| Lista desde matriz         | `list-[Mx[A]]` o `list-[Mx[#1A:#10A]]`                           | `list-[M1[A]]`                                           |
+| Búsqueda en matriz         | `lookup-[#refKey, Mx, colSearch, colReturn]`                     | `lookup-[#1A, M1, A, B]`                                 |
+| Clásico Sí/No/NA           | (déjalo vacío en el Excel — la fila se trata como clásica)       | "" (vacío)                                               |
+
+### Múltiples celdas por fila (multi-celda con `//`)
+
+Cuando una fila representa una probeta/muestra con varias mediciones, usa `//` para
+separar las celdas. Las columnas se etiquetan posicionalmente A, B, C, …:
+
+```
+numerico-[145:155] // numerico-[145:155] // numerico-[445:455] // numerico-[5:30] // numerico-fx[REDONDEAR(#1D*#1C/(#1B*#1A^2)*1000,2)]:[3:8]
+```
+
+Esto define la fila como una probeta con 4 mediciones manuales (A=ancho, B=peralte,
+C=luz, D=carga) + 1 columna calculada (E=MR).
+
+### Referencias en fórmulas
+
+- `#1` = fila 1, columna A (implícita). Equivale a `#1A`.
+- `#1A`, `#1B`, … = fila 1, columna A, B, …
+- `#1A:#4A` = rango vertical (filas 1 a 4 en columna A).
+- `#1A:#1D` = rango horizontal (fila 1 en columnas A a D).
+
+### Funciones built-in (todas en mayúsculas)
+
+- Aritméticas: `+ - * / ^` (^ es potencia)
+- Comparaciones: `> < >= <= == !=` (devuelven 1 o 0)
+- Funciones: `SUMA, PROMEDIO, MAX, MIN, ABS, REDONDEAR(x,n), RAIZ, POTENCIA(x,n), SI(cond,a,b)`
+- Funciones estadísticas: `DESVEST, DESVESTP, CV, MEDIANA, PERCENTIL, CONTAR, OUTLIER(args,metodo)`
+- Búsqueda: `LOOKUP(ref, Mx, colSearch, colReturn)`
+
+### Headers multinivel (col-[…])
+
+Hasta 3 filas de headers al inicio del protocolo. Usa partida_item vacío en el Excel
+(el sistema autoasigna `__hdr1__`, `__hdr2__`, `__hdr3__`):
+
+```
+col-[A:B][GEOMETRÍA] // col-[C][PESO] // col-[D][CARGA] // col-[E:F][RESULTADO]
+```
+
+### Matrices auxiliares (catálogos, ej. tabla de materiales)
+
+Al FINAL del protocolo, en bloques. Cada matriz:
+- 1 fila declaración (partida vacía → autoasigna `__matrix_M1__`):
+  `matrix-[M1] // col-[A][Código] // col-[B][Descripción] // col-[C][Unidad] // col-[D][Valor]`
+- N filas de datos (partida vacía → autoasigna `__matrix_M1_1__`, `_2__`, ...):
+  `val-[MAT-001] // val-[Arena fina] // val-[m³] // val-[12.5]`
+
+## PROCESO QUE DEBES SEGUIR (PASO A PASO)
+
+### PASO 1 — Análisis estructural del Excel adjunto
+
+Para cada hoja del Excel:
+1. Identifica el TÍTULO del protocolo (texto en bold o merged cell en la parte superior).
+2. Identifica los HEADERS de columnas (merged cells con fondo de color o negrita).
+3. Identifica las FILAS DE DATOS (filas vacías donde el usuario llenará valores).
+4. Identifica las CELDAS CALCULADAS (las que tienen fórmula Excel, ej: `=AVERAGE(C5:C7)`).
+5. Identifica VALIDACIONES DE DATOS:
+   - Rango numérico (Data Validation → Decimal between X and Y) → traduce a `numerico-[X:Y]`.
+   - Lista (Data Validation → List → values o range) → traduce a `list-[…]` o `list-[Mx[A]]`.
+6. Identifica TEXTOS FIJOS (etiquetas como "Probeta 1:", "Diámetro (mm):") → estos
+   van en la columna "Actividad realizada" del Excel final, NO son celdas a importar.
+7. Identifica MATRICES AUXILIARES (tablas con catálogos de materiales, valores de
+   referencia, etc.) — generalmente en una hoja aparte o en una región separada.
+
+### PASO 2 — Mapeo de fórmulas Excel → sintaxis del sistema
+
+Para cada celda calculada, traduce la fórmula Excel a la sintaxis del sistema:
+
+| Excel                          | Sistema                                          |
+|--------------------------------|--------------------------------------------------|
+| `=AVERAGE(C5:C7)`              | `PROMEDIO(#1A:#3A)` (si C5..C7 son partidas 1..3)|
+| `=MAX(C5:C7)-MIN(C5:C7)`       | `MAX(#1A:#3A)-MIN(#1A:#3A)`                      |
+| `=IF(C5>=21, 1, 0)`            | `SI(#1>=21, 1, 0)`                               |
+| `=ROUND(C5*1000/D5, 2)`        | `REDONDEAR(#1A*1000/#1B, 2)`                     |
+| `=VLOOKUP(B5, M1, 2, FALSE)`   | `LOOKUP(#1A, M1, A, B)` (asumiendo M1 tiene cols A,B,...)|
+| `=SUMPRODUCT(...)`             | NO HAY EQUIVALENTE DIRECTO — reportar al usuario |
+| `=PI()*D5^2/4`                 | `3.14159*#1A^2/4` (sustituir PI() por 3.14159)   |
+| `=AVERAGE(IF(...))` (array)    | NO HAY EQUIVALENTE — reportar                    |
+
+Mapeo crítico: las referencias Excel (C5, D7) deben convertirse a referencias del
+sistema basadas en la posición de la fila en el orden del protocolo. Si C5 es la
+PRIMERA fila de probetas (partida=1) y D es la cuarta columna de esa fila,
+C5 → `#1A` y D5 → `#1D`.
+
+### PASO 3 — Detección de matrices auxiliares
+
+Si el Excel tiene una región con un catálogo de valores fijos (ej. una tabla de
+materiales con código, descripción, unidad y valor), trátala como una matriz:
+
+1. Identifica el rango de la tabla (ej. M2:P8 en hoja "Catálogos").
+2. Asigna un ID a la matriz (M1, M2, ...).
+3. Al final del protocolo, agrega:
+   - 1 fila `matrix-[M1] // col-[A][Código] // col-[B][Descripción] // col-[C][Unidad] // col-[D][Valor]`
+   - N filas `val-[MAT-001] // val-[Arena fina] // val-[m³] // val-[12.5]` por cada fila del catálogo.
+
+### PASO 4 — Detección de headers multinivel
+
+Si los headers del Excel tienen 2 o 3 niveles de jerarquía (merged cells), úsalos:
+
+```
+Excel:                        Sistema:
+[GEOMETRÍA][CARGA][RESULT]    col-[A:B][GEOMETRÍA] // col-[C][CARGA] // col-[D:E][RESULTADO]
+[Diám|Alt][P][Área|fc]        col-[A][Diám] // col-[B][Alt] // col-[C][P] // col-[D][Área] // col-[E][fc]
+```
+
+Agrega esas filas al inicio del protocolo con PartidaItem vacío (el sistema autoasigna).
+
+### PASO 5 — Generación del Excel final
+
+Produce un Excel con UNA SOLA HOJA y EXACTAMENTE estas columnas:
+
+| ID_Protocolo | Protocolo | PartidaItem | Actividad realizada | Método de validación | Sección |
+
+Orden de las filas:
+1. Filas de headers multinivel (1 a 3 filas con `col-[…]` en Método).
+2. Filas de datos (con PartidaItem "1", "2", "3", ...).
+3. Filas de resúmenes (PROMEDIO, MAX-MIN, SI(>=X)) al final del bloque de datos.
+4. Filas de declaración de matrices y sus datos (al final del protocolo).
+
+Si el Excel original tiene MÚLTIPLES protocolos diferentes, repite la estructura
+para cada uno (mismo workbook, una hoja). El sistema agrupa por ID_Protocolo.
+
+### PASO 6 — Reporte de celdas no mapeadas
+
+Al final, produce un REPORTE en formato Markdown listando:
+
+- Celdas con fórmulas Excel que NO pudiste traducir (ej. SUMPRODUCT complejo, INDIRECT,
+  fórmulas matriciales, macros VBA). Por cada una, indica:
+  - Ubicación en el Excel original (hoja!celda).
+  - La fórmula Excel original.
+  - Por qué no se pudo mapear.
+  - Sugerencia para el usuario humano de cómo resolverlo.
+- Validaciones de datos que no pudiste capturar (ej. mensaje de error customizado).
+- Vínculos entre hojas que requieren atención.
+
+## REGLAS ESTRICTAS
+
+1. NO inventes funciones que no estén en la lista de "Funciones built-in" del sistema.
+2. NO uses comas como separador decimal — solo puntos. Si el Excel original usa coma
+   decimal, conviértelo (1,5 → 1.5).
+3. NO uses paréntesis innecesarios; minimiza la fórmula para legibilidad.
+4. SIEMPRE pon números antes de letras en referencias: `#1A`, NO `#A1`.
+5. SIEMPRE asigna PartidaItem secuencial ("1", "2", "3", ...) a las filas de datos.
+   Las filas de header y matriz dejan PartidaItem VACÍO.
+6. Si una celda Excel tiene fórmula sin equivalente directo y NO es crítica, reporta
+   y déjala como manual (`numerico-[min:max]` con rango estimado).
+7. Si el laboratorio usa una fórmula que evidentemente computa un módulo (ej. MR =
+   PL/(bd²)) pero el rango admisible no está claro, pregúntate qué rango es razonable
+   para el ensayo según las normas comunes (NTP/ASTM) — y si no estás seguro, NO
+   inventes; usa rango amplio `[0:9999]` y reporta para que el usuario lo afine.
+
+## FORMATO DE SALIDA
+
+Tu respuesta tendrá DOS partes:
+
+### Parte 1: El Excel convertido
+
+Entrega el Excel como una tabla en formato CSV (o como archivo descargable si la
+plataforma lo permite). Cada fila exactamente como se subirá al sistema.
+
+### Parte 2: El reporte de no mapeados
+
+Sección Markdown con la lista de problemas encontrados, su ubicación original y la
+recomendación al usuario.
+
+## EJEMPLO COMPLETO
+
+Si el Excel del laboratorio tiene esta estructura (ENSAYO_FLEXION.xlsx, hoja
+"Resistencia"):
+
+```
+Fila 1: ENSAYO DE RESISTENCIA A LA FLEXIÓN — VIGUETAS
+Fila 3:           GEOMETRÍA                ENSAYO          CÁLCULO
+Fila 4:      Ancho   Peralte   Luz       Carga          Área   MR
+Fila 5: VIG 1  ___     ___    ___        ___          =3.14*B5^2/4  =D5*C5/(=B5*A5^2)*1000
+Fila 6: VIG 2  ___     ___    ___        ___          ...
+Fila 7: VIG 3  ___     ___    ___        ___          ...
+Fila 8: PROM                                                       =AVERAGE(F5:F7)
+```
+
+Tu salida sería:
+
+```csv
+ID_Protocolo,Protocolo,PartidaItem,Actividad realizada,Método de validación,Sección
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,,,"col-[A:C][GEOMETRÍA] // col-[D][ENSAYO] // col-[E:F][CÁLCULO]",
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,,,"col-[A][Ancho] // col-[B][Peralte] // col-[C][Luz] // col-[D][Carga] // col-[E][Área] // col-[F][MR]",
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,1,Vigueta 1,"numerico-[145:155] // numerico-[145:155] // numerico-[445:455] // numerico-[5:30] // numerico-fx[3.14159*#1B^2/4] // numerico-fx[#1D*#1C/(#1B*#1A^2)*1000]:[3:8]",ENSAYO INDIVIDUAL
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,2,Vigueta 2,"numerico-[145:155] // numerico-[145:155] // numerico-[445:455] // numerico-[5:30] // numerico-fx[3.14159*#2B^2/4] // numerico-fx[#2D*#2C/(#2B*#2A^2)*1000]:[3:8]",ENSAYO INDIVIDUAL
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,3,Vigueta 3,"numerico-[145:155] // numerico-[145:155] // numerico-[445:455] // numerico-[5:30] // numerico-fx[3.14159*#3B^2/4] // numerico-fx[#3D*#3C/(#3B*#3A^2)*1000]:[3:8]",ENSAYO INDIVIDUAL
+LAB-FLEXION,Ensayo de Resistencia a la Flexión - Viguetas,4,MR promedio (MPa),"numerico-fx[PROMEDIO(#1F:#3F)]:[3:8]",RESULTADOS
+```
+
+Y el reporte de no mapeados:
+
+```markdown
+## Celdas no mapeadas
+
+Ninguna en este ejemplo. La fórmula de área `=3.14*B5^2/4` se mapeó a `3.14159*#1B^2/4`
+(con más precisión de PI). El rango admisible de MR `[3:8]` MPa se estimó por norma
+NTP-339.078; verifica que coincida con tu especificación.
+```
+
+## COMIENZA
+
+Analiza ahora el Excel adjunto y produce las dos partes pedidas. Trabaja con cuidado:
+es preferible reportar más celdas como "no mapeadas" que generar sintaxis incorrecta.
+
+===FIN PROMPT===
+===================================================================
+
+FIN DEL ARCHIVO. Para actualizaciones del prompt, edita este archivo y sube versión.

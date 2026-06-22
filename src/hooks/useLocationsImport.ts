@@ -10,6 +10,7 @@ import { s3ProjectPrefix } from '@config/aws';
 import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import { Q } from '@nozbe/watermelondb';
 import type Location from '@db/models/Location';
+import { useI18n } from '@i18n/index';
 
 export type LocationsImportState =
   | { status: 'idle' }
@@ -19,6 +20,7 @@ export type LocationsImportState =
   | { status: 'error'; message: string; missingColumns?: string[] };
 
 export function useLocationsImport(projectId: string, projectName: string) {
+  const { t } = useI18n();
   const [importState, setImportState] = useState<LocationsImportState>({ status: 'idle' });
 
   const startImport = useCallback(async () => {
@@ -102,7 +104,7 @@ export function useLocationsImport(projectId: string, projectName: string) {
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
       } catch (e) {
-        Alert.alert('S3 Error', String(e));
+        Alert.alert(t('alerts.s3ErrorTitle'), String(e));
       }
     } catch (err) {
       if (err instanceof LocationsImportError) {
@@ -112,11 +114,11 @@ export function useLocationsImport(projectId: string, projectName: string) {
           missingColumns: err.missingColumns,
         });
       } else {
-        setImportState({ status: 'error', message: 'Error inesperado al importar ubicaciones.' });
+        setImportState({ status: 'error', message: t('alerts.locationsImportUnexpectedError') });
         console.error('[useLocationsImport]', err);
       }
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   const reset = useCallback(() => setImportState({ status: 'idle' }), []);
 

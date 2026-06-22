@@ -9,9 +9,10 @@ import {
 import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { Q } from '@nozbe/watermelondb';
-import { pushProjectToSupabase } from '@services/SupabaseSyncService';
+import { pushProjectToSupabase, seedGroupingPresets } from '@services/SupabaseSyncService';
 import type ProtocolTemplate from '@db/models/ProtocolTemplate';
 import type ProtocolTemplateItem from '@db/models/ProtocolTemplateItem';
+import { useI18n } from '@i18n/index';
 
 export type ImportState =
   | { status: 'idle' }
@@ -28,6 +29,7 @@ export type ImportState =
  * Nunca omite filas.
  */
 export function useExcelImport(projectId: string, projectName: string) {
+  const { t } = useI18n();
   const [importState, setImportState] = useState<ImportState>({ status: 'idle' });
 
   const startImport = useCallback(async () => {
@@ -96,6 +98,37 @@ export function useExcelImport(projectId: string, projectName: string) {
 
           let protocolModified = false;
 
+          // v34 — Auto-asignación de partidas reservadas (paridad con la web):
+          // headers `col-[…]` → __hdrN__; matrices `matrix-[Mx]`/val puros →
+          // __matrix_Mx_N__. Sin esto, varias filas con partida vacía colisionan
+          // en la clave (template|partida) y se pisan entre sí.
+          {
+            let hdrCounter = 0;
+            let currentMatrix: string | null = null;
+            let rowCounter = 0;
+            for (const activity of group.activities) {
+              const m = (activity.metodoValidacion ?? '').trim();
+              if (/^col-\[/i.test(m)) {
+                hdrCounter++;
+                if (!activity.partidaItem) activity.partidaItem = `__hdr${hdrCounter}__`;
+                continue;
+              }
+              const mh = m.match(/^matrix-\[([A-Za-z0-9_-]+)\]/i);
+              if (mh) {
+                currentMatrix = mh[1];
+                rowCounter = 0;
+                if (!activity.partidaItem) activity.partidaItem = `__matrix_${currentMatrix}__`;
+                continue;
+              }
+              const isPureValRow = /^val-\[/i.test(m)
+                && m.split('//').every(seg => seg.trim() === '' || /^val-\[[^\[\]]*\]$/i.test(seg.trim()));
+              if (isPureValRow && currentMatrix && !activity.partidaItem) {
+                rowCounter++;
+                activity.partidaItem = `__matrix_${currentMatrix}_${rowCounter}__`;
+              }
+            }
+          }
+
           for (const activity of group.activities) {
             const key = itemKey(template.id, activity.partidaItem ?? null);
             const existingItem = existingItemMap.get(key);
@@ -137,12 +170,22 @@ export function useExcelImport(projectId: string, projectName: string) {
         }
       });
 
+      // v45.3 — Sembrar agrupamientos (presets) de la hoja AGRUPACIONES en feature_flags
+      // (upsert por nombre; conserva los del usuario). No bloquea si no hay hoja.
+      let seededPresets = 0;
+      if (result.groupingPresets && Object.keys(result.groupingPresets).length) {
+        try { const r = await seedGroupingPresets(projectId, result.groupingPresets); seededPresets = r.seeded; } catch { /* */ }
+      }
+
       setImportState({
         status: 'success',
         totalProtocols: addedProtocols,
         totalActivities,
         modifiedProtocols,
       });
+      if (seededPresets > 0) {
+        Alert.alert(t('alerts.groupingsTitle'), t('alerts.groupingsSeededMsg', { count: seededPresets }));
+      }
 
       // Push a Supabase (no bloquea si falla)
       pushProjectToSupabase(projectId).catch(() => {});
@@ -155,7 +198,7 @@ export function useExcelImport(projectId: string, projectName: string) {
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
       } catch (e) {
-        Alert.alert('S3 Error', String(e));
+        Alert.alert(t('alerts.s3ErrorTitle'), String(e));
       }
     } catch (err) {
       if (err instanceof ExcelImportError) {
@@ -165,11 +208,11 @@ export function useExcelImport(projectId: string, projectName: string) {
           missingColumns: err.missingColumns,
         });
       } else {
-        setImportState({ status: 'error', message: 'Error inesperado al importar el archivo.' });
+        setImportState({ status: 'error', message: t('alerts.excelImportUnexpectedError') });
         console.error('[useExcelImport]', err);
       }
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   const reset = useCallback(() => setImportState({ status: 'idle' }), []);
 

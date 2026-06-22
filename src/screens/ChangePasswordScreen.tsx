@@ -8,10 +8,12 @@ import { Colors, Radius, Shadow } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useAuth } from '@context/AuthContext';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChangePassword'>;
 
 export default function ChangePasswordScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const { currentUser, changePassword, deleteAccount, isDemo } = useAuth();
   const [current, setCurrent] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -25,19 +27,19 @@ export default function ChangePasswordScreen({ navigation }: Props) {
   const handleSave = async () => {
     if (!currentUser) return;
     if (isDemo) {
-      Alert.alert('No disponible', 'No puedes cambiar de clave en modo demo.');
+      Alert.alert(t('changePass.demoTitle'), t('changePass.demoMessage'));
       return;
     }
 
     // Verificar contraseña actual
     const storedPassword = currentUser.password ?? currentUser.name;
     if (current !== storedPassword) {
-      Alert.alert('Error', 'La contraseña actual no es correcta.');
+      Alert.alert(t('changePass.errorTitle'), t('changePass.errorCurrentWrong'));
       return;
     }
 
     if (newPass.length < 4) {
-      Alert.alert('Error', 'La nueva contraseña debe tener al menos 4 caracteres.');
+      Alert.alert(t('changePass.errorTitle'), t('changePass.errorTooShort'));
       return;
     }
 
@@ -45,8 +47,8 @@ export default function ChangePasswordScreen({ navigation }: Props) {
     await changePassword(currentUser.id, newPass);
     setLoading(false);
 
-    Alert.alert('Listo', 'Contraseña actualizada correctamente.', [
-      { text: 'OK', onPress: () => navigation.goBack() },
+    Alert.alert(t('changePass.doneTitle'), t('changePass.doneMessage'), [
+      { text: t('changePass.ok'), onPress: () => navigation.goBack() },
     ]);
   };
 
@@ -55,56 +57,56 @@ export default function ChangePasswordScreen({ navigation }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <AppHeader title="Cambiar Clave" onBack={() => navigation.goBack()} />
+      <AppHeader title={t('changePass.title')} onBack={() => navigation.goBack()} />
 
       <View style={styles.container}>
         <View style={styles.card}>
           <Text style={styles.userLabel}>
             {currentUser?.name} {currentUser?.apellido}
           </Text>
-          <Text style={styles.idLabel}>ID: {currentUser?.id}</Text>
+          <Text style={styles.idLabel}>{t('changePass.idLabel', { id: currentUser?.id ?? '' })}</Text>
 
-          <Text style={styles.label}>Contraseña actual</Text>
+          <Text style={styles.label}>{t('changePass.currentLabel')}</Text>
           <View style={styles.row}>
             <TextInput
               style={[styles.input, styles.flex]}
-              placeholder="Contraseña actual"
+              placeholder={t('changePass.currentPlaceholder')}
               placeholderTextColor="#aaa"
               value={current}
               onChangeText={setCurrent}
               secureTextEntry={!showCurrent}
             />
             <TouchableOpacity onPress={() => setShowCurrent(!showCurrent)} style={styles.eye}>
-              <Text style={styles.eyeText}>{showCurrent ? 'Ocultar' : 'Ver'}</Text>
+              <Text style={styles.eyeText}>{showCurrent ? t('changePass.hide') : t('changePass.show')}</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Nueva contraseña</Text>
+          <Text style={styles.label}>{t('changePass.newLabel')}</Text>
           <View style={styles.row}>
             <TextInput
               style={[styles.input, styles.flex]}
-              placeholder="Mínimo 4 caracteres"
+              placeholder={t('changePass.newPlaceholder')}
               placeholderTextColor="#aaa"
               value={newPass}
               onChangeText={setNewPass}
               secureTextEntry={!showNew}
             />
             <TouchableOpacity onPress={() => setShowNew(!showNew)} style={styles.eye}>
-              <Text style={styles.eyeText}>{showNew ? 'Ocultar' : 'Ver'}</Text>
+              <Text style={styles.eyeText}>{showNew ? t('changePass.hide') : t('changePass.show')}</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Confirmar nueva contraseña</Text>
+          <Text style={styles.label}>{t('changePass.confirmLabel')}</Text>
           <TextInput
             style={[styles.input, confirm && newPass !== confirm && styles.inputError]}
-            placeholder="Repite la contraseña"
+            placeholder={t('changePass.confirmPlaceholder')}
             placeholderTextColor="#aaa"
             value={confirm}
             onChangeText={setConfirm}
             secureTextEntry
           />
           {confirm.length > 0 && newPass !== confirm && (
-            <Text style={styles.errorText}>Las contraseñas no coinciden</Text>
+            <Text style={styles.errorText}>{t('changePass.mismatch')}</Text>
           )}
 
           <TouchableOpacity
@@ -113,27 +115,27 @@ export default function ChangePasswordScreen({ navigation }: Props) {
             disabled={!canSave || loading}
           >
             <Text style={styles.btnText}>
-              {loading ? 'Guardando...' : 'GUARDAR CONTRASEÑA'}
+              {loading ? t('changePass.saving') : t('changePass.save')}
             </Text>
           </TouchableOpacity>
         </View>
 
         {/* Eliminar cuenta */}
         <View style={styles.dangerCard}>
-          <Text style={styles.dangerTitle}>Eliminar mi cuenta</Text>
+          <Text style={styles.dangerTitle}>{t('changePass.deleteSectionTitle')}</Text>
           <Text style={styles.dangerDesc}>
-            Se eliminará tu cuenta, firma, accesos a proyectos y token de notificaciones. Esta acción no se puede deshacer.
+            {t('changePass.deleteSectionDesc')}
           </Text>
           <TouchableOpacity
             style={styles.dangerBtn}
             onPress={() => {
               Alert.alert(
-                'Eliminar cuenta',
-                '¿Estás seguro? Se eliminarán todos tus datos personales. Los protocolos y observaciones que creaste se mantendrán como registro del proyecto.',
+                t('changePass.deleteConfirmTitle'),
+                t('changePass.deleteConfirmMessage'),
                 [
-                  { text: 'Cancelar', style: 'cancel' },
+                  { text: t('changePass.cancel'), style: 'cancel' },
                   {
-                    text: 'Eliminar', style: 'destructive',
+                    text: t('changePass.delete'), style: 'destructive',
                     onPress: async () => {
                       await deleteAccount();
                     },
@@ -142,7 +144,7 @@ export default function ChangePasswordScreen({ navigation }: Props) {
               );
             }}
           >
-            <Text style={styles.dangerBtnText}>ELIMINAR MI CUENTA</Text>
+            <Text style={styles.dangerBtnText}>{t('changePass.deleteBtn')}</Text>
           </TouchableOpacity>
         </View>
       </View>

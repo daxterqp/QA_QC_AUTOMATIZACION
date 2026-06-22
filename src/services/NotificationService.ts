@@ -10,7 +10,7 @@
  *   - Protocolo aprobado       → todos los usuarios del proyecto
  */
 
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import { supabase } from '@config/supabase';
 
 // Carga segura — módulo nativo puede no estar disponible en builds anteriores
@@ -60,19 +60,9 @@ export async function registerPushToken(userId: string): Promise<void> {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
     if (existing !== 'granted') {
-      // Show rationale before requesting (required by Android 13+ / Play Store)
-      if (Platform.OS === 'android') {
-        await new Promise<void>((resolve) => {
-          Alert.alert(
-            'Notificaciones',
-            'Flow QA/QC envía notificaciones cuando se crean observaciones, se envían protocolos o se aprueban/rechazan. ¿Deseas activarlas?',
-            [
-              { text: 'No, gracias', onPress: () => resolve() },
-              { text: 'Activar', onPress: () => resolve() },
-            ],
-          );
-        });
-      }
+      // Directo al dialog nativo. Android 13+ ya muestra su propio dialog
+      // con info; no duplicamos con un Alert "rationale" previo (era confuso
+      // y siempre disparaba el nativo después de cualquier opción).
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }

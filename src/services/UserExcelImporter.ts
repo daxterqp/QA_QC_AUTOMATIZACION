@@ -7,6 +7,9 @@ export interface ExcelUser {
   name: string;
   apellido: string;
   role: UserRole;
+  /** v44 — Nombres de proyectos del usuario (columna "Proyectos", separados por coma/;/
+   *  salto de línea). undefined = la columna no existe → no se sincronizan accesos. */
+  projects?: string[];
 }
 
 export class UserImportError extends Error {
@@ -22,15 +25,17 @@ const ROLE_MAP: Record<string, UserRole> = {
   'jefe': 'RESIDENT',
   'resident': 'RESIDENT',
   'supervisor': 'SUPERVISOR',
-  'operario': 'OPERATOR',
+  'tecnico': 'OPERATOR',     // v44 — operario renombrado a Técnico
+  'técnico': 'OPERATOR',
+  'operario': 'OPERATOR',    // alias legacy (sigue mapeando a OPERATOR)
   'operator': 'OPERATOR',
   'otros': 'OPERATOR',
 };
 
 export async function importUsersFromExcel(): Promise<ExcelUser[]> {
+  // Android SAF se bloquea a "Recientes" con array de types — usar '*/*'.
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-           'application/vnd.ms-excel'],
+    type: '*/*',
     copyToCacheDirectory: true,
   });
 
@@ -39,6 +44,9 @@ export async function importUsersFromExcel(): Promise<ExcelUser[]> {
   }
 
   const asset = result.assets[0];
+  if (!/\.(xlsx?|csv)$/i.test(asset.name)) {
+    throw new UserImportError('Formato no válido. Selecciona un archivo .xlsx, .xls o .csv');
+  }
   const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' as const });
   const workbook = read(base64, { type: 'base64' });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -51,6 +59,8 @@ export async function importUsersFromExcel(): Promise<ExcelUser[]> {
   const hasNombre = headers.some((h) => h.includes('nombre'));
   const hasApellido = headers.some((h) => h.includes('apellido'));
   const hasRol = headers.some((h) => h.includes('rol') || h.includes('role'));
+  // v44 — Columna OPCIONAL de proyectos (Proyectos / Proyecto / Projects).
+  const hasProyectos = headers.some((h) => h.includes('proyecto') || h.includes('project'));
 
   if (!hasNombre || !hasApellido || !hasRol) {
     throw new UserImportError(
@@ -64,6 +74,7 @@ export async function importUsersFromExcel(): Promise<ExcelUser[]> {
     const nameKey = Object.keys(row).find((k) => k.toLowerCase().includes('nombre')) ?? '';
     const apellidoKey = Object.keys(row).find((k) => k.toLowerCase().includes('apellido')) ?? '';
     const rolKey = Object.keys(row).find((k) => k.toLowerCase().includes('rol') || k.toLowerCase().includes('role')) ?? '';
+    const projKey = Object.keys(row).find((k) => k.toLowerCase().includes('proyecto') || k.toLowerCase().includes('project')) ?? '';
 
     const name = String(row[nameKey] ?? '').trim();
     const apellido = String(row[apellidoKey] ?? '').trim();
@@ -74,7 +85,12 @@ export async function importUsersFromExcel(): Promise<ExcelUser[]> {
     const role = ROLE_MAP[rolRaw];
     if (!role) continue; // Ignorar roles desconocidos
 
-    users.push({ name, apellido, role });
+    // Proyectos: solo si la columna existe (para no revocar accesos sin querer).
+    const projects = hasProyectos
+      ? String(row[projKey] ?? '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean)
+      : undefined;
+
+    users.push({ name, apellido, role, projects });
   }
 
   if (users.length === 0) {

@@ -42,16 +42,18 @@ export function useCreateContact(projectId: string) {
         .limit(1)
         .single();
       const nextOrder = (existing?.sort_order ?? 0) + 1;
+      const now = Date.now();
       const { data, error } = await supabase
         .from('phone_contacts')
         .insert({
+          id: crypto.randomUUID(),
           project_id: projectId,
           name: input.name.trim(),
           phone: input.phone.trim(),
           role: input.role?.trim() || null,
           sort_order: nextOrder,
-          created_at: Date.now(),
-          updated_at: Date.now(),
+          created_at: now,
+          updated_at: now,
         })
         .select()
         .single();

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
-import type { Plan, PlanAnnotation, AnnotationComment, AnnotationCommentPhoto } from '@/types';
+import type { Plan, PlanAnnotation, AnnotationComment, AnnotationCommentPhoto, Priority } from '@/types';
 
 const supabase = createClient();
 
@@ -49,9 +49,18 @@ export function usePlansList(projectId: string) {
         .from('plans')
         .select('*')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false });
+        .order('updated_at', { ascending: false });
       if (error) throw error;
-      return (data ?? []) as Plan[];
+      // Deduplicar por s3_key (o por nombre si no hay key), conservando el más reciente.
+      const byKey = new Map<string, Plan>();
+      for (const p of (data ?? []) as Plan[]) {
+        const k = p.s3_key ?? `name:${p.name}`;
+        const prev = byKey.get(k);
+        if (!prev || new Date(p.updated_at).getTime() > new Date(prev.updated_at).getTime()) {
+          byKey.set(k, p);
+        }
+      }
+      return Array.from(byKey.values());
     },
     enabled: !!projectId,
   });
@@ -228,6 +237,7 @@ export function useCreateAnnotation(planId: string) {
       annotationData: AnnotationData;
       userId: string;
       protocolId?: string | null;
+      priority?: Priority | null;
     }) => {
       const isDot = input.annotationData.type === 'dot';
       const now = Date.now(); // WatermelonDB guarda timestamps como números (ms)
@@ -244,6 +254,7 @@ export function useCreateAnnotation(planId: string) {
         is_ok: false,
         status: 'OPEN',
         page: input.annotationData.page ?? null,
+        priority: input.priority ?? null,
         created_at: now,
         updated_at: now,
       };
@@ -334,6 +345,33 @@ export function useAddCommentPhoto(planId: string) {
         created_at: now,
         updated_at: now,
       });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotations', planId] }),
+  });
+}
+
+// ── Update annotation priority ───────────────────────────────────────────────
+
+/** Actualiza la prioridad (low/medium/high/null). Guard: solo acepta valores válidos. */
+export function useUpdateAnnotationPriority(planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      annotationId,
+      priority,
+    }: {
+      annotationId: string;
+      priority: Priority | null;
+    }) => {
+      if (priority !== null && !['low', 'medium', 'high'].includes(priority)) {
+        console.warn('[Annotation] priority inválido, ignorando:', priority);
+        return;
+      }
+      const { error } = await supabase
+        .from('plan_annotations')
+        .update({ priority, updated_at: Date.now() })
+        .eq('id', annotationId);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['annotations', planId] }),

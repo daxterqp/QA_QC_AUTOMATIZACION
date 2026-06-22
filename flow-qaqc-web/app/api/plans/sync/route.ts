@@ -57,9 +57,10 @@ async function ensureDbRecord(
       const alreadyLinked = (existingPlans ?? []).some((p: any) => p.location_id === loc.id);
       if (!alreadyLinked) {
         const { error } = await supabase.from('plans').insert({
-          project_id: projectId, name: planName, s3_key: s3Key,
+          id: crypto.randomUUID(),
+          project_id: projectId, name: planName, file_uri: '', s3_key: s3Key,
           file_type: fileType, location_id: loc.id, s3_etag: etag,
-          created_at: now, updated_at: now,
+          uploaded_by_id: '', created_at: now, updated_at: now,
         });
         if (error) console.error('[plans/sync] insert error:', error);
         else created++;
@@ -67,9 +68,10 @@ async function ensureDbRecord(
     }
   } else if ((existingPlans ?? []).length === 0) {
     const { error } = await supabase.from('plans').insert({
-      project_id: projectId, name: planName, s3_key: s3Key,
+      id: crypto.randomUUID(),
+      project_id: projectId, name: planName, file_uri: '', s3_key: s3Key,
       file_type: fileType, location_id: null, s3_etag: etag,
-      created_at: now, updated_at: now,
+      uploaded_by_id: '', created_at: now, updated_at: now,
     });
     if (error) console.error('[plans/sync] insert error (unlinked):', error);
     else created++;
@@ -162,9 +164,12 @@ export async function POST(req: NextRequest) {
 
   // ── Sync ───────────────────────────────────────────────────────────────────
 
-  const allFilenames = new Set([...localFiles, ...s3Map.keys()]);
+  const allFilenames = new Set<string>([
+    ...Array.from(localFiles),
+    ...Array.from(s3Map.keys()),
+  ]);
 
-  for (const filename of allFilenames) {
+  for (const filename of Array.from(allFilenames)) {
     const inLocal = localFiles.has(filename);
     const s3Info  = s3Map.get(filename);
     const s3Key   = s3Info?.key ?? `${prefix}${filename}`;

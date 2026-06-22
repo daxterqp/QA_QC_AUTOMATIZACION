@@ -19,10 +19,12 @@ import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { useTourStepWithLayout } from '@hooks/useTourStep';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DossierPreview'>;
 
 export default function DossierPreviewScreen({ navigation, route }: Props) {
+  const { t } = useI18n();
   const { pdfUri, projectName } = route.params;
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -33,10 +35,10 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
     try {
       await Sharing.shareAsync(pdfUri, {
         mimeType: 'application/pdf',
-        dialogTitle: 'Exportar Dosier PDF',
+        dialogTitle: t('dossierPrev.shareDialogTitle'),
       });
     } catch (e) {
-      Alert.alert('Error', `No se pudo compartir el PDF.\n${String(e)}`);
+      Alert.alert(t('dossierPrev.errorTitle'), t('dossierPrev.shareError', { detail: String(e) }));
     }
   };
 
@@ -66,13 +68,13 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        Alert.alert('Descargado', `El PDF fue guardado en la carpeta seleccionada.`);
+        Alert.alert(t('dossierPrev.downloadedTitle'), t('dossierPrev.downloadedMessage'));
       } else {
         // iOS: compartir como alternativa
         await handleShare();
       }
     } catch (e) {
-      Alert.alert('Error', `No se pudo guardar el PDF.\n${String(e)}`);
+      Alert.alert(t('dossierPrev.errorTitle'), t('dossierPrev.saveError', { detail: String(e) }));
     } finally {
       setDownloading(false);
     }
@@ -81,7 +83,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Vista previa del Dosier"
+        title={t('dossierPrev.headerTitle')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
@@ -112,7 +114,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
         {loading && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.loadingText}>Cargando PDF...</Text>
+            <Text style={styles.loadingText}>{t('dossierPrev.loading')}</Text>
           </View>
         )}
         <Pdf
@@ -121,7 +123,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
           onLoadComplete={() => setLoading(false)}
           onError={() => {
             setLoading(false);
-            Alert.alert('Error', 'No se pudo cargar el PDF para previsualización.');
+            Alert.alert(t('dossierPrev.errorTitle'), t('dossierPrev.previewError'));
           }}
           enablePaging
           horizontal={false}

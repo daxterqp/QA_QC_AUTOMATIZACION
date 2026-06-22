@@ -1,0 +1,44 @@
+name: Backup Supabase DB
+
+# Backup automático de la base Postgres de Supabase → S3.
+# Corre todos los días + se puede lanzar a mano (workflow_dispatch).
+# Requiere estos SECRETS en el repo (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL          → connection string "Session pooler" de Supabase (IPv4)
+#   BACKUP_AWS_ACCESS_KEY_ID → clave AWS (idealmente una dedicada para backups)
+#   BACKUP_AWS_SECRET_ACCESS_KEY
+# El bucket y la región van como texto plano abajo (no son secretos).
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC todos los días (~02:00 Perú)
+  workflow_dispatch: {}    # botón para lanzarlo manualmente
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-2
+      AWS_BUCKET: flow-qc-proyecto
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Instalar pg_dump 17 (compatible con Postgres de Supabase)
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Dump de la base (formato custom, comprimido)
+        run: |
+          STAMP=$(date -u +%Y%m%d-%H%M%S)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/17/bin/pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+            --format=custom --no-owner --no-privileges \
+            --file="flowqc-$STAMP.dump"
+          ls -lh "flowqc-$STAMP.dump"
+
+      - name: Subir el backup a S3
+        run: |
+          aws s3 cp "flowqc-$STAMP.dump" "s3://$AWS_BUCKET/backups/db/flowqc-$STAMP.dump"
+          echo "Backup subido: s3://$AWS_BUCKET/backups/db/flowqc-$STAMP.dump"

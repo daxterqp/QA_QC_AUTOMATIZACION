@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { database, nonConformitiesCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
+import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NonConformity'>;
@@ -15,6 +16,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'NonConformity'>;
 export default function NonConformityScreen({ navigation, route }: Props) {
   const { protocolId, projectId } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -36,9 +38,9 @@ export default function NonConformityScreen({ navigation, route }: Props) {
       });
 
       Alert.alert(
-        'No Conformidad Registrada',
-        'La NC fue levantada y quedara asociada al protocolo.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
+        t('nonConf.savedTitle'),
+        t('nonConf.savedMessage'),
+        [{ text: t('nonConf.ok'), onPress: () => navigation.goBack() }]
       );
     } finally {
       setSaving(false);
@@ -50,28 +52,27 @@ export default function NonConformityScreen({ navigation, route }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <AppHeader title="No Conformidad" onBack={() => navigation.goBack()} />
+      <AppHeader title={t('nonConf.headerTitle')} onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>¿Qué es una No Conformidad?</Text>
+          <Text style={styles.infoTitle}>{t('nonConf.infoTitle')}</Text>
           <Text style={styles.infoText}>
-            Una NC documenta un incumplimiento o desviacion de los requisitos de calidad.
-            Quedara registrada con estado ABIERTO hasta que sea resuelta.
+            {t('nonConf.infoText')}
           </Text>
         </View>
 
-        <Text style={styles.label}>Descripcion de la no conformidad *</Text>
+        <Text style={styles.label}>{t('nonConf.descriptionLabel')}</Text>
         <TextInput
           style={styles.textArea}
-          placeholder="Describe detalladamente el incumplimiento detectado..."
+          placeholder={t('nonConf.descriptionPlaceholder')}
           value={description}
           onChangeText={setDescription}
           multiline
           numberOfLines={6}
           textAlignVertical="top"
         />
-        <Text style={styles.charCount}>{description.length} caracteres (minimo 10)</Text>
+        <Text style={styles.charCount}>{t('nonConf.charCount', { count: description.length })}</Text>
 
         <TouchableOpacity
           style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
@@ -80,7 +81,7 @@ export default function NonConformityScreen({ navigation, route }: Props) {
         >
           {saving
             ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.saveBtnText}>Registrar No Conformidad</Text>
+            : <Text style={styles.saveBtnText}>{t('nonConf.submit')}</Text>
           }
         </TouchableOpacity>
       </ScrollView>

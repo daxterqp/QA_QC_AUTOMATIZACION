@@ -74,11 +74,10 @@ export async function importExcelLocationsFromUri(uri: string): Promise<Location
 // ─── Funcion principal con file picker ───────────────────────────────────────
 
 export async function importExcelLocations(): Promise<LocationsImportResult | null> {
+  // Android SAF se bloquea a "Recientes" con array de types — usar '*/*' y
+  // validar extensión tras la selección.
   const pickerResult = await DocumentPicker.getDocumentAsync({
-    type: [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-    ],
+    type: '*/*',
     copyToCacheDirectory: true,
   });
 
@@ -86,5 +85,9 @@ export async function importExcelLocations(): Promise<LocationsImportResult | nu
     return null;
   }
 
-  return importExcelLocationsFromUri(pickerResult.assets[0].uri);
+  const asset = pickerResult.assets[0];
+  if (!/\.(xlsx?|csv)$/i.test(asset.name)) {
+    throw new Error('Formato no válido. Selecciona un archivo .xlsx, .xls o .csv');
+  }
+  return importExcelLocationsFromUri(asset.uri);
 }

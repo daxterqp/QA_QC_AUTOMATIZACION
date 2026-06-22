@@ -25,6 +25,16 @@ function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
+/** Content-Type según la extensión del key (antes se forzaba image/jpeg, lo que
+ *  podía romper WebP/PNG —p.ej. la ortofoto WebP—). */
+function contentTypeFor(key: string): string {
+  const ext = key.toLowerCase().slice(key.lastIndexOf('.'));
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key');
   if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 });
@@ -44,7 +54,7 @@ export async function GET(req: NextRequest) {
     console.log('[s3-image] HIT local cache');
     const buf = fs.readFileSync(localPath);
     return new Response(toArrayBuffer(buf), {
-      headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600', 'X-Cache': 'HIT' },
+      headers: { 'Content-Type': contentTypeFor(key), 'Cache-Control': 'public, max-age=3600', 'X-Cache': 'HIT' },
     });
   }
 
@@ -74,6 +84,6 @@ export async function GET(req: NextRequest) {
 
   const ab = imageBytes.buffer.slice(imageBytes.byteOffset, imageBytes.byteOffset + imageBytes.byteLength) as ArrayBuffer;
   return new Response(ab, {
-    headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600', 'X-Cache': 'MISS' },
+    headers: { 'Content-Type': contentTypeFor(key), 'Cache-Control': 'public, max-age=3600', 'X-Cache': 'MISS' },
   });
 }

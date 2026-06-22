@@ -15,6 +15,7 @@ import {
   projectsCollection, plansCollection, planAnnotationsCollection, locationsCollection,
 } from '@db/index';
 import { useAuth } from '@context/AuthContext';
+import { useI18n, tx } from '@i18n/index';
 import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
 import type User from '@models/User';
@@ -64,14 +65,16 @@ function getWeekBoundaries(projectStart: Date): Array<{ start: number; end: numb
 
 // ── Calendario desplegable (Modal) ───────────────────────────────────────────
 
-const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const MONTHS = ['historical.monthJanuary','historical.monthFebruary','historical.monthMarch','historical.monthApril','historical.monthMay','historical.monthJune',
+  'historical.monthJuly','historical.monthAugust','historical.monthSeptember','historical.monthOctober','historical.monthNovember','historical.monthDecember'];
+const DAY_NAMES = ['historical.dayMon','historical.dayTue','historical.dayWed','historical.dayThu','historical.dayFri','historical.daySat','historical.daySun'];
 const SCREEN_W = Dimensions.get('window').width;
 const SCREEN_H = Dimensions.get('window').height;
 
 function CalendarPicker({ value, onChange, label }: {
   value: string; onChange: (d: string) => void; label: string;
 }) {
+  const { t } = useI18n();
   const init = value ? new Date(value + 'T12:00:00') : new Date();
   const [open, setOpen] = useState(false);
   const [vy, setVy] = useState(init.getFullYear());
@@ -115,7 +118,7 @@ function CalendarPicker({ value, onChange, label }: {
     <View style={cal.wrap}>
       <Text style={cal.label}>{label}</Text>
       <TouchableOpacity ref={btnRef} style={cal.input} onPress={openCalendar} activeOpacity={0.8}>
-        <Text style={[cal.inputTxt, !value && cal.placeholder]}>{value || 'Seleccionar'}</Text>
+        <Text style={[cal.inputTxt, !value && cal.placeholder]}>{value || t('historical.calendarSelect')}</Text>
         <Text style={cal.caret}>{open ? '▲' : '▼'}</Text>
       </TouchableOpacity>
 
@@ -128,12 +131,12 @@ function CalendarPicker({ value, onChange, label }: {
           >
             <View style={cal.nav}>
               <TouchableOpacity onPress={prev} style={cal.navBtn}><Text style={cal.navTxt}>◀</Text></TouchableOpacity>
-              <Text style={cal.monthTxt}>{MONTHS[vm]} {vy}</Text>
+              <Text style={cal.monthTxt}>{t(MONTHS[vm])} {vy}</Text>
               <TouchableOpacity onPress={next} style={cal.navBtn}><Text style={cal.navTxt}>▶</Text></TouchableOpacity>
             </View>
             <View style={cal.dayNames}>
-              {['Lu','Ma','Mi','Ju','Vi','Sa','Do'].map(n => (
-                <Text key={n} style={cal.dayName}>{n}</Text>
+              {DAY_NAMES.map(n => (
+                <Text key={n} style={cal.dayName}>{t(n)}</Text>
               ))}
             </View>
             <View style={cal.grid}>
@@ -151,7 +154,7 @@ function CalendarPicker({ value, onChange, label }: {
             </View>
             {!!value && (
               <TouchableOpacity style={cal.clear} onPress={() => { onChange(''); setOpen(false); }}>
-                <Text style={cal.clearTxt}>Limpiar fecha</Text>
+                <Text style={cal.clearTxt}>{t('historical.calendarClear')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -168,6 +171,7 @@ function AnalysisCard({ title, a, b, labelA, labelB, colorA, colorB, onLongPress
   labelA: string; labelB: string; colorA: string; colorB: string;
   onLongPress?: () => void;
 }) {
+  const { t } = useI18n();
   const total = a + b;
   const pctA = total > 0 ? Math.round((a / total) * 100) : 0;
   const pctB = 100 - pctA;
@@ -176,10 +180,10 @@ function AnalysisCard({ title, a, b, labelA, labelB, colorA, colorB, onLongPress
       <View>
         <Text style={styles.chartTitle}>{title}</Text>
         {onLongPress && (
-          <Text style={styles.longPressHint}>Toca para ver detalle</Text>
+          <Text style={styles.longPressHint}>{t('historical.tapForDetail')}</Text>
         )}
         {total === 0 ? (
-          <Text style={styles.noData}>Sin datos</Text>
+          <Text style={styles.noData}>{t('historical.noData')}</Text>
         ) : (
           <>
             <View style={styles.propBar}>
@@ -213,6 +217,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
   protocols: Protocol[]; projectStart: Date; locations: Location[];
   locMap: Record<string, Location>; onNavigateProtocol: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
   const [weekModal, setWeekModal] = useState<{ label: string; items: Protocol[] } | null>(null);
 
@@ -268,9 +273,9 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
       <View style={styles.weekHeader}>
         <View style={styles.weekBadge}>
           <Text style={styles.weekBadgeNum}>{approved}/{total}</Text>
-          <Text style={styles.weekBadgeLbl}>completados</Text>
+          <Text style={styles.weekBadgeLbl}>{t('historical.completed')}</Text>
         </View>
-        <Text style={styles.sectionTitle}>Avance semanal</Text>
+        <Text style={styles.sectionTitle}>{t('historical.weeklyProgress')}</Text>
         <View style={{ width: 70 }} />
       </View>
 
@@ -281,7 +286,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
             style={[styles.specChip, !selectedSpecialty && styles.specChipActive]}
             onPress={() => setSelectedSpecialty('')}
           >
-            <Text style={[styles.specChipTxt, !selectedSpecialty && styles.specChipTxtActive]}>Todas</Text>
+            <Text style={[styles.specChipTxt, !selectedSpecialty && styles.specChipTxtActive]}>{t('historical.allFilter')}</Text>
           </TouchableOpacity>
           {uniqueSpecialties.map(sp => (
             <TouchableOpacity
@@ -304,7 +309,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
                 key={i}
                 style={{ width: BAR_W, alignItems: 'center', justifyContent: 'flex-end', height: CHART_H + 36 }}
                 onPress={() => setWeekModal({
-                  label: `Semana ${i + 1}`,
+                  label: t('historical.weekLabel', { n: i + 1 }),
                   items: weekProtocols[i],
                 })}
                 activeOpacity={0.85}
@@ -324,9 +329,9 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
       <Modal visible={!!weekModal} transparent animationType="fade" onRequestClose={() => setWeekModal(null)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setWeekModal(null)}>
           <View style={styles.weekDetailCard} onStartShouldSetResponder={() => true}>
-            <Text style={styles.weekDetailTitle}>{weekModal?.label} — Protocolos aprobados</Text>
+            <Text style={styles.weekDetailTitle}>{t('historical.weekApprovedTitle', { week: weekModal?.label ?? '' })}</Text>
             {(weekModal?.items.length ?? 0) === 0 ? (
-              <Text style={styles.weekDetailEmpty}>Sin protocolos aprobados esta semana.</Text>
+              <Text style={styles.weekDetailEmpty}>{t('historical.weekNoApproved')}</Text>
             ) : (
               <ScrollView style={{ maxHeight: 320 }}>
                 {weekModal?.items.map((p, idx) => {
@@ -352,7 +357,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
               </ScrollView>
             )}
             <TouchableOpacity style={styles.weekDetailClose} onPress={() => setWeekModal(null)}>
-              <Text style={styles.weekDetailCloseTxt}>Cerrar</Text>
+              <Text style={styles.weekDetailCloseTxt}>{t('historical.close')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -364,6 +369,7 @@ function WeeklyBarChart({ protocols, projectStart, locations, locMap, onNavigate
 // ── Gráfico horizontal por especialidad ──────────────────────────────────────
 
 function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { protocols: Protocol[]; locations: Location[]; onNavigateProtocol: (id: string) => void; }) {
+  const { t } = useI18n();
   const [specModal, setSpecModal] = useState<{ name: string; items: Protocol[] } | null>(null);
 
   const locSpecMap = useMemo(() => {
@@ -425,11 +431,11 @@ function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { proto
 
   return (
     <View style={styles.specCard}>
-      <Text style={styles.sectionTitle}>Avance por especialidad</Text>
+      <Text style={styles.sectionTitle}>{t('historical.specialtyProgress')}</Text>
       <View style={styles.specLegendRow}>
-        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: '#c8d0db' }]} /><Text style={styles.specLegTxt}>Pendiente</Text></View>
-        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: Colors.success }]} /><Text style={styles.specLegTxt}>Aprobados</Text></View>
-        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: Colors.danger }]} /><Text style={styles.specLegTxt}>Rechazados</Text></View>
+        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: '#c8d0db' }]} /><Text style={styles.specLegTxt}>{t('historical.legendPending')}</Text></View>
+        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: Colors.success }]} /><Text style={styles.specLegTxt}>{t('historical.legendApproved')}</Text></View>
+        <View style={styles.specLegItem}><View style={[styles.specDot, { backgroundColor: Colors.danger }]} /><Text style={styles.specLegTxt}>{t('historical.legendRejected')}</Text></View>
       </View>
       {data.map(({ name, total, approved, rejected }) => {
         const appPct = total > 0 ? Math.min((approved / total) * 100, 100) : 0;
@@ -457,15 +463,15 @@ function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { proto
           </TouchableOpacity>
         );
       })}
-      <Text style={styles.longPressHint}>Mantén presionada una barra para ver detalle</Text>
+      <Text style={styles.longPressHint}>{t('historical.specialtyLongPressHint')}</Text>
 
       {/* Modal detalle especialidad */}
       <Modal visible={!!specModal} transparent animationType="fade" onRequestClose={() => setSpecModal(null)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSpecModal(null)}>
           <View style={styles.weekDetailCard} onStartShouldSetResponder={() => true}>
-            <Text style={styles.weekDetailTitle}>{specModal?.name} — Protocolos</Text>
+            <Text style={styles.weekDetailTitle}>{t('historical.specialtyTitle', { name: specModal?.name ?? '' })}</Text>
             {(specModal?.items.length ?? 0) === 0 ? (
-              <Text style={styles.weekDetailEmpty}>Sin protocolos en esta especialidad.</Text>
+              <Text style={styles.weekDetailEmpty}>{t('historical.specialtyNoProtocols')}</Text>
             ) : (
               <ScrollView style={{ maxHeight: 360 }}>
                 {specModal?.items
@@ -492,7 +498,7 @@ function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { proto
                         </View>
                         {(isApproved || isRejected) && (
                           <View style={[styles.specStatusBadge, { backgroundColor: isApproved ? Colors.success : Colors.danger }]}>
-                            <Text style={styles.specStatusTxt}>{isApproved ? 'Aprobado' : 'Rechazado'}</Text>
+                            <Text style={styles.specStatusTxt}>{isApproved ? t('historical.statusApproved') : t('historical.statusRejected')}</Text>
                           </View>
                         )}
                         <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
@@ -502,7 +508,7 @@ function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { proto
               </ScrollView>
             )}
             <TouchableOpacity style={styles.weekDetailClose} onPress={() => setSpecModal(null)}>
-              <Text style={styles.weekDetailCloseTxt}>Cerrar</Text>
+              <Text style={styles.weekDetailCloseTxt}>{t('historical.close')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -514,6 +520,7 @@ function SpecialtyBarChart({ protocols, locations, onNavigateProtocol }: { proto
 // ── Pantalla principal ────────────────────────────────────────────────────────
 
 export default function HistoricalScreen({ navigation, route }: Props) {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour, unregisterMeasure, registerMeasure } = useTour();
   const mainScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -673,12 +680,12 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
   const deleteNote = (note: DashboardNote) => {
     Alert.alert(
-      'Eliminar anotación',
-      '¿Estás seguro de que deseas eliminar esta anotación?',
+      t('historical.deleteNoteTitle'),
+      t('historical.deleteNoteMsg'),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('historical.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar', style: 'destructive',
+          text: t('historical.delete'), style: 'destructive',
           onPress: async () => {
             await database.write(async () => { await note.destroyPermanently(); });
           },
@@ -705,7 +712,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Dashboard"
+        title={t('historical.headerTitle')}
         onBack={() => navigation.goBack()}
         rightContent={
           <TouchableOpacity onPress={() => jumpToStep('dashboard_project_filter')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -721,7 +728,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
           <TouchableOpacity
             style={[styles.chip, selectedProjectId === null && styles.chipActive]}
             onPress={() => setSelectedProjectId(null)}>
-            <Text style={[styles.chipTxt, selectedProjectId === null && styles.chipTxtActive]}>Todos</Text>
+            <Text style={[styles.chipTxt, selectedProjectId === null && styles.chipTxtActive]}>{t('historical.allProjects')}</Text>
           </TouchableOpacity>
           {projects.map((p, pIdx) => (
             <TouchableOpacity key={p.id}
@@ -740,11 +747,11 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
         {/* Filtros de fecha */}
         <View ref={dashboardDateFiltersRef} style={styles.filterCard}>
-          <Text style={styles.filterTitle}>Filtros por fecha</Text>
-          <Text style={styles.filterNote}>Afectan: aprobados/rechazados y observaciones</Text>
+          <Text style={styles.filterTitle}>{t('historical.dateFiltersTitle')}</Text>
+          <Text style={styles.filterNote}>{t('historical.dateFiltersNote')}</Text>
           <View style={styles.filterRow}>
-            <CalendarPicker label="Fecha inicial" value={dateFrom} onChange={setDateFrom} />
-            <CalendarPicker label="Fecha final" value={dateTo} onChange={setDateTo} />
+            <CalendarPicker label={t('historical.dateFrom')} value={dateFrom} onChange={setDateFrom} />
+            <CalendarPicker label={t('historical.dateTo')} value={dateTo} onChange={setDateTo} />
           </View>
         </View>
 
@@ -752,9 +759,9 @@ export default function HistoricalScreen({ navigation, route }: Props) {
         <View style={styles.chartsRow}>
           <View ref={dashboardApprovedRejectedRef} style={{ flex: 1 }} onLayout={dashboardApprovedRejectedLayout}>
             <AnalysisCard
-              title="Aprobados vs Rechazados"
+              title={t('historical.approvedVsRejected')}
               a={approved} b={rejected}
-              labelA="Aprobados" labelB="Rechazados"
+              labelA={t('historical.labelApproved')} labelB={t('historical.labelRejected')}
               colorA={Colors.success} colorB={Colors.danger}
               onLongPress={
                 selectedProjectId
@@ -768,9 +775,9 @@ export default function HistoricalScreen({ navigation, route }: Props) {
           </View>
           <View ref={dashboardObsStatusRef} style={{ flex: 1 }} onLayout={dashboardObsStatusLayout}>
             <AnalysisCard
-              title="Obs. Abiertas vs Resueltas"
+              title={t('historical.obsOpenVsClosed')}
               a={obsOpen} b={obsClosed}
-              labelA="Abiertas" labelB="Resueltas"
+              labelA={t('historical.labelOpen')} labelB={t('historical.labelResolved')}
               colorA="#e37400" colorB={Colors.secondary}
               onLongPress={
                 selectedProjectId
@@ -810,11 +817,11 @@ export default function HistoricalScreen({ navigation, route }: Props) {
 
         {/* Anotaciones */}
         <View ref={dashboardNotesRef} style={styles.notesSection} onLayout={dashboardNotesLayout}>
-          <Text style={styles.sectionTitle}>Anotaciones</Text>
+          <Text style={styles.sectionTitle}>{t('historical.notesTitle')}</Text>
           <View style={styles.noteInputRow}>
             <TextInput
               style={styles.noteInput}
-              placeholder="Escribe una anotación..."
+              placeholder={t('historical.notePlaceholder')}
               value={noteText}
               onChangeText={setNoteText}
               multiline
@@ -822,7 +829,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={[styles.noteSaveBtn, !noteText.trim() && styles.btnDisabled]}
               onPress={saveNote} disabled={!noteText.trim()}>
-              <Text style={styles.noteSaveBtnText}>Guardar</Text>
+              <Text style={styles.noteSaveBtnText}>{t('historical.save')}</Text>
             </TouchableOpacity>
           </View>
           {notes.map(note => {
@@ -844,13 +851,13 @@ export default function HistoricalScreen({ navigation, route }: Props) {
                     />
                     <View style={styles.noteEditActions}>
                       <TouchableOpacity style={styles.noteActionBtn} onPress={cancelEditNote}>
-                        <Text style={styles.noteActionBtnText}>Cancelar</Text>
+                        <Text style={styles.noteActionBtnText}>{tx('historical.cancel')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.noteActionBtn, styles.noteActionBtnPrimary, !editingText.trim() && styles.btnDisabled]}
                         onPress={() => updateNote(note)}
                         disabled={!editingText.trim()}>
-                        <Text style={[styles.noteActionBtnText, styles.noteActionBtnTextPrimary]}>Guardar</Text>
+                        <Text style={[styles.noteActionBtnText, styles.noteActionBtnTextPrimary]}>{tx('historical.save')}</Text>
                       </TouchableOpacity>
                     </View>
                   </>
@@ -859,7 +866,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
                     <Text style={styles.noteContent}>{note.content}</Text>
                     <View style={styles.noteFooter}>
                       <Text style={styles.noteMeta}>
-                        {nameMap[note.createdById] ?? '—'} · {new Date(t).toLocaleString('es-CL')}
+                        {nameMap[note.createdById] ?? tx('historical.unknownAuthor')} · {new Date(t).toLocaleString('es-CL')}
                       </Text>
                       {isOwner && (
                         <View style={styles.noteActions}>
@@ -879,7 +886,7 @@ export default function HistoricalScreen({ navigation, route }: Props) {
           })}
           {notes.length === 0 && (
             <View style={styles.emptyNote}>
-              <Text style={styles.emptyNoteText}>Sin anotaciones aún.</Text>
+              <Text style={styles.emptyNoteText}>{t('historical.notesEmpty')}</Text>
             </View>
           )}
         </View>

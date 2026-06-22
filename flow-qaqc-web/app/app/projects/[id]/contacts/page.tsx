@@ -11,6 +11,7 @@ import {
   useContacts, useCreateContact, useUpdateContact, useDeleteContact,
 } from '@hooks/useContacts';
 import { cn } from '@lib/utils';
+import { useI18n } from '@lib/i18n';
 import type { PhoneContact } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ function formatPhone(raw: string): string {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
+  const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
 
   const { data: projects = [] } = useProjects();
@@ -61,12 +63,12 @@ export default function ContactsPage() {
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <PageHeader
-        title={project?.name ?? 'Proyecto'}
-        subtitle={`${contacts.length} contacto${contacts.length !== 1 ? 's' : ''}`}
+        title={project?.name ?? t('webMisc.projectFallback')}
+        subtitle={t('webMisc.contactsSubtitle', { count: contacts.length, plural: contacts.length !== 1 ? 's' : '' })}
         crumbs={[
-          { label: 'Proyectos', href: '/app/projects' },
+          { label: t('webMisc.crumbProjects'), href: '/app/projects' },
           { label: project?.name ?? '...', href: `/app/projects/${projectId}/locations` },
-          { label: 'Contactos' },
+          { label: t('webMisc.crumbContacts') },
         ]}
         syncing={isLoading}
         rightContent={
@@ -75,7 +77,7 @@ export default function ContactsPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-primary text-white hover:bg-primary/90 transition"
           >
             <Plus size={14} />
-            Nuevo
+            {t('webMisc.new')}
           </button>
         }
       />
@@ -86,7 +88,7 @@ export default function ContactsPage() {
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, teléfono o cargo..."
+          placeholder={t('webMisc.searchContactsPlaceholder')}
           className="flex-1 bg-surface border border-border rounded-md px-3 py-2 text-sm text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
         />
         {search && (
@@ -107,8 +109,8 @@ export default function ContactsPage() {
             <Phone size={36} className="text-[#8896a5]" />
             <p className="text-[#8896a5] font-semibold text-sm text-center">
               {contacts.length === 0
-                ? 'No hay contactos aún.\nPresiona "Nuevo" para agregar uno.'
-                : 'Sin resultados para la búsqueda.'}
+                ? t('webMisc.noContactsYet')
+                : t('webMisc.noSearchResults')}
             </p>
           </div>
         ) : (
@@ -153,6 +155,7 @@ function ContactCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="bg-white rounded-xl shadow-subtle border border-transparent p-4 flex items-center gap-3 hover:shadow-card hover:border-primary/20 transition group">
       {/* Avatar */}
@@ -188,14 +191,14 @@ function ContactCard({
         <button
           onClick={onEdit}
           className="p-1.5 rounded-lg text-[#8896a5] hover:text-primary hover:bg-primary/10 transition"
-          title="Editar"
+          title={t('webMisc.edit')}
         >
           <Pencil size={14} />
         </button>
         <button
           onClick={onDelete}
           className="p-1.5 rounded-lg text-[#8896a5] hover:text-danger hover:bg-danger/10 transition"
-          title="Eliminar"
+          title={t('common.delete')}
         >
           <Trash2 size={14} />
         </button>
@@ -213,6 +216,7 @@ function ContactFormModal({
   contact: PhoneContact | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const isEdit = !!contact;
   const createMut = useCreateContact(projectId);
   const updateMut = useUpdateContact(projectId);
@@ -227,8 +231,8 @@ function ContactFormModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (!name.trim()) { setError('El nombre es obligatorio.'); return; }
-    if (!phone.trim()) { setError('El teléfono es obligatorio.'); return; }
+    if (!name.trim()) { setError(t('webMisc.nameRequired')); return; }
+    if (!phone.trim()) { setError(t('webMisc.phoneRequired')); return; }
 
     try {
       if (isEdit) {
@@ -238,7 +242,7 @@ function ContactFormModal({
       }
       onClose();
     } catch {
-      setError('Error al guardar. Intenta nuevamente.');
+      setError(t('webMisc.saveErrorRetry'));
     }
   }
 
@@ -248,7 +252,7 @@ function ContactFormModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-divider">
           <h2 className="font-bold text-navy text-base">
-            {isEdit ? 'Editar contacto' : 'Nuevo contacto'}
+            {isEdit ? t('webMisc.editContact') : t('webMisc.newContact')}
           </h2>
           <button onClick={onClose} className="text-[#8896a5] hover:text-navy transition">
             <X size={18} />
@@ -257,29 +261,29 @@ function ContactFormModal({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-5 py-4 flex flex-col gap-3">
-          <Field label="Nombre *">
+          <Field label={t('webMisc.nameLabel')}>
             <input
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="Ej. Juan Pérez"
+              placeholder={t('webMisc.contactNamePlaceholder')}
               className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
               autoFocus
             />
           </Field>
-          <Field label="Teléfono *">
+          <Field label={t('webMisc.phoneLabel')}>
             <input
               value={phone}
               onChange={e => setPhone(e.target.value)}
-              placeholder="Ej. 999 123 456"
+              placeholder={t('webMisc.phonePlaceholder')}
               type="tel"
               className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
             />
           </Field>
-          <Field label="Cargo">
+          <Field label={t('webMisc.jobTitleLabel')}>
             <input
               value={role}
               onChange={e => setRole(e.target.value)}
-              placeholder="Ej. Residente de obra"
+              placeholder={t('webMisc.jobTitlePlaceholder')}
               className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-sm text-navy placeholder:text-[#8896a5] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
             />
           </Field>
@@ -294,7 +298,7 @@ function ContactFormModal({
               onClick={onClose}
               className="flex-1 py-2.5 rounded-xl border border-border text-sm font-semibold text-[#4a5568] hover:bg-surface transition"
             >
-              Cancelar
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -309,7 +313,7 @@ function ContactFormModal({
               ) : (
                 <>
                   <Check size={14} />
-                  {isEdit ? 'Guardar cambios' : 'Agregar'}
+                  {isEdit ? t('webMisc.saveChanges') : t('webMisc.add')}
                 </>
               )}
             </button>
@@ -329,6 +333,7 @@ function DeleteConfirmModal({
   projectId: string;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const deleteMut = useDeleteContact(projectId);
 
   async function handleDelete() {
@@ -344,8 +349,8 @@ function DeleteConfirmModal({
             <Trash2 size={18} className="text-danger" />
           </div>
           <div>
-            <p className="font-bold text-navy text-sm">Eliminar contacto</p>
-            <p className="text-[#8896a5] text-xs mt-0.5">Esta acción no se puede deshacer.</p>
+            <p className="font-bold text-navy text-sm">{t('webMisc.deleteContact')}</p>
+            <p className="text-[#8896a5] text-xs mt-0.5">{t('webMisc.cannotUndo')}</p>
           </div>
         </div>
 
@@ -359,14 +364,14 @@ function DeleteConfirmModal({
             onClick={onClose}
             className="flex-1 py-2.5 rounded-xl border border-border text-sm font-semibold text-[#4a5568] hover:bg-surface transition"
           >
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleDelete}
             disabled={deleteMut.isPending}
             className="flex-1 py-2.5 rounded-xl bg-danger text-white text-sm font-bold hover:bg-red-700 transition disabled:opacity-60"
           >
-            {deleteMut.isPending ? 'Eliminando…' : 'Eliminar'}
+            {deleteMut.isPending ? t('webMisc.deleting') : t('common.delete')}
           </button>
         </div>
       </div>

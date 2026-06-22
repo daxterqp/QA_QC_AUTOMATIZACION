@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronRight, Loader2, FileText, AlertCircle, Trash2 } from 'lucide-react';
+import { ChevronRight, Loader2, FileText, AlertCircle } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
-import { useLocations, useLocationProtocols, useCreateProtocolInstance, useDeleteProtocols, type TemplateRow } from '@hooks/useLocations';
-import { useProjects } from '@hooks/useProjects';
+import { useLocations, useLocationProtocols, useCreateProtocolInstance, fetchTemplateDirectives, type TemplateRow } from '@hooks/useLocations';
+import { useProjects, useProjectFlags } from '@hooks/useProjects';
+import { RepeatPromptModal } from '@components/parametric/RepeatPromptModal';
+import type { RepeatDirective } from '@lib/parametricExpand';
 import { useAuth } from '@lib/auth-context';
 import { cn } from '@lib/utils';
+import { useI18n } from '@lib/i18n';
 import type { ProtocolStatus } from '@/types';
 
 const STATUS_COLORS: Record<ProtocolStatus, string> = {
@@ -18,17 +21,18 @@ const STATUS_COLORS: Record<ProtocolStatus, string> = {
   REJECTED:    'bg-danger/20 text-danger',
 };
 
-const STATUS_LABELS: Record<ProtocolStatus, string> = {
-  DRAFT:       'Sin iniciar',
-  IN_PROGRESS: 'En progreso',
-  SUBMITTED:   'En revisión',
-  APPROVED:    'Aprobado',
-  REJECTED:    'Rechazado',
+const STATUS_LABEL_KEYS: Record<ProtocolStatus, string> = {
+  DRAFT:       'webMisc.statusDraft',
+  IN_PROGRESS: 'webMisc.statusInProgress',
+  SUBMITTED:   'webMisc.statusSubmitted',
+  APPROVED:    'webMisc.statusApproved',
+  REJECTED:    'webMisc.statusRejected',
 };
 
 export default function LocationProtocolsPage() {
   const { id: projectId, locId: locationId } = useParams<{ id: string; locId: string }>();
   const router = useRouter();
+  const { t } = useI18n();
   const { currentUser } = useAuth();
 
   const { data: projects = [] } = useProjects();
@@ -40,58 +44,64 @@ export default function LocationProtocolsPage() {
   const location = locations.find(l => l.id === locationId);
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
-  const deleteProtocols = useDeleteProtocols(locationId, projectId);
 
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
-  const [deleteMode, setDeleteMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
+  // v25 — Plantillas paramétricas: si el flag está activo y la plantilla tiene
+  // directivas `repeat-[...]`, mostramos un modal pidiendo N por grupo ANTES
+  // de crear la instancia. Llamamos `fetchTemplateDirectives` imperativamente
+  // (no hook reactivo) para evitar races cuando el usuario hace clics rápidos
+  // en diferentes plantillas.
+  const { data: projectFlags } = useProjectFlags(projectId);
+  const [pendingModal, setPendingModal] = useState<{ row: TemplateRow; directives: RepeatDirective[] } | null>(null);
 
-  function toggleSelect(id: string) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  async function handleDelete() {
-    if (selected.size === 0) return;
-    setDeleting(true);
+  async function createAndNavigate(row: TemplateRow, repeatChoices?: Record<string, number>) {
+    setPendingTemplateId(row.template.id);
     try {
-      await deleteProtocols.mutateAsync(Array.from(selected));
-      setSelected(new Set());
-      setDeleteMode(false);
-    } catch (e) {
-      console.error('[protocols/delete] error:', e);
+      const { protocol: created, warnings } = await createInstance.mutateAsync({
+        templateId: row.template.id,
+        templateName: row.template.name,
+        locationName: location?.name ?? '',
+        repeatChoices,
+      });
+      // v25 — Si la expansión paramétrica encontró cross-offset refs no soportadas,
+      // mostrar warnings ANTES de navegar para que el usuario sepa que parte del
+      // protocolo tendrá celdas con error inline.
+      if (warnings.length > 0) {
+        alert(t('webMisc.protocolCreatedWarnings', { warnings: warnings.join('\n\n') }));
+      }
+      router.push(`/app/projects/${projectId}/protocols/${created.id}/fill`);
     } finally {
-      setDeleting(false);
+      setPendingTemplateId(null);
     }
   }
-
-  const hasInstances = rows.some(r => r.instance !== null);
 
   const handleOpenProtocol = async (row: TemplateRow) => {
     if (pendingTemplateId) return;  // Evitar doble tap
-    let instanceId = row.instance?.id;
+    const instanceId = row.instance?.id;
 
     if (!instanceId) {
-      setPendingTemplateId(row.template.id);
-      try {
-        const created = await createInstance.mutateAsync({
-          templateId: row.template.id,
-          templateName: row.template.name,
-          locationName: location?.name ?? '',
-        });
-        instanceId = created.id;
-      } finally {
-        setPendingTemplateId(null);
+      // Plantillas paramétricas: fetch imperativo de directivas, sin race con react-query.
+      if (projectFlags?.parametric_templates) {
+        setPendingTemplateId(row.template.id);
+        try {
+          const directives = await fetchTemplateDirectives(row.template.id);
+          if (directives.length > 0) {
+            setPendingModal({ row, directives });
+            return; // El usuario confirma en el modal → createAndNavigate(row, choices)
+          }
+        } catch (e) {
+          console.warn('[parametric] fetchTemplateDirectives falló:', e);
+        } finally {
+          setPendingTemplateId(null);
+        }
       }
+      // Sin directivas o flag OFF → crear directo
+      await createAndNavigate(row);
+      return;
     }
 
     const status = row.instance?.status ?? 'DRAFT';
-    const canFill = !row.instance || status === 'DRAFT' || status === 'IN_PROGRESS' || status === 'REJECTED';
-
+    const canFill = status === 'DRAFT' || status === 'IN_PROGRESS' || status === 'REJECTED';
     if (isJefe && !canFill) {
       router.push(`/app/projects/${projectId}/protocols/${instanceId}/audit`);
     } else {
@@ -102,54 +112,15 @@ export default function LocationProtocolsPage() {
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <PageHeader
-        title={location?.name ?? 'Ubicación'}
-        subtitle="Protocolos requeridos"
+        title={location?.name ?? t('webMisc.locationFallback')}
+        subtitle={t('webMisc.requiredProtocols')}
         crumbs={[
-          { label: 'Proyectos', href: '/app/projects' },
+          { label: t('webMisc.crumbProjects'), href: '/app/projects' },
           { label: project?.name ?? '...', href: `/app/projects/${projectId}/locations` },
           { label: location?.name ?? '...' },
         ]}
         syncing={isLoading}
-        rightContent={isJefe && !deleteMode ? (
-          <button
-            onClick={() => { setDeleteMode(true); setSelected(new Set()); }}
-            disabled={!hasInstances}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25
-                       text-white text-xs font-bold transition-colors disabled:opacity-40"
-            title="Eliminar protocolos"
-          >
-            <Trash2 size={14} />
-          </button>
-        ) : undefined}
       />
-
-      {/* Barra de eliminación */}
-      {deleteMode && (
-        <div className="bg-red-50 border-b border-red-200 px-4 py-2.5 flex items-center justify-between">
-          <span className="text-sm font-semibold text-danger">
-            {selected.size > 0
-              ? `${selected.size} protocolo${selected.size !== 1 ? 's' : ''} seleccionado${selected.size !== 1 ? 's' : ''}`
-              : 'Selecciona protocolos a eliminar'}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setDeleteMode(false); setSelected(new Set()); }}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-600 hover:bg-gray-100 transition"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={selected.size === 0 || deleting}
-              className="px-3 py-1.5 rounded-lg bg-danger text-white text-xs font-bold
-                         disabled:opacity-40 hover:bg-red-700 transition flex items-center gap-1.5"
-            >
-              {deleting && <Loader2 size={12} className="animate-spin" />}
-              {deleting ? 'Eliminando...' : `Confirmar (${selected.size})`}
-            </button>
-          </div>
-        </div>
-      )}
 
       <div className="flex-1 p-4 flex flex-col gap-2.5">
         {isLoading ? (
@@ -167,8 +138,8 @@ export default function LocationProtocolsPage() {
           <div className="flex flex-col items-center py-16 gap-3">
             <AlertCircle size={36} className="text-[#8896a5]" />
             <p className="text-[#8896a5] text-sm text-center leading-relaxed">
-              Esta ubicación no tiene protocolos vinculados.<br />
-              Revisa la columna ID_Protocolos en el Excel de ubicaciones.
+              {t('webMisc.noLinkedProtocols')}<br />
+              {t('webMisc.checkProtocolColumn')}
             </p>
           </div>
         ) : (
@@ -180,58 +151,49 @@ export default function LocationProtocolsPage() {
               onOpen={() => handleOpenProtocol(row)}
               loading={pendingTemplateId === row.template.id}
               disabled={!!pendingTemplateId}
-              deleteMode={deleteMode}
-              isSelected={row.instance ? selected.has(row.instance.id) : false}
-              onToggle={row.instance ? () => toggleSelect(row.instance!.id) : undefined}
             />
           ))
         )}
       </div>
+
+      {/* v25 — Modal de prompt N para plantillas paramétricas */}
+      {pendingModal && (
+        <RepeatPromptModal
+          directives={pendingModal.directives}
+          onCancel={() => setPendingModal(null)}
+          onConfirm={(choices) => {
+            const row = pendingModal.row;
+            setPendingModal(null);
+            void createAndNavigate(row, choices);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ── Fila de protocolo ─────────────────────────────────────────────────────────
 function ProtocolRow({
-  row, isJefe, onOpen, loading, disabled, deleteMode, isSelected, onToggle,
+  row, isJefe, onOpen, loading, disabled,
 }: {
   row: TemplateRow;
   isJefe: boolean;
   onOpen: () => void;
   loading?: boolean;
   disabled?: boolean;
-  deleteMode?: boolean;
-  isSelected?: boolean;
-  onToggle?: () => void;
 }) {
+  const { t } = useI18n();
   const status = row.instance?.status ?? null;
   const canFill = isJefe && (!status || status === 'DRAFT' || status === 'IN_PROGRESS' || status === 'REJECTED');
-  const canSelect = deleteMode && row.instance !== null;
 
   const cls = cn(
     'w-full bg-white rounded-xl shadow-subtle p-4 flex items-center justify-between gap-3 text-left border transition group',
-    deleteMode && isSelected ? 'ring-2 ring-danger/50 bg-red-50/30 border-danger/20' :
-    deleteMode && !canSelect ? 'opacity-40 border-transparent' :
-    deleteMode ? 'border-transparent hover:border-danger/20' :
     'hover:shadow-card border-transparent hover:border-primary/20 disabled:opacity-60',
   );
 
   return (
-    <button
-      onClick={deleteMode ? (canSelect ? onToggle : undefined) : onOpen}
-      disabled={deleteMode ? !canSelect : disabled}
-      className={cls}
-    >
+    <button onClick={onOpen} disabled={disabled} className={cls}>
       <div className="flex items-start gap-3 flex-1 min-w-0">
-        {canSelect && (
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={onToggle}
-            className="w-4 h-4 rounded border-gray-300 text-danger focus:ring-danger/30 flex-shrink-0 mt-2.5"
-            onClick={e => e.stopPropagation()}
-          />
-        )}
         <div className="w-9 h-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
           <FileText size={16} className="text-primary" />
         </div>
@@ -240,9 +202,9 @@ function ProtocolRow({
             {row.template.name}
           </p>
           <p className="text-[#8896a5] text-[11px] mt-0.5">ID: {row.template.id_protocolo}</p>
-          {!deleteMode && canFill && (
+          {canFill && (
             <p className="text-primary text-[11px] font-bold mt-1">
-              Toca para rellenar ›
+              {t('webMisc.tapToFill')}
             </p>
           )}
         </div>
@@ -254,7 +216,7 @@ function ProtocolRow({
         ) : (
           <>
             <StatusBadge status={status} />
-            {!deleteMode && <ChevronRight size={16} className="text-[#8896a5]" />}
+            <ChevronRight size={16} className="text-[#8896a5]" />
           </>
         )}
       </div>
@@ -263,13 +225,14 @@ function ProtocolRow({
 }
 
 function StatusBadge({ status }: { status: ProtocolStatus | null }) {
+  const { t } = useI18n();
   const s = status ?? 'DRAFT';
   return (
     <span className={cn(
       'text-[11px] font-bold px-2.5 py-1 rounded-md',
       STATUS_COLORS[s]
     )}>
-      {STATUS_LABELS[s]}
+      {t(STATUS_LABEL_KEYS[s])}
     </span>
   );
 }

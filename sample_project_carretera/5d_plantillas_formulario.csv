@@ -1,0 +1,11 @@
+﻿Plantilla,Partida,Item,Método de validación,Sección
+Inspección excavadora,01.01,Nivel de aceite hidráulico,list-[OK;BAJO;CRÍTICO],Pre-uso
+Inspección excavadora,01.02,Estado de orugas,list-[OK;DESGASTE LEVE;DESGASTE GRAVE],Pre-uso
+Inspección excavadora,01.03,Presión de combustible (bar),numerico-[200:280],Operación
+Inspección excavadora,01.04,Horómetro inicial,numerico-[0:99999],Operación
+Inspección excavadora,01.05,Observaciones,comment-[],Final
+Inspección compactador,02.01,Nivel de combustible (%),numerico-[10:100],Pre-uso
+Inspección compactador,02.02,Frecuencia vibratoria (Hz),numerico-[25:35],Operación
+Inspección compactador,02.03,Amplitud vibración (mm),numerico-[0.5:2.0],Operación
+Inspección compactador,02.04,Pases sobre capa,numerico-[1:12],Operación
+Inspección compactador,02.05,Observaciones,comment-[],Final

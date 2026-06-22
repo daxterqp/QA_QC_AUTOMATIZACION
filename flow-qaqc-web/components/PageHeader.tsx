@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { cn } from '@lib/utils';
+import { useI18n } from '@lib/i18n';
 
 interface Crumb { label: string; href?: string }
 
@@ -20,6 +21,7 @@ export default function PageHeader({
   title, subtitle, crumbs, syncing, rightContent, backHref,
 }: PageHeaderProps) {
   const router = useRouter();
+  const { t } = useI18n();
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
 
@@ -83,14 +85,14 @@ export default function PageHeader({
                   ? 'text-light/80 hover:bg-white/15 hover:text-white cursor-pointer'
                   : 'text-light/15 cursor-default'
               )}
-              title="Atrás"
+              title={t('webCMisc.header.back')}
             >
               <ArrowLeft size={16} strokeWidth={2.5} />
             </button>
             <button
               onClick={() => window.history.forward()}
               className="w-7 h-7 rounded-full flex items-center justify-center text-light/15 cursor-default"
-              title="Adelante"
+              title={t('webCMisc.header.forward')}
             >
               <ArrowRight size={16} strokeWidth={2.5} />
             </button>
@@ -114,7 +116,7 @@ export default function PageHeader({
           {(subtitle || syncing) && (
             <p className="text-light/80 text-xs mt-0.5 flex items-center gap-1.5">
               {syncing && <Loader2 size={11} className="animate-spin" />}
-              {syncing ? 'Sincronizando...' : subtitle}
+              {syncing ? t('webCMisc.header.syncing') : subtitle}
             </p>
           )}
         </div>

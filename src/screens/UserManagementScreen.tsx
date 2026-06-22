@@ -1,204 +1,487 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Modal, TextInput, ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { database, usersCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
+import { useNetwork } from '@context/NetworkContext';
 import { importUsersFromExcel, UserImportError } from '@services/UserExcelImporter';
+import { pushUserToSupabase } from '@services/SupabaseSyncService';
+import { loadAccessSnapshot, grantAccess, revokeAccess, syncUserAccess } from '@services/UserAccessService';
 import type User from '@models/User';
+import { useI18n, tx } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserManagement'>;
+type Role = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR';
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  CREATOR:    { label: 'Creador',    color: '#5b2d8e' },
-  RESIDENT:   { label: 'Jefe',       color: Colors.primary },
-  SUPERVISOR: { label: 'Supervisor', color: Colors.secondary },
-  OPERATOR:   { label: 'Operario',   color: Colors.warning },
+  CREATOR:    { label: tx('usersMgmt.role.creator'),    color: '#5b2d8e' },
+  RESIDENT:   { label: tx('usersMgmt.role.resident'),       color: Colors.primary },
+  SUPERVISOR: { label: tx('usersMgmt.role.supervisor'), color: Colors.secondary },
+  OPERATOR:   { label: tx('usersMgmt.role.operator'),    color: Colors.warning },
 };
+// El Creador puede asignar estos roles (no puede crear otros Creadores desde aquí).
+const ASSIGNABLE_ROLES: Role[] = ['RESIDENT', 'SUPERVISOR', 'OPERATOR'];
 
 export default function UserManagementScreen({ navigation }: Props) {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
+  const { isOnline } = useNetwork();
+  const isCreator = currentUser?.role === 'CREATOR';
   const [users, setUsers] = useState<User[]>([]);
   const [importing, setImporting] = useState(false);
+
+  // Alta manual
+  const [showAdd, setShowAdd] = useState(false);
+  const [fName, setFName] = useState('');
+  const [fApellido, setFApellido] = useState('');
+  const [fRole, setFRole] = useState<Role>('OPERATOR');
+  const [saving, setSaving] = useState(false);
+  // Editar rol
+  const [roleEditUser, setRoleEditUser] = useState<User | null>(null);
+
+  // v44 — Accesos usuario↔proyecto (Supabase = fuente de verdad).
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [accessIdsByUser, setAccessIdsByUser] = useState<Record<string, Set<string>>>({});
+  const projName = React.useMemo(() => Object.fromEntries(projects.map(p => [p.id, p.name])), [projects]);
+  const loadAccess = useCallback(async () => {
+    try {
+      const snap = await loadAccessSnapshot();
+      setProjects(snap.projects);
+      setAccessIdsByUser(snap.byUser);
+    } catch { /* offline → tarjetas sin proyectos */ }
+  }, []);
+
+  // v44 — Modales de gestión de accesos (asignar / quitar).
+  const [showAssign, setShowAssign] = useState(false);
+  const [showRemove, setShowRemove] = useState(false);
+  const [selUsers, setSelUsers] = useState<Set<string>>(new Set());
+  const [selProjects, setSelProjects] = useState<Set<string>>(new Set());
+  const [removeProjectId, setRemoveProjectId] = useState<string | null>(null);
+  const [accessBusy, setAccessBusy] = useState(false);
+  const toggleSet = (setFn: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+    setFn(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const activeUsers = users.filter(u => (u as any).isActive !== false);
+
+  const doAssign = async () => {
+    if (selUsers.size === 0 || selProjects.size === 0) { Alert.alert(t('usersMgmt.alert.selectTitle'), t('usersMgmt.alert.selectUserProject')); return; }
+    setAccessBusy(true);
+    try {
+      const n = await grantAccess([...selUsers], [...selProjects]);
+      await loadAccess();
+      setShowAssign(false); setSelUsers(new Set()); setSelProjects(new Set());
+      Alert.alert(t('usersMgmt.alert.done'), n > 0 ? t('usersMgmt.alert.grantedSome', { count: n }) : t('usersMgmt.alert.grantedNone'));
+    } catch (e: any) { Alert.alert(t('usersMgmt.alert.error'), e?.message ?? t('usersMgmt.alert.grantFailed')); }
+    finally { setAccessBusy(false); }
+  };
+
+  const doRemove = async () => {
+    if (!removeProjectId || selUsers.size === 0) { Alert.alert(t('usersMgmt.alert.selectTitle'), t('usersMgmt.alert.selectProjectUser')); return; }
+    const pname = projName[removeProjectId] ?? t('usersMgmt.alert.theProject');
+    Alert.alert(t('usersMgmt.alert.removeAccessTitle'), t('usersMgmt.alert.removeAccessMessage', { count: selUsers.size, project: pname }), [
+      { text: t('usersMgmt.alert.cancel'), style: 'cancel' },
+      { text: t('usersMgmt.alert.remove'), style: 'destructive', onPress: async () => {
+        setAccessBusy(true);
+        try {
+          await revokeAccess([...selUsers], removeProjectId);
+          await loadAccess();
+          setShowRemove(false); setSelUsers(new Set()); setRemoveProjectId(null);
+          Alert.alert(t('usersMgmt.alert.done'), t('usersMgmt.alert.accessRevoked'));
+        } catch (e: any) { Alert.alert(t('usersMgmt.alert.error'), e?.message ?? t('usersMgmt.alert.removeFailed')); }
+        finally { setAccessBusy(false); }
+      } },
+    ]);
+  };
 
   useEffect(() => {
     const sub = usersCollection.query().observe().subscribe(setUsers);
     return () => sub.unsubscribe();
   }, []);
+  useEffect(() => { loadAccess(); }, [loadAccess]);
 
   const handleImport = async () => {
+    if (!isOnline) { Alert.alert(t('usersMgmt.alert.offlineTitle'), t('usersMgmt.alert.offlineImport')); return; }
     setImporting(true);
     try {
       const imported = await importUsersFromExcel();
       const all = await usersCollection.query().fetch();
+      // Proyectos por nombre (case-insensitive) para mapear la columna "Proyectos".
+      const snap = await loadAccessSnapshot();
+      const projByName: Record<string, string> = {};
+      for (const p of snap.projects) projByName[p.name.trim().toLowerCase()] = p.id;
+
+      const pushIds: string[] = [];                                  // usuarios a empujar a la nube
+      const accessOps: { userId: string; projectIds: string[] }[] = []; // sync de accesos (Excel con Proyectos)
+      const unmatched = new Set<string>();
 
       await database.write(async () => {
         for (const u of imported) {
-          const exists = all.find(
-            (ex) =>
-              ex.name.toLowerCase() === u.name.toLowerCase() &&
-              ex.apellido?.toLowerCase() === u.apellido.toLowerCase()
-          );
+          const exists = all.find(ex => ex.name.toLowerCase() === u.name.toLowerCase() && ex.apellido?.toLowerCase() === u.apellido.toLowerCase());
+          let userId: string;
           if (!exists) {
-            await usersCollection.create((newUser) => {
-              newUser.name = u.name;
-              newUser.apellido = u.apellido;
-              newUser.role = u.role;
-              newUser.password = u.name; // Primera contraseña = nombre
-              newUser.pin = null;
-              newUser.signatureUri = null;
+            const created = await usersCollection.create((newUser) => {
+              newUser.name = u.name; newUser.apellido = u.apellido; newUser.role = u.role;
+              newUser.password = u.name; newUser.pin = null; newUser.signatureUri = null;
+              (newUser as any).isActive = true;
             });
+            userId = (created as any).id;
+          } else {
+            userId = exists.id;
+            if (exists.role !== u.role && exists.role !== 'CREATOR') await exists.update((x) => { x.role = u.role; });
+          }
+          pushIds.push(userId);
+          if (u.projects) {
+            const ids = u.projects.map(n => { const id = projByName[n.trim().toLowerCase()]; if (!id) unmatched.add(n); return id; }).filter(Boolean) as string[];
+            accessOps.push({ userId, projectIds: ids });
           }
         }
       });
 
-      Alert.alert('Importación completada', `${imported.length} usuarios procesados.`);
+      // Empujar usuarios a la nube (necesario para que existan y puedan tener accesos/login).
+      for (const id of pushIds) { try { await pushUserToSupabase(id); } catch { /* reintenta el sync */ } }
+      // Sincronizar accesos SOLO si el Excel traía columna Proyectos (agrega nuevos, revoca faltantes).
+      for (const op of accessOps) { try { await syncUserAccess(op.userId, op.projectIds); } catch { /* */ } }
+      await loadAccess();
+
+      let msg = t('usersMgmt.alert.usersProcessed', { count: imported.length });
+      if (accessOps.length > 0) msg += t('usersMgmt.alert.projectAccessSynced');
+      if (unmatched.size > 0) msg += t('usersMgmt.alert.unmatchedProjects', { projects: [...unmatched].join(', ') });
+      Alert.alert(t('usersMgmt.alert.importDoneTitle'), msg);
     } catch (err) {
-      const msg = err instanceof UserImportError ? err.message : 'Error inesperado al importar.';
-      Alert.alert('Error', msg);
-    } finally {
-      setImporting(false);
-    }
+      Alert.alert(t('usersMgmt.alert.error'), err instanceof UserImportError ? err.message : t('usersMgmt.alert.importUnexpected'));
+    } finally { setImporting(false); }
   };
 
-  const handleDelete = (user: User) => {
-    if (user.id === currentUser?.id) {
-      Alert.alert('No permitido', 'No puedes eliminar tu propio usuario.');
-      return;
-    }
+  const handleAddUser = async () => {
+    if (saving) return;
+    const name = fName.trim();
+    if (!name) { Alert.alert(t('usersMgmt.alert.missingNameTitle'), t('usersMgmt.alert.missingNameMessage')); return; }
+    setSaving(true);
+    try {
+      const created = await database.write(async () => usersCollection.create((u) => {
+        u.name = name; u.apellido = fApellido.trim() || null; u.role = fRole;
+        u.password = name; u.pin = null; u.signatureUri = null;
+        (u as any).isActive = true;
+      }));
+      pushUserToSupabase((created as any).id).catch(() => {});
+      setShowAdd(false); setFName(''); setFApellido(''); setFRole('OPERATOR');
+      Alert.alert(t('usersMgmt.alert.userCreatedTitle'), t('usersMgmt.alert.userCreatedMessage', { name }));
+    } catch (e: any) {
+      Alert.alert(t('usersMgmt.alert.error'), e?.message ?? t('usersMgmt.alert.createUserFailed'));
+    } finally { setSaving(false); }
+  };
+
+  const handleChangeRole = async (user: User, role: Role) => {
+    setRoleEditUser(null);
+    if (user.role === role) return;
+    await database.write(async () => { await user.update((u) => { u.role = role; }); });
+    pushUserToSupabase(user.id).catch(() => {});
+  };
+
+  // v43 — Soft-delete: NO se borra de la base (conserva firmas/aprobaciones), solo
+  // se marca inactivo (pierde acceso). Sigue visible, etiquetado "inactivo".
+  const handleToggleActive = (user: User) => {
+    if (user.id === currentUser?.id) { Alert.alert(t('usersMgmt.alert.notAllowedTitle'), t('usersMgmt.alert.cannotDeactivateSelf')); return; }
+    const isActive = (user as any).isActive !== false;
     Alert.alert(
-      'Eliminar usuario',
-      `¿Eliminar a ${user.name} ${user.apellido ?? ''}?`,
+      isActive ? t('usersMgmt.alert.deactivateTitle') : t('usersMgmt.alert.reactivateTitle'),
+      isActive
+        ? t('usersMgmt.alert.deactivateMessage', { name: user.name })
+        : t('usersMgmt.alert.reactivateMessage', { name: user.name }),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('usersMgmt.alert.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar', style: 'destructive',
+          text: isActive ? t('usersMgmt.deactivate') : t('usersMgmt.reactivate'), style: isActive ? 'destructive' : 'default',
           onPress: async () => {
-            await database.write(async () => {
-              await user.destroyPermanently();
-            });
+            await database.write(async () => { await user.update((u) => { (u as any).isActive = !isActive; }); });
+            pushUserToSupabase(user.id).catch(() => {});
           },
         },
-      ]
+      ],
     );
   };
 
   const handleResetPassword = (user: User) => {
-    Alert.alert(
-      'Resetear contraseña',
-      `La contraseña de ${user.name} volverá a ser su nombre.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Resetear',
-          onPress: async () => {
-            await database.write(async () => {
-              await user.update((u) => { u.password = u.name; });
-            });
-            Alert.alert('Listo', 'Contraseña reseteada.');
-          },
+    Alert.alert(t('usersMgmt.alert.resetPasswordTitle'), t('usersMgmt.alert.resetPasswordMessage', { name: user.name }), [
+      { text: t('usersMgmt.alert.cancel'), style: 'cancel' },
+      {
+        text: t('usersMgmt.alert.resetConfirm'),
+        onPress: async () => {
+          await database.write(async () => { await user.update((u) => { u.password = u.name; }); });
+          pushUserToSupabase(user.id).catch(() => {});
+          Alert.alert(t('usersMgmt.alert.done'), t('usersMgmt.alert.passwordReset'));
         },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
     <View style={styles.container}>
-      <AppHeader title="Usuarios" onBack={() => navigation.goBack()} />
+      <AppHeader title={t('usersMgmt.title')} onBack={() => navigation.goBack()} />
 
-      <View style={styles.importBar}>
-        <TouchableOpacity
-          style={[styles.importBtn, importing && styles.btnDisabled]}
-          onPress={handleImport}
-          disabled={importing}
-        >
-          {importing
-            ? <ActivityIndicator color="#fff" size="small" />
-            : <Text style={styles.importBtnText}>+ Importar desde Excel</Text>
-          }
-        </TouchableOpacity>
-        <Text style={styles.importHint}>Columnas: Nombre · Apellido · Rol</Text>
-      </View>
+      {isCreator && (
+        <View style={styles.importBar}>
+          {/* v44 — Botón principal "Añadir usuario" (reemplaza el + del encabezado), encima de Importar. */}
+          <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
+            <Ionicons name="person-add-outline" size={18} color={Colors.white} />
+            <Text style={styles.addBtnText}>{t('usersMgmt.addUser')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.importBtn, importing && styles.btnDisabled]} onPress={handleImport} disabled={importing} activeOpacity={0.85}>
+            {importing ? <ActivityIndicator color="#fff" size="small" /> : <><Ionicons name="document-attach-outline" size={16} color={Colors.white} /><Text style={styles.importBtnText}>{t('usersMgmt.importFromExcel')}</Text></>}
+          </TouchableOpacity>
+          <Text style={styles.importHint}>{t('usersMgmt.importHint')}</Text>
+
+          {/* v44 — Gestión de accesos en lote */}
+          <View style={styles.accessRow}>
+            <TouchableOpacity style={styles.accessBtn} onPress={() => { setSelUsers(new Set()); setSelProjects(new Set()); setShowAssign(true); }} activeOpacity={0.85}>
+              <Ionicons name="person-add-outline" size={15} color={Colors.primary} />
+              <Text style={styles.accessBtnText}>{t('usersMgmt.enterProject')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.accessBtn} onPress={() => { setSelUsers(new Set()); setRemoveProjectId(null); setShowRemove(true); }} activeOpacity={0.85}>
+              <Ionicons name="person-remove-outline" size={15} color={Colors.danger} />
+              <Text style={[styles.accessBtnText, { color: Colors.danger }]}>{t('usersMgmt.removeAccess')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       <FlatList
         data={users}
         keyExtractor={(u) => u.id}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={<Text style={styles.empty}>No hay usuarios registrados.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{t('usersMgmt.empty')}</Text>}
         renderItem={({ item }) => {
           const roleInfo = ROLE_LABELS[item.role] ?? { label: item.role, color: '#666' };
           const isMe = item.id === currentUser?.id;
+          const inactive = (item as any).isActive === false;
+          const projIds = accessIdsByUser[item.id];
+          const projs = projIds ? [...projIds].map(id => projName[id]).filter(Boolean) as string[] : [];
+          const isCreatorUser = item.role === 'CREATOR';
           return (
-            <View style={[styles.card, isMe && styles.cardMe]}>
-              <View style={[styles.roleTag, { backgroundColor: roleInfo.color }]}>
-                <Text style={styles.roleTagText}>{roleInfo.label}</Text>
-              </View>
-              <View style={styles.cardInfo}>
-                <Text style={styles.userName}>{item.name} {item.apellido}</Text>
-                {isMe && <Text style={styles.meTag}>Usted</Text>}
-              </View>
-              <View style={styles.cardActions}>
+            <View style={[styles.card, isMe && styles.cardMe, inactive && styles.cardInactive]}>
+              <View style={styles.cardTopRow}>
                 <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() => handleResetPassword(item)}
+                  style={[styles.roleTag, { backgroundColor: roleInfo.color }]}
+                  disabled={!isCreator || item.role === 'CREATOR' || isMe}
+                  onPress={() => setRoleEditUser(item)}
                 >
-                  <Text style={styles.actionText}>Reset</Text>
+                  <Text style={styles.roleTagText}>{roleInfo.label}</Text>
+                  {isCreator && item.role !== 'CREATOR' && !isMe ? <Ionicons name="chevron-down" size={10} color="#fff" /> : null}
                 </TouchableOpacity>
-                {!isMe && (
-                  <TouchableOpacity
-                    style={[styles.actionBtn, styles.deleteBtn]}
-                    onPress={() => handleDelete(item)}
-                  >
-                    <Text style={[styles.actionText, { color: Colors.danger }]}>Eliminar</Text>
-                  </TouchableOpacity>
+                <View style={styles.cardInfo}>
+                  <Text style={[styles.userName, inactive && styles.userNameInactive]}>{item.name} {item.apellido}</Text>
+                  {isMe ? <Text style={styles.meTag}>{t('usersMgmt.you')}</Text> : inactive ? <Text style={styles.inactiveTag}>{t('usersMgmt.inactive')}</Text> : null}
+                </View>
+                {isCreator && (
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity style={styles.actionBtn} onPress={() => handleResetPassword(item)}>
+                      <Text style={styles.actionText}>{t('usersMgmt.reset')}</Text>
+                    </TouchableOpacity>
+                    {!isMe && (
+                      <TouchableOpacity style={[styles.actionBtn, inactive ? styles.reactivateBtn : styles.deleteBtn]} onPress={() => handleToggleActive(item)}>
+                        <Text style={[styles.actionText, { color: inactive ? Colors.success : Colors.danger }]}>{inactive ? t('usersMgmt.reactivate') : t('usersMgmt.deactivate')}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+              {/* v44 — Proyectos asignados */}
+              <View style={styles.projectsRow}>
+                <Ionicons name="folder-outline" size={13} color={Colors.textMuted} />
+                {isCreatorUser ? (
+                  <Text style={styles.allProjects}>{t('usersMgmt.allProjects')}</Text>
+                ) : projs.length === 0 ? (
+                  <Text style={styles.noProjects}>{t('usersMgmt.noProjectsAssigned')}</Text>
+                ) : (
+                  <View style={styles.chips}>
+                    {projs.slice(0, 8).map((n, i) => (
+                      <View key={i} style={styles.projChip}><Text style={styles.projChipText} numberOfLines={1}>{n}</Text></View>
+                    ))}
+                    {projs.length > 8 ? <Text style={styles.moreProjects}>+{projs.length - 8}</Text> : null}
+                  </View>
                 )}
               </View>
             </View>
           );
         }}
       />
+
+      {/* Modal: alta manual */}
+      <Modal visible={showAdd} transparent animationType="fade" onRequestClose={() => setShowAdd(false)}>
+        <View style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAdd(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('usersMgmt.addModal.title')}</Text>
+            <Text style={styles.fieldLabel}>{t('usersMgmt.field.name')}</Text>
+            <TextInput style={styles.input} value={fName} onChangeText={setFName} placeholder={t('usersMgmt.field.name')} placeholderTextColor="#bbb" autoCapitalize="words" />
+            <Text style={styles.fieldLabel}>{t('usersMgmt.field.lastName')}</Text>
+            <TextInput style={styles.input} value={fApellido} onChangeText={setFApellido} placeholder={t('usersMgmt.field.lastName')} placeholderTextColor="#bbb" autoCapitalize="words" />
+            <Text style={styles.fieldLabel}>{t('usersMgmt.field.role')}</Text>
+            <View style={styles.roleRow}>
+              {ASSIGNABLE_ROLES.map(r => (
+                <TouchableOpacity key={r} style={[styles.roleChip, fRole === r && { backgroundColor: ROLE_LABELS[r].color, borderColor: ROLE_LABELS[r].color }]} onPress={() => setFRole(r)}>
+                  <Text style={[styles.roleChipText, fRole === r && { color: '#fff' }]}>{ROLE_LABELS[r].label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.hint}>{t('usersMgmt.addModal.passwordHint')}</Text>
+            <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={handleAddUser} disabled={saving}>
+              <Text style={styles.saveBtnText}>{saving ? t('usersMgmt.creating') : t('usersMgmt.createUser')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: editar rol */}
+      <Modal visible={!!roleEditUser} transparent animationType="fade" onRequestClose={() => setRoleEditUser(null)}>
+        <View style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setRoleEditUser(null)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('usersMgmt.roleModal.title', { name: roleEditUser?.name ?? '' })}</Text>
+            <ScrollView style={{ maxHeight: 260 }}>
+              {ASSIGNABLE_ROLES.map(r => (
+                <TouchableOpacity key={r} style={styles.optionRow} onPress={() => roleEditUser && handleChangeRole(roleEditUser, r)}>
+                  <View style={[styles.roleDot, { backgroundColor: ROLE_LABELS[r].color }]} />
+                  <Text style={styles.optionText}>{ROLE_LABELS[r].label}</Text>
+                  {roleEditUser?.role === r ? <Ionicons name="checkmark" size={18} color={Colors.primary} /> : null}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Ingresar usuarios a proyecto (multi-usuario → multi-proyecto) */}
+      <Modal visible={showAssign} transparent animationType="fade" onRequestClose={() => setShowAssign(false)}>
+        <View style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAssign(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('usersMgmt.assignModal.title')}</Text>
+            <Text style={styles.fieldLabel}>{t('usersMgmt.assignModal.usersLabel', { count: selUsers.size })}</Text>
+            <ScrollView style={styles.pickList}>
+              {activeUsers.map(u => (
+                <TouchableOpacity key={u.id} style={styles.pickRow} onPress={() => toggleSet(setSelUsers, u.id)}>
+                  <Ionicons name={selUsers.has(u.id) ? 'checkbox' : 'square-outline'} size={20} color={selUsers.has(u.id) ? Colors.primary : Colors.textMuted} />
+                  <Text style={styles.pickText} numberOfLines={1}>{u.name} {u.apellido}</Text>
+                  <Text style={styles.pickRole}>{(ROLE_LABELS[u.role]?.label ?? u.role)}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={styles.fieldLabel}>{t('usersMgmt.assignModal.projectsLabel', { count: selProjects.size })}</Text>
+            <ScrollView style={styles.pickList}>
+              {projects.map(p => (
+                <TouchableOpacity key={p.id} style={styles.pickRow} onPress={() => toggleSet(setSelProjects, p.id)}>
+                  <Ionicons name={selProjects.has(p.id) ? 'checkbox' : 'square-outline'} size={20} color={selProjects.has(p.id) ? Colors.primary : Colors.textMuted} />
+                  <Text style={styles.pickText} numberOfLines={1}>{p.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={[styles.saveBtn, accessBusy && { opacity: 0.5 }]} onPress={doAssign} disabled={accessBusy}>
+              <Text style={styles.saveBtnText}>{accessBusy ? t('usersMgmt.assigning') : t('usersMgmt.assignAccess', { users: selUsers.size, projects: selProjects.size })}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Quitar accesos (1 proyecto → multi-usuario) */}
+      <Modal visible={showRemove} transparent animationType="fade" onRequestClose={() => setShowRemove(false)}>
+        <View style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowRemove(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('usersMgmt.removeModal.title')}</Text>
+            <Text style={styles.fieldLabel}>{t('usersMgmt.removeModal.projectLabel')}</Text>
+            <ScrollView style={styles.pickList}>
+              {projects.map(p => (
+                <TouchableOpacity key={p.id} style={styles.pickRow} onPress={() => setRemoveProjectId(p.id)}>
+                  <Ionicons name={removeProjectId === p.id ? 'radio-button-on' : 'radio-button-off'} size={20} color={removeProjectId === p.id ? Colors.primary : Colors.textMuted} />
+                  <Text style={styles.pickText} numberOfLines={1}>{p.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={styles.fieldLabel}>{t('usersMgmt.removeModal.usersLabel', { count: selUsers.size })}</Text>
+            <ScrollView style={styles.pickList}>
+              {users.filter(u => removeProjectId ? accessIdsByUser[u.id]?.has(removeProjectId) : false).map(u => (
+                <TouchableOpacity key={u.id} style={styles.pickRow} onPress={() => toggleSet(setSelUsers, u.id)}>
+                  <Ionicons name={selUsers.has(u.id) ? 'checkbox' : 'square-outline'} size={20} color={selUsers.has(u.id) ? Colors.danger : Colors.textMuted} />
+                  <Text style={styles.pickText} numberOfLines={1}>{u.name} {u.apellido}</Text>
+                </TouchableOpacity>
+              ))}
+              {removeProjectId && users.filter(u => accessIdsByUser[u.id]?.has(removeProjectId)).length === 0
+                ? <Text style={styles.pickEmpty}>{t('usersMgmt.removeModal.noAccess')}</Text> : null}
+              {!removeProjectId ? <Text style={styles.pickEmpty}>{t('usersMgmt.removeModal.pickProjectFirst')}</Text> : null}
+            </ScrollView>
+            <TouchableOpacity style={[styles.removeBtn, accessBusy && { opacity: 0.5 }]} onPress={doRemove} disabled={accessBusy}>
+              <Text style={styles.saveBtnText}>{accessBusy ? t('usersMgmt.removing') : t('usersMgmt.removeAccess')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
-  importBar: {
-    padding: 16, gap: 6, backgroundColor: Colors.white,
-    borderBottomWidth: 1, borderBottomColor: Colors.divider,
-  },
-  importBtn: {
-    backgroundColor: Colors.primary, borderRadius: Radius.md, padding: 14,
-    alignItems: 'center',
-  },
+  importBar: { padding: 16, gap: 8, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 14 },
+  addBtnText: { color: Colors.white, fontWeight: '800', fontSize: 15 },
+  importBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: Colors.secondary, borderRadius: Radius.md, paddingVertical: 13 },
   btnDisabled: { backgroundColor: Colors.light },
-  importBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 1 },
+  importBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13, letterSpacing: 0.5 },
   importHint: { fontSize: 11, color: Colors.textMuted, textAlign: 'center' },
+  accessRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  accessBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
+  accessBtnText: { fontSize: 12.5, fontWeight: '800', color: Colors.primary },
+  pickList: { maxHeight: 150, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, marginTop: 2 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  pickText: { flex: 1, fontSize: 13.5, color: Colors.textPrimary, fontWeight: '600' },
+  pickRole: { fontSize: 10, color: Colors.textMuted, fontWeight: '700' },
+  pickEmpty: { fontSize: 12, color: Colors.textMuted, fontStyle: 'italic', padding: 12, textAlign: 'center' },
+  removeBtn: { backgroundColor: Colors.danger, paddingVertical: 13, borderRadius: Radius.md, alignItems: 'center', marginTop: 10 },
   list: { padding: 16, gap: 10 },
   empty: { textAlign: 'center', color: Colors.textMuted, marginTop: 40 },
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14,
-    ...Shadow.subtle,
-  },
+  card: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14, gap: 10, ...Shadow.subtle },
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  projectsRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, borderTopWidth: 1, borderTopColor: Colors.divider, paddingTop: 9 },
+  chips: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  projChip: { backgroundColor: Colors.divider, borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3, maxWidth: 150 },
+  projChipText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+  noProjects: { flex: 1, fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' },
+  allProjects: { flex: 1, fontSize: 12, color: Colors.primary, fontWeight: '700' },
+  moreProjects: { fontSize: 11, color: Colors.textMuted, fontWeight: '700', alignSelf: 'center' },
   cardMe: { borderWidth: 2, borderColor: Colors.primary },
-  roleTag: {
-    borderRadius: Radius.sm, paddingHorizontal: 8, paddingVertical: 4, minWidth: 80, alignItems: 'center',
-  },
+  cardInactive: { opacity: 0.6 },
+  roleTag: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: Radius.sm, paddingHorizontal: 8, paddingVertical: 4, minWidth: 80, justifyContent: 'center' },
   roleTagText: { color: Colors.white, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   cardInfo: { flex: 1 },
   userName: { fontSize: 15, fontWeight: '600', color: Colors.navy },
+  userNameInactive: { textDecorationLine: 'line-through', color: Colors.textMuted },
   meTag: { fontSize: 11, color: Colors.primary, fontWeight: '600', marginTop: 2 },
+  inactiveTag: { fontSize: 11, color: Colors.danger, fontWeight: '700', marginTop: 2 },
   cardActions: { flexDirection: 'row', gap: 8 },
-  actionBtn: {
-    backgroundColor: Colors.surface, borderRadius: Radius.sm,
-    paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: Colors.border,
-  },
+  actionBtn: { backgroundColor: Colors.surface, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: Colors.border },
   deleteBtn: { backgroundColor: '#fef2f2', borderColor: Colors.danger },
+  reactivateBtn: { backgroundColor: '#ecfdf5', borderColor: Colors.success },
   actionText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(14,33,61,0.55)', justifyContent: 'center', padding: 16 },
+  modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 18, gap: 8 },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: Colors.navy, marginBottom: 6 },
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginTop: 4 },
+  input: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 10, fontSize: 14, color: Colors.textPrimary },
+  roleRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  roleChip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: Colors.border },
+  roleChipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  hint: { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  saveBtn: { backgroundColor: Colors.success, paddingVertical: 13, borderRadius: Radius.md, alignItems: 'center', marginTop: 10 },
+  saveBtnText: { color: Colors.white, fontWeight: '800', fontSize: 15 },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  roleDot: { width: 12, height: 12, borderRadius: 6 },
+  optionText: { flex: 1, fontSize: 14, color: Colors.textPrimary },
 });

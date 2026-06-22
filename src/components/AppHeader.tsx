@@ -17,10 +17,13 @@ interface AppHeaderProps {
   leftContent?: React.ReactNode;
   /** Contenido de la sección derecha (botones adicionales, badges, etc.) */
   rightContent?: React.ReactNode;
+  /** v42d — Si se provee, REEMPLAZA el título/subtítulo del centro por contenido
+   *  custom (ej. en el Audit numérico: solo el botón "Ver norma" centrado). */
+  centerContent?: React.ReactNode;
 }
 
 export default function AppHeader({
-  title, subtitle, onBack, leftContent, rightContent,
+  title, subtitle, onBack, leftContent, rightContent, centerContent,
 }: AppHeaderProps) {
   return (
     <View style={[styles.container, { paddingTop: STATUS_H + 16 }]}>
@@ -43,10 +46,14 @@ export default function AppHeader({
 
       {/* ── Centro ── */}
       <View style={styles.center}>
-        <Text style={styles.title} numberOfLines={2}>{title}</Text>
-        {subtitle ? (
-          <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>
-        ) : null}
+        {centerContent ?? (
+          <>
+            <Text style={styles.title} numberOfLines={2}>{title}</Text>
+            {subtitle ? (
+              <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>
+            ) : null}
+          </>
+        )}
       </View>
 
       {/* ── Derecha ── */}

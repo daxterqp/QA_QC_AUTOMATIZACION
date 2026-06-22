@@ -1,0 +1,731 @@
+===================================================================
+PROMPT MAESTRO v2 — CONVERSIÓN DE EXCEL DE LABORATORIO A EXCEL DEL SISTEMA
+Flow QA/QC · Versión 2.0 · Mejorado con FASES 1-7
+===================================================================
+
+CAMBIOS RESPECTO A v1:
+- + Funciones estadísticas (DESVEST, DESVESTP, CV, MEDIANA, PERCENTIL, OUTLIER)
+- + Sufijo `:norma[<ref>]` para anotar normas técnicas (NTP, ASTM, etc.)
+- + Tipo de celda `comment-[opt1, opt2]` para comentarios predefinidos
+- + Gráficos avanzados: gr3 barras, gr5 log-x (granulometría), gr7 scatter con R²
+- + Sintaxis de gráficos con títulos: `numerico-gr5[x:...|y:...|xt:...|yt:...|t:...]`
+- + Celdas en blanco intencionales con `////` o `// //`
+- + Plantillas paramétricas: `repeat-[grupo:min:max:default]` (N variable de instancias)
+- + Cross-protocol refs: `@<external_id>.<row><col>` (vincular protocolos APPROVED)
+- + Mejor documentación de errores comunes y workarounds
+
+===================================================================
+INSTRUCCIONES DE USO (para el operador humano, NO para la IA)
+===================================================================
+
+1. Abre una sesión con un modelo de IA capaz (Claude Sonnet 4.6+/Opus, GPT-4o/o1+,
+   Gemini Pro 2+ o equivalente). NO uses modelos pequeños — la conversión requiere
+   razonamiento profundo sobre fórmulas Excel y atención al detalle de sintaxis.
+
+2. Pega TODO el contenido entre los marcadores `===INICIO PROMPT===` y `===FIN PROMPT===`
+   como primer mensaje a la IA.
+
+3. Adjunta el Excel del laboratorio (.xlsx) como archivo en el mismo mensaje. Si la IA
+   no acepta archivos directamente, pega una transcripción estructurada (filas, valores,
+   fórmulas, validaciones de datos) que obtendrás de cualquier herramienta o de Excel
+   mismo (View Source / Show Formulas).
+
+4. La IA producirá:
+   (a) El Excel final con la estructura exacta que importa el sistema.
+   (b) Un reporte de las celdas que no pudo mapear (para que las completes a mano).
+   (c) Sugerencias de mejoras (uso de norma, gráficos, paramétricos) cuando aplique.
+
+5. Sube el Excel a la pestaña "Actividades" en `/file-upload`. Si el sistema reporta
+   warnings, revisa el reporte de la IA y corrige.
+
+===================================================================
+===INICIO PROMPT===
+
+Eres un experto en sistemas de control de calidad de laboratorios y en sintaxis de
+Excel. Tu tarea es convertir el Excel adjunto (formato propio del laboratorio) a un
+Excel con la estructura específica que requiere el sistema Flow QA/QC v2.
+
+===================================================================
+1. ESTRUCTURA DEL EXCEL DESTINO
+===================================================================
+
+El Excel final tiene EXACTAMENTE estas columnas en una sola hoja:
+
+| ID_Protocolo | Protocolo | PartidaItem | Actividad realizada | Método de validación | Sección |
+
+Cada fila representa UNA fila del protocolo (que puede tener 1 o más celdas).
+
+- ID_Protocolo: código corto único del protocolo (ej: "LAB-CONCRETO-RC").
+                Identifica el GRUPO de filas que pertenecen al mismo protocolo.
+                Todas las filas de un mismo protocolo comparten el mismo ID.
+
+- Protocolo:    nombre legible (ej: "Ensayo de Resistencia a la Compresión - Concreto").
+                Solo la PRIMERA fila del grupo necesita tener este campo lleno; las
+                demás pueden estar vacías. El sistema toma el de la primera fila.
+
+- PartidaItem:  identificador único de la fila DENTRO del protocolo. Usa números
+                correlativos ("1", "2", "3", ...) en orden de aparición. SOLO se omite
+                en filas auto-gestionadas por convención del sistema (ver sección 5).
+
+- Actividad realizada: descripción legible de la fila para el usuario final.
+                Soporta el placeholder `{{n}}` en plantillas paramétricas (ver sección 12).
+
+- Método de validación: sintaxis estricta del sistema (ver "SINTAXIS" detallada abajo).
+                Una sola celda → un string; multi-celda → strings separados por ` // `.
+
+- Sección:      agrupación visual opcional (ej: "PESAJE INICIAL", "RESULTADOS").
+                Filas consecutivas con la misma sección se agrupan en la UI/PDF.
+
+===================================================================
+2. SINTAXIS DEL "MÉTODO DE VALIDACIÓN" — CELDAS INDIVIDUALES
+===================================================================
+
+Una sola celda (un solo string en el campo "Método de validación"):
+
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ Tipo                  │ Sintaxis                                                  │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Manual con rango      │ numerico-[min:max]                                        │
+│                       │   ej: numerico-[18:50]   numerico-[-10:0]  numerico-[0.5:1.5] │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Fórmula sin rango     │ numerico-fx[expresión]                                    │
+│                       │   ej: numerico-fx[#1A + #2A]                              │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Fórmula con rango     │ numerico-fx[expresión]:[min:max]                          │
+│                       │   ej: numerico-fx[PROMEDIO(#1A:#5A)]:[21:35]              │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Lista desplegable     │ list-[opt1, opt2, opt3]                                   │
+│                       │   ej: list-[Aprobado, Observado, Rechazado]               │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Lista desde matriz    │ list-[Mx[A]]              (toda la col A de matriz Mx)    │
+│                       │ list-[Mx[#2A:#10A]]       (subconjunto de filas 2-10)     │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Lookup (vlookup-like) │ lookup-[#refCell, Mx, searchCol, returnCol]               │
+│                       │   ej: lookup-[#3A, M1, A, B]                              │
+│                       │   Lee valor de #3A, lo busca en M1.A, devuelve M1.B.      │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Comentario predefinido│ comment-[opt1, opt2, opt3]                                │
+│                       │   ej: comment-[Sin segregación, Segregación leve, Otros]  │
+│                       │   Dropdown que escribe el texto seleccionado en comments. │
+│                       │   NO afecta el estado ok/fail (es solo anotación).        │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Celda en blanco       │ (segmento vacío entre //, ej: numerico-[1:5] // // ...) │
+│                       │ Placeholder visual sin input. Útil para alineación.       │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Gráfico (ocupa fila)  │ ver sección 9 (numerico-gr1..gr8)                         │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Header de columna     │ ver sección 6 (col-[...])                                 │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Matriz / catálogo     │ ver sección 7 (matrix-[Mx] + val-[...])                   │
+├───────────────────────┼───────────────────────────────────────────────────────────┤
+│ Directiva paramétrica │ ver sección 12 (repeat-[grupo:min:max:default])           │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+Sufijo opcional `:norma[<ref>]` aplicable a cualquier celda de input:
+   numerico-[18:50]:norma[NTP-339.034]
+   numerico-fx[PROMEDIO(#1A:#5A)]:[21:50]:norma[ASTM-C39]
+   list-[OK, NOK]:norma[ISO-9001]
+
+   El sufijo muestra una etiqueta pequeña debajo de la celda con la referencia
+   de la norma. SOLO sirve para documentación visual; NO afecta validación.
+
+===================================================================
+3. SINTAXIS DEL "MÉTODO DE VALIDACIÓN" — FILAS MULTI-CELDA (`//`)
+===================================================================
+
+Una fila puede tener HASTA 26 celdas (columnas A-Z) separadas por ` // `:
+
+   Ejemplos:
+   numerico-[1:2] // numerico-[1:2] // numerico-fx[#1A + #1B]
+   numerico-[145:155] // numerico-fx[#1A * 0.005]:[0.5:1.5] // list-[OK,NOK]
+
+Las celdas se etiquetan posicionalmente con A, B, C, …, Z. Una referencia `#1`
+SIN letra equivale a `#1A` (columna A implícita).
+
+Celdas en blanco intencionales: deja el segmento vacío entre `//`. El parser las
+reconoce como `kind: 'blank'` (placeholder visual sin input):
+
+   numerico-[1:5] // // numerico-fx[#1A + 10]
+   //// // numerico-[0:100]          (los primeros 2 segments son blank)
+
+USO TÍPICO de multi-celda:
+- 1 fila representa "una muestra" con N propiedades a registrar
+  (ej: peso, densidad, resistencia → 3 celdas)
+- Las fórmulas internas referencian las otras celdas de la MISMA fila
+  con `#<partida><col>` (ej: si la fila es partida "5", `#5A` es su col A)
+
+===================================================================
+4. REFERENCIAS A CELDAS — TOKEN `#`
+===================================================================
+
+Dentro de fórmulas y gráficos, las referencias usan el sigilo `#`:
+
+   #1      → fila partida "1", columna A (por defecto)
+   #1A     → fila partida "1", columna A explícita
+   #3B     → fila partida "3", columna B
+   #5C     → fila partida "5", columna C
+
+Rangos (dentro de argumentos de función):
+   #1A:#5A     → vertical: 1A, 2A, 3A, 4A, 5A
+   #1A:#1D     → horizontal: 1A, 1B, 1C, 1D
+   #1A:#5B     → INVÁLIDO (no puede variar fila Y columna a la vez)
+
+IMPORTANTE:
+- El lexer SOLO acepta números como row (#1, #2, ..., #999).
+- Partidas alfanuméricas (ej. "PA-1", "Sección-A") NO son referenciables por fórmula.
+  → Si necesitas refs entre filas, usa partidas numéricas correlativas.
+
+===================================================================
+5. CONVENCIONES DE PartidaItem
+===================================================================
+
+Tipo de fila                              | PartidaItem en el Excel
+─────────────────────────────────────────  | ────────────────────────────────────
+Datos normales del usuario                 | "1", "2", "3", ... correlativo
+Header de columna (col-[...])              | (déjalo vacío — auto: __hdr1__, __hdr2__, __hdr3__)
+Matriz declaración (matrix-[Mx])           | (déjalo vacío — auto: __matrix_Mx__)
+Valor de matriz (val-[...])                | (déjalo vacío — auto: __matrix_Mx_N__)
+Directiva paramétrica (repeat-[...])       | (déjalo vacío — auto: __repeat_<grupo>__)
+Fila template de un grupo paramétrico      | (déjalo vacío — auto: __template_<grupo>_N__)
+
+PROHIBIDO: usar manualmente los nombres reservados `__hdr*__`, `__matrix_*__`,
+`__repeat_*__`, `__template_*__` como PartidaItem real — el importer los
+reasignará y romperá tu protocolo.
+
+LÍMITES:
+- Máx 3 headers (col-[...]) consecutivos al inicio del protocolo (más caen al modo clásico).
+- Máx 26 celdas por fila (A-Z).
+- Partidas duplicadas en un mismo protocolo → la última sobrescribe (warning del importer).
+
+===================================================================
+6. HEADERS DE COLUMNA — `col-[col:col][titulo]`
+===================================================================
+
+Permite agrupar visualmente las columnas multi-celda. Solo válido en las
+PRIMERAS filas del protocolo (máx 3 niveles consecutivos).
+
+   col-[A][Peso]                       → titula la columna A como "Peso"
+   col-[A:C][Resultados Iniciales]    → titula las columnas A-C como "Resultados Iniciales"
+   col-[A][Peso] // col-[B][Densidad] // col-[C][Volumen]   → 3 spans en una fila
+
+   Múltiples niveles (apilados como sub-headers en la tabla):
+   Fila 1: col-[A:F][PROBETAS]                              (nivel 1, todo A-F)
+   Fila 2: col-[A:C][Iniciales] // col-[D:F][Finales]       (nivel 2)
+   Fila 3: col-[A][Peso] // col-[B][Vol] // col-[C][Den]    (nivel 3)
+            // col-[D][Peso] // col-[E][Vol] // col-[F][Den]
+
+REGLAS:
+- Spans no pueden solaparse en el mismo nivel.
+- Si un header aparece DESPUÉS de filas de datos → el protocolo cae al modo clásico.
+- El span `A:Z` ocupa la franja completa de columnas existentes.
+
+===================================================================
+7. MATRICES AUXILIARES — `matrix-[Mx]` + `val-[...]`
+===================================================================
+
+Matrices = catálogos / tablas de referencia usadas por:
+- Listas que leen valores de una columna de la matriz (`list-[Mx[A]]`)
+- LOOKUPs (`lookup-[#refCell, Mx, A, B]`)
+
+Estructura: se declaran al FINAL del protocolo (después de todas las filas de datos).
+
+   Fila tipo                | PartidaItem  | Método de validación
+   ─────────────────────────|──────────────|──────────────────────────────────────
+   Matriz header           | (vacío)      | matrix-[M1] // col-[A][Marca] // col-[B][Densidad]
+   Fila de datos (row 1)   | (vacío)      | val-[Sika] // val-[1450]
+   Fila de datos (row 2)   | (vacío)      | val-[Chema] // val-[1520]
+   Fila de datos (row N)   | (vacío)      | val-[BASF] // val-[1480]
+
+Múltiples matrices: declara cada una con su `matrix-[M2]`, `matrix-[M3]`, etc.
+
+EJEMPLOS de uso desde otras celdas:
+   list-[M1[A]]              → dropdown con todas las marcas (col A)
+   list-[M1[#1A:#3A]]        → dropdown con solo las primeras 3 marcas
+   lookup-[#5A, M1, A, B]    → busca el valor de #5A en M1.A y devuelve M1.B
+
+REGLAS:
+- IDs de matriz: alfanuméricos + guiones (`M1`, `M_Aceros`, etc.)
+- Una vez declarado `matrix-[M1]`, todas las filas siguientes deben ser val-[...] o
+  inicio de otra matriz.
+- val-[...] antes de un matrix-[...] → inválido, protocolo cae al clásico.
+
+===================================================================
+8. FÓRMULAS — `numerico-fx[expresión]`
+===================================================================
+
+Sintaxis tipo Excel pero con operadores en ESPAÑOL para funciones.
+
+OPERADORES SOPORTADOS:
+   + - * /     aritmética básica
+   ^           potenciación (asoc. derecha: 2^3^2 = 2^9 = 512)
+   ( )         agrupación
+   > < >= <=   comparaciones (devuelven 1 o 0)
+   == !=  <>   igualdad / desigualdad (== es alias de =)
+
+DECIMAL: usa `.` o `,` indistintamente (`1.5` y `1,5` son válidos).
+NOTACIÓN CIENTÍFICA: soportada (`1e3`, `2.5e-4`).
+
+FUNCIONES BUILT-IN (case-insensitive):
+
+┌─────────────────┬────────────────────────────────────────────────────────────────┐
+│ Función         │ Descripción                                                    │
+├─────────────────┼────────────────────────────────────────────────────────────────┤
+│ SUMA(args…)     │ Suma de todos los args                                         │
+│ PROMEDIO(args…) │ Media aritmética                                               │
+│ MAX(args…)      │ Valor máximo                                                   │
+│ MIN(args…)      │ Valor mínimo                                                   │
+│ ABS(x)          │ Valor absoluto                                                 │
+│ REDONDEAR(x,n)  │ Redondea x a n decimales                                       │
+│ RAIZ(x)         │ Raíz cuadrada                                                  │
+│ POTENCIA(x,n)   │ x elevado a n (alias del operador ^)                           │
+│ SI(cond, a, b)  │ Si cond es verdad → a, sino → b                                │
+├─────────────────┴────────────────────────────────────────────────────────────────┤
+│ ── ESTADÍSTICAS (FASE 1 — agregadas v2) ──────────────────────────────────────── │
+├─────────────────┬────────────────────────────────────────────────────────────────┤
+│ DESVEST(args…)  │ Desviación estándar MUESTRAL (denominador n-1)                 │
+│ DESVESTP(args…) │ Desviación estándar POBLACIONAL (denominador n)                │
+│ CV(args…)       │ Coeficiente de variación % = DESVEST/PROMEDIO × 100            │
+│ MEDIANA(args…)  │ Mediana (valor central con interpolación en n par)             │
+│ PERCENTIL(args…,p) │ Percentil p (0–100). Ej: PERCENTIL(#1A:#10A, 75) = Q3       │
+│ OUTLIER(args…)  │ 1 si el ÚLTIMO arg es outlier IQR del resto, 0 si no.          │
+│                 │ Usa regla 1.5×IQR. Requiere n≥4 para ser confiable.            │
+├─────────────────┴────────────────────────────────────────────────────────────────┤
+│ ── LOOKUP (matrices auxiliares — sección 7) ─────────────────────────────────── │
+├─────────────────┬────────────────────────────────────────────────────────────────┤
+│ LOOKUP(refCell, Mx, srcCol, retCol)  │ Equivalente a la celda `lookup-[...]`.    │
+│                 │ Útil para componer dentro de otra fórmula:                     │
+│                 │ ej: numerico-fx[LOOKUP(#1A, M1, A, B) * 1.05]                  │
+└─────────────────┴────────────────────────────────────────────────────────────────┘
+
+PROPAGACIÓN DE NULL:
+   Si CUALQUIER referencia de una fórmula es null (celda vacía o sin input),
+   la fórmula entera evalúa a null y la celda se renderiza como "—". No es error.
+
+ERRORES:
+   - División por 0 → "Error: división por 0" en la celda.
+   - Referencia desconocida (#99 que no existe) → "Referencia desconocida".
+   - Referencia circular (A → B → A) → "Referencia circular" en ambas.
+
+EJEMPLOS COMPLETOS:
+   numerico-fx[(#1A + #2A) / 2]:[20:30]              promedio simple de 2 valores con rango
+   numerico-fx[REDONDEAR(PROMEDIO(#1A:#5A), 2)]      promedio de 5 valores redondeado
+   numerico-fx[SI(#1A > 25, "OK", "NOK")]            condicional textual (no recomendado)
+   numerico-fx[CV(#1A:#10A)]:[0:5]                   coef. de variación con rango 0-5%
+   numerico-fx[SI(OUTLIER(#1A:#6A), 0, PROMEDIO(#1A:#5A))]   excluye outliers
+   numerico-fx[DESVEST(#1A:#10A) * 2]:[0:10]         2 desviaciones estándar
+
+===================================================================
+9. GRÁFICOS — `numerico-gr<N>[...]`
+===================================================================
+
+Una fila gráfico ocupa la fila completa (no admite `//`).
+
+TIPOS SOPORTADOS:
+┌──────┬──────────────┬─────────────────────────────────────────────────────────┐
+│ Tipo │ Modo         │ Uso recomendado                                         │
+├──────┼──────────────┼─────────────────────────────────────────────────────────┤
+│ gr1  │ Línea recta  │ Tendencias simples                                      │
+│ gr2  │ Curva suave  │ Curvas continuas (Catmull-Rom)                          │
+│ gr3  │ Barras vert. │ Resultados por categoría                                │
+│ gr5  │ Log-x lineal │ GRANULOMETRÍA (tamiz log mm, % pasante lineal)          │
+│ gr7  │ Scatter + R² │ Correlaciones con regresión lineal                      │
+└──────┴──────────────┴─────────────────────────────────────────────────────────┘
+
+(gr4 / gr6 / gr8 reservados para versiones futuras — no usar todavía.)
+
+SINTAXIS — FORMATO LEGACY (solo refs x e y, sin títulos):
+   numerico-gr1[x:#1A,#2A,#3A-y:#1B,#2B,#3B]            puntos individuales
+   numerico-gr2[x:#1A:#5A-y:#1B:#5B]                    rango x:y
+
+SINTAXIS — FORMATO MODERNO con secciones nombradas (separador `|`):
+   numerico-gr5[x:#1A:#7A|y:#1B:#7B|xt:Tamiz (mm)|yt:% Pasante|t:Curva granulométrica]
+
+Secciones disponibles en el formato moderno:
+   x:   refs eje X (puntos individuales con `,` o rango con `:`)
+   y:   refs eje Y
+   xt:  título del eje X (opcional, gris debajo)
+   yt:  título del eje Y (opcional, gris rotado izquierda)
+   t:   título del gráfico (opcional, bold arriba)
+
+IMPORTANTE:
+- El `|` NO puede aparecer dentro de los títulos (es el separador de secciones).
+  Workaround: usa otro carácter (ej. "Pre/Vaciado" en vez de "Pre|Vaciado").
+- Los rangos x e y deben tener la MISMA cantidad de refs.
+- Si alguna ref es null en runtime, ese punto se omite (los demás siguen).
+- gr5 (log-x) requiere TODOS los X positivos (>0). Puntos con X≤0 se descartan.
+
+EJEMPLOS COMPLETOS:
+   # Granulometría profesional
+   numerico-gr5[x:#1A:#7A|y:#1B:#7B|xt:Abertura del tamiz (mm)|yt:% Pasante acumulado|t:Curva granulométrica - Suelo A]
+
+   # Curva esfuerzo-deformación con regresión
+   numerico-gr7[x:#1A:#20A|y:#1B:#20B|xt:Deformación (mm)|yt:Carga (kN)]
+
+   # Barras de resistencia por probeta
+   numerico-gr3[x:#1A,#2A,#3A|y:#1B,#2B,#3B|xt:Probeta|yt:f'c (MPa)]
+
+===================================================================
+10. SUFIJO `:norma[<ref>]`  (FASE 1 — agregado v2)
+===================================================================
+
+Aplicable a CUALQUIER celda de input (manual/fórmula/lista/lookup/comment).
+La norma se muestra como etiqueta pequeña debajo de la celda en la UI y el PDF.
+
+   numerico-[18:50]:norma[NTP-339.034]
+   numerico-fx[(#1A + #2A) / 2]:[20:30]:norma[ASTM C-39]
+   list-[OK, NOK]:norma[ISO 9001]
+   comment-[Sin segregación, Con segregación]:norma[NTP-339.035]
+
+REGLAS:
+- El contenido entre `[...]` puede ser cualquier texto SIN `[`, `]`, `//`.
+- NO afecta validación — es puramente documental.
+- Aparece en la UI con color primary, fuente pequeña, bold.
+
+NORMAS COMUNES:
+   ASTM C39  Resistencia compresión hormigón
+   ASTM D422 Análisis granulométrico
+   NTP 339.034 Compresión cilindros concreto (Perú)
+   NTP 339.035 Asentamiento (slump)
+   NTP 400.022 Peso específico agregado fino
+   ISO 9001  Sistemas de gestión de calidad
+
+===================================================================
+11. COMENTARIOS PREDEFINIDOS — `comment-[opt1, opt2]`  (FASE 1 — agregado v2)
+===================================================================
+
+Dropdown con opciones predefinidas que escribe el texto seleccionado en el campo
+`comments` del item. NO afecta validación (no cuenta para ok/fail), es solo
+anotación más rápida que escribir texto libre.
+
+   comment-[Sin segregación, Segregación leve, Segregación grave]
+   comment-[Color uniforme, Color heterogéneo, Otros]
+   comment-[Aprobado por inspector, Pendiente revisión, Reprogramado]
+
+REGLAS:
+- Mínimo 1 opción.
+- Las opciones SON case-sensitive y se almacenan exactamente como las escribes.
+- NO usar `,` dentro de una opción (es el separador). Si necesitas coma usa "y":
+    MAL:  comment-[Hasta 1,000 kg, Más de 1,000 kg]
+    BIEN: comment-[Hasta 1000 kg, Más de 1000 kg]
+    BIEN: comment-[Hasta mil kg, Más de mil kg]
+- Las opciones no admiten `[`, `]`, `//`.
+
+USO TÍPICO: junto con celdas manuales/fórmula en multi-cell para registrar
+"valor + observación cualitativa" en una sola fila.
+
+   Ejemplo:
+   numerico-[145:155] // comment-[OK, Reprogramar, Descartar]
+   → Celda A: peso entre 145-155g. Celda B: dropdown de observación.
+
+===================================================================
+12. PLANTILLAS PARAMÉTRICAS — `repeat-[grupo:min:max:default]`  (FASE 5 — agregado v2)
+===================================================================
+
+Permite que una plantilla genere N instancias variables al crear el protocolo.
+El usuario elige N al crear la instancia (entre min y max, default preseleccionado).
+
+ESTRUCTURA — fila directiva + filas template:
+
+   PartidaItem (vacío) | (Actividad)                | Método
+   ──────────────────  | ──────────────────────────| ─────────────────────────────
+   (vacío)            | (cualquier desc)           | repeat-[probetas:2:6:3]         ← directiva
+   (vacío)            | Probeta {{n}}              | numerico-[145:155]              ← fila template
+   (vacío)            | Densidad probeta {{n}}     | numerico-fx[#1A * 0.005]:[0.5:1.5]   ← segunda template (multi-offset, ver abajo)
+
+REGLAS DE PARTIDA (auto-asignado por el importer):
+- Directiva: PartidaItem = `__repeat_<grupo>__`
+- Cada fila template siguiente sin PartidaItem: `__template_<grupo>_<offset>__`
+  donde offset = 1, 2, 3, ... en orden de aparición.
+- El bloque termina al encontrar otra directiva O una fila con PartidaItem explícita
+  que no empiece con `__template_` o `__repeat_`.
+
+PLACEHOLDER `{{n}}`:
+- En la columna "Actividad realizada" se reemplaza por el índice de la instancia
+  (1, 2, 3, ..., N) al expandir.
+- Solo aplica a la descripción, NO al método de validación.
+
+REWRITE DE FÓRMULAS:
+- Refs `#<offset><col>` dentro del método de la fila template se reescriben
+  automáticamente a `#<n><col>` al expandir.
+- Ej: fila template offset=1 con `numerico-fx[#1A * 0.005]` → al expandir instancia
+  n=3, la fórmula final es `numerico-fx[#3A * 0.005]`.
+
+LIMITACIÓN — MULTI-OFFSET (K > 1 filas template por grupo):
+- Las partidas resultantes son COMPUESTAS: `"1.1"`, `"1.2"`, `"2.1"`, ...
+- El lexer NO acepta refs decimales (`#1.2A`), así que las refs CRUZADAS entre
+  filas template del mismo grupo NO funcionan.
+- Si lo detecta, el sistema emite warning + marca las refs problemáticas con
+  sentinel `#999999<col>` (la celda muestra error inline).
+- WORKAROUND: usa single-offset con multi-cell `//` para casos típicos:
+    En vez de 2 filas template, una fila con 2 celdas:
+    numerico-[145:155] // numerico-fx[#1A * 0.005]:[0.5:1.5]
+
+RECOMENDACIÓN: SINGLE-OFFSET es el modo soportado plenamente. Usa multi-offset
+SOLO si cada fila template del grupo es totalmente independiente (sin refs cruzadas).
+
+EJEMPLOS COMPLETOS:
+
+   # Ensayo "N probetas de concreto" (N entre 3 y 9, default 6)
+   (vacío) | Cantidad de probetas         | repeat-[probetas:3:9:6]
+   (vacío) | Probeta {{n}} - peso (g)     | numerico-[140:160]
+   (vacío) | Probeta {{n}} - resistencia  | numerico-[18:35]
+
+   # Ensayo con peso + densidad (single-offset + multi-cell, RECOMENDADO)
+   (vacío) | Cantidad de probetas         | repeat-[probetas:2:6:3]
+   (vacío) | Probeta {{n}}                | numerico-[145:155] // numerico-fx[#1A*0.005]:[0.5:1.5]
+
+   # Múltiples grupos en el mismo protocolo
+   (vacío) | Granulometría: # tamices     | repeat-[tamices:5:12:8]
+   (vacío) | Tamiz {{n}} - % retenido     | numerico-[0:100]
+   (vacío) | Probetas: cantidad           | repeat-[probetas:2:6:3]
+   (vacío) | Probeta {{n}} - peso         | numerico-[140:160]
+
+===================================================================
+13. CROSS-PROTOCOL REFS — `@<external_id>.<row><col>`  (FASE 6 — agregado v2)
+===================================================================
+
+Permite que una fórmula de un protocolo lea valores de OTRO protocolo aprobado del
+mismo proyecto. Útil para informes consolidados, comparaciones, estadísticas
+trimestrales, etc.
+
+SINTAXIS:
+   @<external_id>.<row><col?>
+
+   ej: @HIS-001.5F                    valor de la celda 5F del protocolo external_id="HIS-001"
+       @RC-2024-001.1A                valor 1A del protocolo "RC-2024-001"
+
+USO EN FÓRMULAS (igual que cualquier ref):
+   numerico-fx[@HIS-001.5F * 2]
+   numerico-fx[PROMEDIO(@RC-2024-001.5A, @RC-2024-002.5A, @RC-2024-003.5A)]
+   numerico-fx[(#1A + @HIS-001.5F) / 2]
+
+REGLAS:
+- Solo protocolos APPROVED del MISMO proyecto califican.
+- Si más de un APPROVED comparte el mismo external_id, gana el más reciente
+  por updated_at.
+- Si el protocolo no existe o no está aprobado → la celda muestra error inline.
+- Si la celda referenciada está vacía (null) → propaga null como cualquier ref.
+
+LIMITACIONES:
+- SOLO soportado en WEB. En móvil las refs `@xref` muestran error claro
+  "Referencia cruzada no soportada offline — abre el protocolo desde la versión web".
+- El feature FLAG `protocol_linking` debe estar activado en el proyecto.
+
+CASO DE USO REAL:
+   Protocolo "RESUMEN-2024-Q1" que consolida estadísticas de 10 protocolos de
+   resistencia del trimestre:
+
+   PartidaItem | Actividad                          | Método
+   ────────────|────────────────────────────────────|─────────────────────────────────────────
+   1           | f'c promedio Q1                    | numerico-fx[PROMEDIO(@RC-2024-001.5A, @RC-2024-002.5A, ..., @RC-2024-010.5A)]:[21:35]
+   2           | f'c desv estándar Q1               | numerico-fx[DESVEST(@RC-2024-001.5A, ..., @RC-2024-010.5A)]:[0:5]
+   3           | CV del trimestre                   | numerico-fx[CV(@RC-2024-001.5A, ..., @RC-2024-010.5A)]:[0:10]
+
+===================================================================
+14. MAPEO EXCEL REAL → SISTEMA — Tabla de fórmulas
+===================================================================
+
+Tu trabajo de conversión consiste en buscar cada fórmula de Excel y traducirla.
+
+Excel original                  | Sistema Flow QA/QC
+────────────────────────────────|────────────────────────────────────────────────
+=SUM(A1:A5)                     | numerico-fx[SUMA(#1A:#5A)]
+=AVERAGE(B1:B10)                | numerico-fx[PROMEDIO(#1B:#10B)]
+=MAX(A1:A20)                    | numerico-fx[MAX(#1A:#20A)]
+=MIN(C5:C15)                    | numerico-fx[MIN(#5C:#15C)]
+=ABS(A1-A2)                     | numerico-fx[ABS(#1A - #2A)]
+=ROUND(A1, 2)                   | numerico-fx[REDONDEAR(#1A, 2)]
+=SQRT(A1)                       | numerico-fx[RAIZ(#1A)]
+=POWER(A1, 2)                   | numerico-fx[POTENCIA(#1A, 2)]   o numerico-fx[#1A ^ 2]
+=IF(A1>10, "OK", "NOK")         | numerico-fx[SI(#1A > 10, 1, 0)]  (textual no recomendado, usar 1/0)
+=STDEV(A1:A10)                  | numerico-fx[DESVEST(#1A:#10A)]
+=STDEV.P(A1:A10)                | numerico-fx[DESVESTP(#1A:#10A)]
+=STDEV(A1:A10)/AVERAGE(A1:A10)  | numerico-fx[CV(#1A:#10A) / 100]   o numerico-fx[CV(#1A:#10A)] (CV ya es en %)
+=MEDIAN(A1:A10)                 | numerico-fx[MEDIANA(#1A:#10A)]
+=PERCENTILE(A1:A10, 0.75)       | numerico-fx[PERCENTIL(#1A:#10A, 75)]   (¡usa 75 no 0.75!)
+=VLOOKUP(A1, M1!A:B, 2, FALSE)  | lookup-[#1A, M1, A, B]   o numerico-fx[LOOKUP(#1A, M1, A, B)]
+=A1+B1                          | numerico-fx[#1A + #1B]   (asumiendo misma fila como partida 1)
+=(A1+A2)/2                      | numerico-fx[(#1A + #2A) / 2]
+=IFERROR(A1/B1, 0)              | numerico-fx[SI(#1B == 0, 0, #1A / #1B)]
+=SUMPRODUCT(A1:A5, B1:B5)       | numerico-fx[(#1A*#1B + #2A*#2B + #3A*#3B + #4A*#4B + #5A*#5B)]  (no hay SUMPRODUCT nativo)
+=COUNTIF(A1:A10, ">10")         | NO soportado directamente. Usa SUMA de comparaciones:
+                                |   numerico-fx[(#1A>10) + (#2A>10) + ... + (#10A>10)]
+                                |   (cada comparación devuelve 1 o 0)
+
+VALIDACIONES Excel → sistema:
+Data validation list (dropdown) | list-[opt1, opt2, opt3]
+                                |   o list-[Mx[A]] si la lista viene de una matriz
+Data validation entre números   | numerico-[min:max]
+Cell color condicional          | NO se mapea. El sistema usa rangos numéricos, no formato.
+
+===================================================================
+15. PROCESO PASO A PASO PARA LA IA
+===================================================================
+
+Sigue este orden para CADA hoja/protocolo del Excel original:
+
+PASO 1: Identifica el protocolo
+   - ¿Cómo se llama? → "Protocolo" (legible)
+   - ¿Qué código tiene? → "ID_Protocolo" (corto, sin espacios)
+   - ¿Cuál es la norma o estándar de referencia? → mira títulos, headers (NTP, ASTM, ISO)
+
+PASO 2: Identifica matrices auxiliares
+   - Tablas de referencia (rangos admisibles, conversiones, factores)
+   - Listas desplegables que apuntan a celdas (Source: =Sheet2!A1:A10)
+   - Tabla pivote / catálogo
+   → Estas van al FINAL del protocolo con matrix-[Mx] + val-[]
+
+PASO 3: Identifica headers visuales
+   - Filas con celdas merged y bold que titulan columnas
+   - Hasta 3 niveles consecutivos al inicio del protocolo
+   → Estas van al INICIO con col-[A:C][titulo]
+
+PASO 4: Identifica filas de datos
+   - Cada fila del Excel se vuelve una fila del sistema
+   - Detecta si es: input manual, fórmula, lista desplegable, lookup, comentario
+   - Cuenta cuántos "valores" por fila → ¿1 celda? ¿multi-celda con //?
+
+PASO 5: Para cada celda determina su tipo
+   - Input numérico libre con rango → numerico-[min:max]
+   - Input fórmula sin rango (calculado) → numerico-fx[<expr>]
+   - Input fórmula con rango admisible → numerico-fx[<expr>]:[min:max]
+   - Dropdown corto → list-[opt1, opt2, ...]
+   - Dropdown de catálogo → list-[Mx[A]] + matriz al final
+   - Lookup (VLOOKUP) → lookup-[#ref, Mx, A, B] + matriz al final
+   - Comentario predefinido → comment-[opt1, opt2, ...]
+   - Solo placeholder visual → (vacío en el segmento //)
+
+PASO 6: Detecta normas referenciadas
+   - Si el header del Excel cita la norma (ej. "según NTP 339.034") → agrega
+     `:norma[NTP-339.034]` a las celdas correspondientes.
+
+PASO 7: Detecta repetición variable
+   - Si el Excel tiene "Probeta 1", "Probeta 2", ... "Probeta N" donde N es
+     variable o configurable → considera convertir a `repeat-[grupo:min:max:default]`
+   - Si N es fijo (ej. siempre 3 probetas) NO uses repeat — escribe las 3 filas
+     literales para mejor visibilidad.
+
+PASO 8: Detecta gráficos
+   - Si el Excel tiene un Chart embebido → genera la fila numerico-grN[...]
+   - Determina el tipo de gráfico:
+     * Línea con tendencia simple → gr1 o gr2
+     * Barras por categoría → gr3
+     * Granulometría (eje X log) → gr5
+     * Correlación con regresión → gr7
+   - Incluye títulos de ejes y del gráfico con el formato moderno `|`
+
+PASO 9: Asigna PartidaItem
+   - Filas de datos: numeración correlativa "1", "2", "3", ...
+   - Headers, matrices, repeats: DEJA VACÍO (el importer asigna).
+
+PASO 10: Sección
+   - Agrupa visualmente filas relacionadas con el mismo valor en "Sección"
+     (ej. "PESAJE INICIAL", "RESULTADOS", "OBSERVACIONES").
+   - Si no es necesario agrupar, deja vacío.
+
+===================================================================
+16. ERRORES COMUNES Y CÓMO EVITARLOS
+===================================================================
+
+🚫 Mezclar PartidaItem alfanumérico con fórmulas que lo referencien
+   PartidaItem "PA-1" no se puede referenciar como #PA-1A — el lexer rechaza.
+   ✅ Usa partidas numéricas: "1", "2", "3", ...
+
+🚫 Olvidar el `:` en numerico-fx con rango
+   MAL:  numerico-fx[#1A + #2A][20:30]
+   BIEN: numerico-fx[#1A + #2A]:[20:30]
+
+🚫 Espacios extra dentro de [...]
+   MAL:  numerico-[ 18 : 50 ]
+   BIEN: numerico-[18:50]
+   (los espacios en MUCHOS contextos son ok, pero por consistencia evítalos en `[...]`)
+
+🚫 Coma dentro de opción de list / comment
+   MAL:  comment-[Hasta 1,000, Más de 1,000]
+   BIEN: comment-[Hasta 1000, Más de 1000]   o   comment-[Hasta mil, Más de mil]
+
+🚫 Header después de filas de datos
+   El sistema cae al modo clásico. Pon TODOS los headers al INICIO del protocolo.
+
+🚫 Mezclar gráfico con multi-cell //
+   MAL:  numerico-[1:5] // numerico-gr1[x:#1A-y:#1B]
+   BIEN: el gráfico va solo en su propia fila.
+
+🚫 Refs cruzadas entre filas template multi-offset
+   Ya documentado en sección 12. Usa single-offset con multi-cell // en su lugar.
+
+🚫 `@xref` apuntando a protocolo no aprobado
+   El sistema lo trata como "no encontrado". Espera a que el protocolo destino
+   se apruebe antes de hacer referencias.
+
+🚫 Rango invertido en fórmulas
+   MAL:  numerico-fx[SUMA(#5A:#1A)]    (5 > 1)
+   BIEN: numerico-fx[SUMA(#1A:#5A)]
+
+🚫 Rango variando fila Y columna
+   MAL:  numerico-fx[SUMA(#1A:#5B)]   (varía ambas)
+   BIEN: numerico-fx[SUMA(#1A:#5A) + SUMA(#1B:#5B)]
+
+🚫 Operador de comparación = (igualdad) confundido con asignación
+   El sistema acepta `=` como alias de `==`, pero usa `==` por claridad:
+   ✅ numerico-fx[SI(#1A == 25, 1, 0)]
+
+===================================================================
+17. FORMATO DE OUTPUT
+===================================================================
+
+Tu salida tiene DOS partes:
+
+PARTE A — Excel final
+   Genera un archivo .xlsx (o tabla en formato Markdown si no puedes generar archivos)
+   con exactamente las 6 columnas: ID_Protocolo | Protocolo | PartidaItem | Actividad
+   realizada | Método de validación | Sección.
+
+   Filas en orden lógico: headers primero, luego datos, luego matrices, luego repeats.
+
+PARTE B — Reporte de conversión
+   Por cada protocolo procesado, lista:
+
+   1. RESUMEN: nombre, ID, # filas, # matrices, # repeats, # gráficos.
+
+   2. NORMAS DETECTADAS: cualquier referencia a NTP/ASTM/ISO/etc. y a qué filas
+      se aplicó el sufijo :norma[...].
+
+   3. CELDAS NO CONVERTIDAS: para cada celda del Excel original que NO pudiste
+      mapear, explica por qué (función no soportada, formato condicional, macro VBA,
+      etc.) y sugiere qué hacer (input manual, simplificar, ignorar).
+
+   4. SUGERENCIAS DE MEJORA: oportunidades de usar features avanzadas:
+      - "Las probetas 1-6 podrían unificarse con repeat-[probetas:3:9:6]"
+      - "Esta fórmula calcula CV manualmente — usa CV() directo"
+      - "El gráfico de granulometría debe usar gr5 (log-x), no gr1"
+      - "La tabla de marcas/densidades debería ir como matrix-[M1]"
+      - "Las celdas con norma ASTM C39 deberían tener :norma[ASTM-C39]"
+
+   5. VALIDACIONES POST-IMPORT: lista de cosas que el usuario debe verificar
+      manualmente tras subir el Excel al sistema:
+      - "Confirma que el protocolo se detecta como NUMÉRICO (no clásico)"
+      - "Confirma que las matrices aparecen en el botón 'Ver tablas'"
+      - "Si hay repeats, intenta crear una instancia y verifica el modal de N"
+      - "Si hay xrefs, confirma que el protocolo destino está APPROVED"
+
+===================================================================
+===FIN PROMPT===
+===================================================================
+
+VERSIÓN DEL DOCUMENTO: 2.0
+SISTEMA OBJETIVO: Flow QA/QC v2 (con FASES 0-7 aplicadas)
+ÚLTIMA ACTUALIZACIÓN: 2026-05-29
+
+CAMBIOS DESDE v1:
+- 6 funciones estadísticas agregadas (DESVEST, DESVESTP, CV, MEDIANA, PERCENTIL, OUTLIER)
+- Sufijo :norma[<ref>] en todas las celdas de input
+- Tipo comment-[opt1, opt2] para anotaciones predefinidas
+- Gráficos gr3 (barras), gr5 (log-x), gr7 (scatter+regresión) + sintaxis con títulos `|`
+- Celdas en blanco intencionales con //// o // //
+- Plantillas paramétricas repeat-[grupo:min:max:default]
+- Cross-protocol refs @<external_id>.<row><col>
+- Tabla expandida de mapeo Excel → sistema
+- Sección dedicada de errores comunes con ejemplos
+- Process step-by-step más detallado (10 pasos vs 7 en v1)
+- Reporte de conversión con 5 secciones (vs 2 en v1)

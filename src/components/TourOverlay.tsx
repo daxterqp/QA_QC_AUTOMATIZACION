@@ -14,15 +14,27 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTour } from '@context/TourContext';
+import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const PAD = 10;
 
 export default function TourOverlay() {
   const {
-    isActive, currentStep, currentStepIndex, totalSteps,
+    isActive, currentStep, currentStepIndex, totalSteps, isContextual,
     measures, nextStep, prevStep, skipTour, completeTour,
   } = useTour();
+  const { t } = useI18n();
+
+  // v46.1 — Textos del tutorial traducidos. Resuelve `tour.<id>.<campo>` y, si la
+  // clave no existe, cae al literal embebido en el paso (sin romper nunca el render).
+  const stepText = (field: 'title' | 'message' | 'waitingHint'): string => {
+    const fallback = (currentStep as any)?.[field] ?? '';
+    if (!currentStep?.id) return fallback;
+    const key = `tour.${currentStep.id}.${field}`;
+    const v = t(key);
+    return v === key ? fallback : v;
+  };
 
   const { width: SW, height: SH } = useWindowDimensions();
 
@@ -100,7 +112,10 @@ export default function TourOverlay() {
   const measure = currentStep.elementId ? measures[currentStep.elementId] : undefined;
   const isWaiting = !isWelcome && !measure;
   const isLastStep = currentStepIndex === totalSteps - 1;
-  const stepLabel = `${currentStepIndex} / ${totalSteps - 1}`;
+  // v32d — En modo contextual (botón de ayuda por pantalla) el índice apunta a
+  // los pasos del tramo de esa pantalla, fuera del recorrido lineal: el contador
+  // "X / N" no aplica, así que se oculta.
+  const stepLabel = isContextual ? '' : `${currentStepIndex} / ${totalSteps - 1}`;
 
   // ── Welcome Card (paso 0) ──────────────────────────────────────────────────
   if (isWelcome) {
@@ -111,14 +126,14 @@ export default function TourOverlay() {
             <View style={styles.welcomeIconCircle}>
               <Ionicons name="shield-checkmark" size={40} color={Colors.white} />
             </View>
-            <Text style={styles.welcomeTitle}>{currentStep.title}</Text>
-            <Text style={styles.welcomeMessage}>{currentStep.message}</Text>
+            <Text style={styles.welcomeTitle}>{stepText('title')}</Text>
+            <Text style={styles.welcomeMessage}>{stepText('message')}</Text>
             <View style={styles.rowBtns}>
               <TouchableOpacity onPress={skipTour} style={styles.skipBtn}>
-                <Text style={styles.skipText}>Saltar tutorial</Text>
+                <Text style={styles.skipText}>{t('tour.skip')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={nextStep} style={styles.primaryBtn}>
-                <Text style={styles.primaryBtnText}>Empezar</Text>
+                <Text style={styles.primaryBtnText}>{t('tour.start')}</Text>
                 <Ionicons name="arrow-forward" size={16} color={Colors.white} />
               </TouchableOpacity>
             </View>
@@ -133,7 +148,7 @@ export default function TourOverlay() {
   // Con pre-medición en useTourStep (upcomingStep), este estado solo aparece
   // cuando el siguiente paso está en una pantalla diferente (navegación real necesaria).
   if (isWaiting) {
-    const hint = currentStep.waitingHint ?? 'Navega a la pantalla del siguiente paso';
+    const hint = stepText('waitingHint') || t('tour.waitingHintDefault');
     const sbOffset2 = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
     const wm = currentStep.waitingElementId ? measures[currentStep.waitingElementId] : undefined;
     const ringScale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.35] });
@@ -201,7 +216,7 @@ export default function TourOverlay() {
           </View>
           {/* Cuerpo — título e indicación */}
           <View style={styles.waitingPillBody}>
-            <Text style={styles.waitingPillTitle}>{currentStep.title}</Text>
+            <Text style={styles.waitingPillTitle}>{stepText('title')}</Text>
             <Text style={styles.waitingPillHint}>{hint}</Text>
           </View>
         </Animated.View>
@@ -289,28 +304,28 @@ export default function TourOverlay() {
           {showAbove  && <View style={[styles.caret, styles.caretDown, { left: caretRelLeft }]} />}
 
           <Text style={styles.tooltipCounter}>{stepLabel}</Text>
-          <Text style={styles.tooltipTitle}>{currentStep.title}</Text>
-          <Text style={styles.tooltipMessage}>{currentStep.message}</Text>
+          <Text style={styles.tooltipTitle}>{stepText('title')}</Text>
+          <Text style={styles.tooltipMessage}>{stepText('message')}</Text>
 
           <View style={styles.tooltipBtns}>
             <TouchableOpacity onPress={skipTour} style={styles.skipBtnSmall}>
-              <Text style={styles.skipText}>Salir</Text>
+              <Text style={styles.skipText}>{t('tour.exit')}</Text>
             </TouchableOpacity>
             <View style={styles.rowBtns}>
               {currentStepIndex > 0 && (
                 <TouchableOpacity onPress={prevStep} style={styles.backBtn}>
                   <Ionicons name="arrow-back" size={14} color="#20b2aa" />
-                  <Text style={styles.backBtnText}>Atrás</Text>
+                  <Text style={styles.backBtnText}>{t('tour.back')}</Text>
                 </TouchableOpacity>
               )}
               {isLastStep ? (
                 <TouchableOpacity onPress={completeTour} style={styles.finishBtn}>
-                  <Text style={styles.primaryBtnText}>Finalizar</Text>
+                  <Text style={styles.primaryBtnText}>{t('tour.finish')}</Text>
                   <Ionicons name="checkmark" size={14} color={Colors.white} />
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity onPress={nextStep} style={styles.primaryBtn}>
-                  <Text style={styles.primaryBtnText}>Siguiente</Text>
+                  <Text style={styles.primaryBtnText}>{t('tour.next')}</Text>
                   <Ionicons name="arrow-forward" size={14} color={Colors.white} />
                 </TouchableOpacity>
               )}

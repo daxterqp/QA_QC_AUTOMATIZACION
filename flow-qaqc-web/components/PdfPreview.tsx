@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Download, ExternalLink, Loader2 } from 'lucide-react';
 import { getPreviewData, clearPreviewData } from '@lib/pdfGenerator';
+import { useI18n } from '@lib/i18n';
 
 export default function PdfPreview() {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
   const [html, setHtml] = useState('');
   const [filename, setFilename] = useState('');
@@ -97,7 +99,7 @@ export default function PdfPreview() {
           className="flex items-center gap-1.5 bg-primary hover:bg-primary/80 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {saving ? 'Guardando...' : 'Guardar PDF'}
+          {saving ? t('webCMisc.pdf.saving') : t('webCMisc.pdf.savePdf')}
         </button>
 
         <button
@@ -106,13 +108,13 @@ export default function PdfPreview() {
           className="flex items-center gap-1.5 bg-secondary hover:bg-secondary/80 text-white text-xs font-bold px-4 py-2 rounded-lg transition disabled:opacity-50"
         >
           {opening ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
-          Abrir en Navegador
+          {t('webCMisc.pdf.openInBrowser')}
         </button>
 
         <button
           onClick={handleClose}
           className="text-white/60 hover:text-white transition p-1.5 rounded-lg hover:bg-white/10"
-          title="Cerrar"
+          title={t('webCMisc.pdf.close')}
         >
           <X size={18} />
         </button>
@@ -124,7 +126,7 @@ export default function PdfPreview() {
           ref={iframeRef}
           className="bg-white shadow-2xl rounded-lg"
           style={{ width: '210mm', height: '100%', border: 'none' }}
-          title="Vista previa PDF"
+          title={t('webCMisc.pdf.previewTitle')}
         />
       </div>
     </div>

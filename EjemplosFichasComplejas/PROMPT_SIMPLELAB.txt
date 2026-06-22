@@ -1,0 +1,1624 @@
+================================================================================
+  PROMPT MAESTRO — GENERACIÓN DE ENSAYOS SIMPLELAB / GEOLABOR
+  Versión: 1.0  |  Idioma del lenguaje: Español (sistema parcialmente en Portugués)
+  Uso: pegar al inicio de un chat nuevo cuando quieras retomar este trabajo
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. CONTEXTO GENERAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SimpleLab (también llamado Geolabor) es un software de laboratorio geotécnico.
+Los ensayos se modelan como una jerarquía:
+
+  ENSAYO (tipoEnsaio)
+    └── WORKFLOW (orden de ejecución + dependencias + pantalla de resultados)
+          └── GRUPOS / PROCEDIMIENTOS (cada paso del ensayo)
+                └── CAMPOS (Parámetros / Determinaciones / Resultados)
+
+Un ensayo se distribuye en un único JSON que contiene TODO:
+  - Metadata del ensayo (sigla, categoría, normas)
+  - Workflow (cómo se ejecuta, qué depende de qué)
+  - Las definiciones completas de cada procedimiento embebidas
+
+El usuario pasa Excel + fotos del formato → la IA entrega el JSON completo
+listo para importar al sistema. El usuario sube un solo archivo.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. ESTRUCTURA RAÍZ DEL JSON DE ENSAYO COMPLETO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "referencia": "SIGLA - Nombre completo del ensayo",
+  "tipoEnsaio": {
+    "_id": "<ObjectId 24 hex>",
+    "nome": "Nombre del Ensayo",
+    "categoria": "Caracterización" | "Identificación" | "Resistencia" | ...,
+    "sigla": "XXX" (3 letras mayúsculas típicamente),
+    "unidade": "Ensaio",
+    "habilitadoParaCampo": true | false,
+    "permiteCriacaoExclusaoCpDuranteExecucao": false,
+    "investigacaoGeotecnica": false,
+    "normasReferencia": [],
+    "arquivado": false,
+    "__v": 0,
+    "versaoAtual": "<ObjectId>",
+    "ultimaVersaoPublicada": "<ObjectId>",
+    "ultimaVersaoAprovada": "<ObjectId>"
+  },
+  "workflow": {
+    "_id": "<ObjectId>",
+    "tipoEnsaio": "<mismo _id de tipoEnsaio>",
+    "versao": 1,
+    "publicada": false,
+    "atividades": [ /* grupos y/o procedimientos en orden */ ],
+    "telaResultados": [ /* layout de la pantalla de resultados */ ],
+    "investigacaoGeotecnica": false,
+    "__v": 0
+  },
+  "tiposProcedimentosPublicados": [
+    /* array de procedimientos COMPLETOS (uno por proc del workflow) */
+  ]
+}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. WORKFLOW — ESTRUCTURA DE ACTIVIDADES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Las "atividades" del workflow pueden ser:
+
+A) PROCEDIMIENTO SUELTO (sin grupo padre):
+{
+  "atributosProcedimento": {
+    "tipo": "<_id del proc en tiposProcedimentosPublicados>",
+    "versao": "<_id de la versión publicada (mismo _id del proc embebido)>",
+    "sequencialTipo": 1,
+    "titulo": "Nombre visible del paso",
+    "identificador": "identificador-corto",
+    "minimoDeterminacoes": 3,
+    "maximoDeterminacoes": 10,  /* opcional */
+    "possuiAnexos": false,
+    "possuiFotos": false,
+    "ehObrigatorioFotos": false,
+    "fotosPorLinha": 4,
+    "possuiDocumentos": false,
+    "dependencias": []
+  },
+  "atributosGrupo": {
+    "tipo": "Simples",
+    "possuiEstagios": null,
+    "graficos": [],
+    "atividades": []
+  },
+  "tipo": "Procedimento",
+  "nivel": 0,
+  "_id": "<ObjectId>"
+}
+
+B) GRUPO QUE CONTIENE PROCEDIMIENTOS (jerarquía):
+{
+  "atributosProcedimento": {
+    "sequencialTipo": 1,
+    "possuiAnexos": false,
+    "possuiFotos": false,
+    "ehObrigatorioFotos": false,
+    "fotosPorLinha": 4,
+    "possuiDocumentos": false,
+    "dependencias": []
+  },
+  "atributosGrupo": {
+    "tipo": "Simples",
+    "titulo": "Título del Grupo",
+    "possuiEstagios": null | true,
+    "quantidadeMinima": 3,  /* solo si possuiEstagios: true */
+    "graficos": [],
+    "atividades": [ /* procedimientos hijos con nivel: 1 */ ]
+  },
+  "tipo": "Grupo",
+  "nivel": 0,
+  "_id": "<ObjectId>"
+}
+
+C) DEPENDENCIA dentro de atributosProcedimento.dependencias:
+{
+  "referencia": "<_id del tipoEnsaio del proc dependido>",
+  "nome": "Nombre del proc dependido",
+  "identificador": "identificador-del-proc",
+  "mesmoCP": false,
+  "mesmoEstagio": false | true,
+  "atividade": "<_id de la actividad dependida>",
+  "_id": "<ObjectId>"
+}
+
+REGLAS CRÍTICAS DE DEPENDENCIAS:
+- "referencia" apunta al _id del procedimiento (en tiposProcedimentosPublicados)
+- "atividade" apunta al _id de la atividade (en workflow.atividades)
+- "mesmoEstagio: true" cuando ambos procs viven en el mismo grupo con etapas
+- Hay dependencias a DOS NIVELES: a nivel workflow (con "atividade") y a nivel
+  procedimiento (sin "atividade", solo "referencia"). Deben coincidir.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. WORKFLOW — TELA DE RESULTADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Define cómo se renderiza la pantalla final de resultados. Una entrada por fila.
+
+A) FILA SIMPLE (un proc):
+{
+  "quebraPagina": { "ensaio": false, "campanha": false },
+  "tipo": "Simples",
+  "colunas": [
+    {
+      "tipo": "Procedimento",
+      "titulo": "Nombre visible",
+      "largura": 100,
+      "atividade": "<_id de la atividade del proc>",
+      "_id": "<ObjectId>"
+    }
+  ],
+  "ocultada": false,
+  "_id": "<ObjectId>",
+  "linhas": []
+}
+
+B) FILA DE ETAPAS (cuando un grupo tiene etapas):
+{
+  "quebraPagina": { "ensaio": false, "campanha": false },
+  "tipo": "Estágios",
+  "titulo": "Título del grupo",
+  "atividade": "<_id del grupo padre>",
+  "colunas": [],
+  "ocultada": false,
+  "_id": "<ObjectId>",
+  "linhas": [
+    /* una fila por procedimiento dentro del grupo, cada una como tipo Simples */
+  ]
+}
+
+quebraPagina: true/true para forzar salto de página al imprimir reportes.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. PROCEDIMIENTO — ESTRUCTURA COMPLETA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cada elemento de tiposProcedimentosPublicados:
+
+{
+  "_id": "<ObjectId>",
+  "nome": "SIGLA - Nombre del Procedimiento",
+  "identificador": "sigla-nombre-procedimiento",
+  "layout": "horizontal" | "vertical",
+  "visibilidadeCabecalhoDeterminacoes": true | false,
+  "colunasParametros": 1 | 2,
+  "dependencias": [
+    {
+      "referencia": "<_id del proc dependido>",
+      "nome": "Nombre",
+      "identificador": "identificador",
+      "_id": "<ObjectId>"
+    }
+  ],
+  "parametros": [ /* campos de la sección Parámetros */ ],
+  "determinacoes": [ /* campos de la sección Determinaciones */ ],
+  "resultados": [ /* campos de la sección Resultados globales */ ],
+  "graficos": [ /* configuración de gráficos */ ],
+  "investigacaoGeotecnica": false,
+  "versao": 1,
+  "__v": 0,
+  "referencia": "<_id del tipoEnsaio del proc — distinto del _id raíz>",
+  "dataPublicacao": "2026-05-26T00:00:00.000Z",
+  "responsavel": "<ObjectId del usuario>",
+  "justificativa": "Criação do procedimento."
+}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. CAMPO — ESTRUCTURA UNIFORME (parametros / determinacoes / resultados)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "_id": "<ObjectId>",
+  "nome": "Nombre Visible del Campo",
+  "identificador": "identificador-kebab-case",
+  "ordem": 0,           // empieza en 0 (no en 1). NO tiene que ser consecutivo.
+  "unidade": "g" | "cm³" | "%" | "MPa" | "ms" | "µm" | "m" | "Tyler" | "",
+  "categoria": "Entrada" | "Resultado",
+  "tipo": "Numérico" | "Textual" | "Porcentagem" | "Lista" | "Booleano" |
+          "Data" | "Hora" | "Exponencial" | "Referencia",
+  "casasDecimais": 0..6 | null,
+  "aceitaNegativo": false,
+  "validacoes": [],
+  "exibirTelaResultados": true | false,
+  "exibirTelaExecucao": true | false,
+  "documentacao": "texto opcional",
+  "attrsEntrada": {
+    "tipoLista": "Valores",
+    "lista": ["valor1", "valor2"],   // SOLO si tipo == "Lista"
+    "valorDefault": false
+  },
+  "attrsResultado": {
+    "formula": "fórmula del lenguaje SimpleLab"
+  }
+}
+
+REGLAS DE LOS CAMPOS:
+- "attrsEntrada" y "attrsResultado" coexisten en el mismo objeto. Se usa el que
+  corresponde según "categoria".
+- Si "categoria" == "Entrada" → no se llena "attrsResultado.formula".
+- Si "categoria" == "Resultado" → se llena "attrsResultado.formula" con la
+  fórmula. "attrsEntrada" igual está presente pero vacío (default).
+- "ordem" controla el orden visual y de evaluación.
+- "exibirTelaExecucao" / "exibirTelaResultados" en false → campo oculto, útil
+  para auxiliares intermedios.
+- "casasDecimais": null en Textual/Booleano/Lista. Número entero en Numérico/
+  Porcentagem.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. SECCIONES Y REGLAS DE ACCESO ENTRE ELLAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  p["..."]   → campo de PARÁMETROS (sección global del proc, 1 valor por ejec)
+  d["..."]   → campo de DETERMINACIONES (fila de una tabla, indexada por DINDEX)
+  r["..."]   → campo de RESULTADOS GLOBALES
+  ds         → colección de todas las determinaciones
+
+REGLAS DE ACCESO (CRÍTICAS — no romperlas):
+  - d[] puede leer:  p[], r[], otros d[] calculados antes en la misma fila
+  - d[] puede leer r[] del mismo procedimiento
+  - r[] puede leer:  p[], d[] (vía DVALUES/DATTR/etc.), otros r[]
+  - p[] (Resultado) puede leer: otros p[], RESULTADO()/DETERMINACAO()/PARAMETRO()
+                                de OTROS procedimientos
+  - p[] (Resultado) NO PUEDE leer d[] ni r[] del mismo proc
+
+CONSECUENCIA PRÁCTICA:
+  Si necesitas calcular algo en Parámetros que dependa de las Determinaciones
+  del mismo proc, tienes que moverlo a Resultados Globales. La sección
+  "Parámetros - Resultado" solo sirve para combinar otros p[] o leer datos de
+  procedimientos externos.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. TIPOS DE CAMPO — DETALLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Numérico       → número con N decimales. Si tipo Entrada, el operador tipea.
+Porcentagem    → CRÍTICO: la fórmula maneja FRACCIÓN (0.131 = 13.1%). El sistema
+                 muestra como %. NO multiplicar por 100 en fórmulas. El usuario
+                 tipea 13.1 y el sistema lo guarda como 0.131.
+Textual        → texto libre o resultado de CONCAT/IF.
+Lista          → valores fijos. El sistema devuelve el valor SIEMPRE como TEXTO.
+                 Si la Lista contiene números, hay que envolver con NUMERO(...)
+                 antes de filtrar tablas numéricas:
+                   TABELA("...", "campo", ["numero"], [NUMERO(p["x"], 0)])
+Booleano       → true/false. Comparar SIN comillas: EQUAL(d["flag"], VERDADEIRO())
+                 o NOT(d["flag"]). VERDADEIRO()/FALSO() son las constantes.
+Data (Fecha)   → fecha. Se puede copiar con PARAMETRO().
+Hora           → HH:MM:SS. Usar con TADD(), TDIFF().
+Exponencial    → notación científica (números muy pequeños).
+Referencia     → apunta a un equipo del sistema. Atributos: p["equip"]["atr"]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. IDENTIFICADORES — CÓMO SE AUTOGENERAN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+El software auto-genera el identificador a partir del nombre del campo.
+Reglas:
+  - Todo en minúsculas
+  - Espacios → guiones (-)
+  - Acentos eliminados: á→a, é→e, í→i, ó→o, ú→u, ñ→n
+  - Caracteres especiales eliminados: . + / ° ( ) , % # ¿ ? ! ¡ : ;
+  - Múltiples guiones consecutivos → colapsados a uno solo
+  - Números se mantienen
+
+Ejemplos confirmados:
+  "Peso muestra húmeda + tara"     → peso-muestra-humeda-tara
+  "Densidad seca (Val. Dens.)"     → densidad-seca-val-dens
+  "Cota de elevación (msnm)"       → cota-de-elevacion-msnm
+  "Guardia N°"                     → guardia-n
+  "Distancia a eje de presa S-N"   → distancia-a-eje-de-presa-s-n
+  "EVd,criterio"                   → e-vd-criterio
+  "Peso de Pocillo"                → peso-de-pocillo
+  "P50" / "P80"                    → p-50 / p-80
+
+⚠️ CASOS PELIGROSOS — el carácter "°" se ELIMINA, NO se reemplaza por "umero":
+  "N° de molde"                    → n-de-molde       (NO numero-de-molde)
+  "N° Tara"                        → n-tara           (NO numero-tara)
+  "N° de Picnómetro"               → n-de-picnometro  (NO numero-de-picnometro)
+  "N° densímetro"                  → n-densimetro
+
+⚠️ "%" se elimina y deja la palabra sola — TOO GENÉRICO, mejor renombrar:
+  "% Retenido"      → "retenido"   (mejor renombrar a "Retenido parcial")
+  "% Acumulado"     → "acumulado"  (mejor "Retenido acumulado")
+  "% Pasa"          → "pasa"       (mejor "Pasante acumulado")
+  Patrón GRA/CPN: NUNCA usar "%" en el nombre del campo. Renombrar a algo
+  descriptivo siguiendo "Retenido parcial / Retenido acumulado / Pasante
+  acumulado".
+
+REGLA OBLIGATORIA — al construir un JSON nuevo:
+  1. Implementar función sanitize() en el script de generación (ver código abajo)
+  2. Cada campo se crea con assert sanitize(nome) == identificador
+  3. Si falla, RENOMBRAR el campo o cambiar el identificador, no improvisar
+  4. SIEMPRE verificar el ID real en el sistema después del import — si
+     difiere, actualizar todas las fórmulas que lo referencian
+
+⚠️ Letra-Dígito contiguos → SE INSERTA "-" (observado en GRA):
+  "P80"        → "p-80"  (NO "p80")
+  "P50"        → "p-50"
+  "N°8"        → "n-8"   (después de eliminar °)
+  "Pasante80%" → "pasante-80"
+
+Código Python de la función sanitize() oficial:
+
+  import re, unicodedata
+  def sanitize(nome):
+      s = nome.lower()
+      s = unicodedata.normalize('NFD', s)
+      s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+      s = re.sub(r'[.+/°(),%#¿?!¡:;]', ' ', s)
+      s = re.sub(r'[^a-z0-9]+', '-', s)
+      # Insertar guion entre letra y dígito contiguos (regla observada en GRA)
+      s = re.sub(r'([a-z])(\d)', r'\1-\2', s)
+      s = re.sub(r'(\d)([a-z])', r'\1-\2', s)
+      s = s.strip('-')
+      return s
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. OPERADORES Y FUNCIONES DEL LENGUAJE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OPERADORES:
+  +  -  *  /  %   con paréntesis para precedencia
+
+MATEMÁTICAS:
+  ABS(x)              → valor absoluto
+  ARCTAN(x)           → arcotangente en radianes
+  SENO(x)             → seno (radianes)
+  COSENO(x)           → coseno (radianes)
+  LN(x)               → logaritmo natural (base e)
+  LOG(x, base)        → logaritmo; base: e (default), 2 ó 10
+  PI()                → 3.141592...
+  POWER(base, exp)    → base^exp
+  ROUND(num, dec)     → redondeo
+
+LÓGICA Y COMPARACIÓN:
+  IF(cond, exprTrue, exprFalse)
+  IF(cond, exprTrue)            ← retorna VACÍO si cond es falso
+  AND(a, b, ...)
+  OR(a, b, ...)
+  NOT(x)
+  EQUAL(a, b)                   ← strings/lista con comillas; booleanos SIN comillas
+  GT(a, b)  GTE(a, b)  LT(a, b)  LTE(a, b)
+  EMPTY(x)                      ← true si campo vacío
+  VERDADEIRO()                  ← constante true
+  FALSO()                       ← constante false
+
+ESTADÍSTICAS / AGREGACIÓN:
+  AVG(array)
+  SOMA(array)
+  MAX(a, b) o MAX(array)
+  MIN(a, b) o MIN(array)
+  MEDIANA(array)
+  MODA(array)
+  DMEDIA(campo, filtro)        ← promedio de d[campo] donde d[filtro]=true
+  DSOMA(campo, filtro)         ← suma equivalente
+  DR2(x, y, filtro, tipo, grado) ← R² de regresión
+
+ACCESO A DETERMINACIONES (DESDE OTRO d[] EN LA MISMA FILA O DESDE r[]):
+  DINDEX()                     ← índice base 1 de la determinación actual
+  DATTR(campo, indice)         ← d[campo] de la fila "indice"
+  DVALUES(campo)               ← arreglo con d[campo] de todas las filas
+  AVALUE(array, indice)        ← elemento del arreglo (base 1)
+  GETINDEX([campos], [valores]) ← índice de la 1ra fila donde d[campos]=valores
+
+ACCESO A OTROS PROCEDIMIENTOS (REQUIEREN AMBOS PUBLICADOS):
+  PARAMETRO(proc, campo, [ctx], [ctxVals])
+  RESULTADO(proc, campo, [ctx], [ctxVals])
+  DETERMINACAO(proc, campo, [condCampos], [condValores], [ctx], [ctxVals])
+  DETERMINACOES(proc, campo, [ctx], [ctxVals], [condCampos], [condValores])
+
+  Filtros por contexto especiales:
+    ["estagio"], [DINDEX()]     ← filtrar por etapa actual
+
+ETAPAS Y CUERPOS DE PRUEBA:
+  EINDEX()                     ← índice de la etapa actual (1, 2, 3, ...)
+  CPINDEX()                    ← identificador del cuerpo de prueba ("A", "B", ...)
+
+REGRESIÓN E INTERPOLACIÓN:
+  REGRESSAO(x, y, filtro, tipo, grado, precision)
+    tipos: "polinomial", "logaritmica", "exponencial"
+  PONTOMAXIMO(x, y, filtro, metodo, coord)
+    metodo: "spline_cubica"
+    coord: "x" | "y"
+
+TEXTO:
+  CONCAT(a, b, ...)
+  TEXTO(valor, dec)            ← número → texto con coma decimal
+  NUMERO(texto, dec)           ← texto → número (acepta . y , como decimal)
+  MAIUSCULO(texto)
+  MINUSCULO(texto)
+
+FECHA Y HORA:
+  DATEADDDAYS(fecha, dias, soloLaborables)
+  DATEDIFF(inicio, fin)
+  DATETIMEDIFF(fI, hI, fF, hF, unidad)  ← unidad: "s","m","h","d"
+  TADD(hora, valor, unidad)
+  TDIFF(inicio, fin, unidad)
+  NOTA: NO existe HOY() ni AHORA(). No se puede obtener la fecha actual.
+
+TABLAS Y EQUIPOS:
+  TABELA(id_tabla, campo, [campos_filtro], [valores_filtro])
+  EQUIPAMENTO(id_equipo, campo, [campos_filtro], [valores_filtro])
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. PATRONES FRECUENTES (con código de fórmula)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── P1. GUARDIA CONTRA VACÍO ──────────────────────────────────────────
+  IF(NOT(EMPTY(d["divisor"])), d["numerador"]/d["divisor"])
+
+── P2. GUARDIA MÚLTIPLE CON AND ──────────────────────────────────────
+  IF(
+    AND(
+      NOT(EMPTY(d["a"])),
+      NOT(EMPTY(d["b"]))
+    ),
+    d["a"] - d["b"]
+  )
+
+── P3. AUTO-CALCULAR DESDE TABLA AUXILIAR ────────────────────────────
+  TABELA("nombre-tabla", "campo-deseado", ["campo-filtro"], [DINDEX()])
+  TABELA("conos", "densidad", ["numero"], [NUMERO(p["cono"], 0)])
+
+── P4. FILA AUTO-ETIQUETADA POR DINDEX ───────────────────────────────
+  IF(EQUAL(DINDEX(),1), "Lab",
+    IF(EQUAL(DINDEX(),2), "Pto"))
+
+── P5. SUMA ACUMULADA ────────────────────────────────────────────────
+  IF(
+    GT(DINDEX(),1),
+    DATTR("ret-acum", DINDEX()-1) + d["retenido-parcial"],
+    IF(
+      EMPTY(d["retenido-parcial"]),
+      0,
+      d["retenido-parcial"]
+    )
+  )
+
+── P6. CONFORMIDAD GTE ───────────────────────────────────────────────
+  IF(
+    AND(NOT(EMPTY(p["valor"])), NOT(EMPTY(p["criterio"]))),
+    IF(GTE(p["valor"], p["criterio"]), "Conforme", "No conforme")
+  )
+
+── P7. MDS DE UNA CURVA (PUNTO MÁXIMO SIMPLE) ────────────────────────
+  r["densidad-seca-maxima"] = MAX(DVALUES("densidad-de-campo-seca")) / 1000
+  r["humedad-optima"] = DATTR("humedad-real",
+    GETINDEX(["densidad-de-campo-seca"], [MAX(DVALUES("densidad-de-campo-seca"))]))
+
+── P8. INTERPOLACIÓN LOGARÍTMICA P50 / P80 ───────────────────────────
+Para encontrar el tamaño de partícula donde pasa exactamente 50% o 80%:
+
+  // Auxiliares (en Determinaciones, ocultos):
+  d["superior-80"] = IF(GTE(d["pasante-acumulado"], 0.8), d["pasante-acumulado"], "")
+  d["inferior-80"] = IF(LTE(d["pasante-acumulado"], 0.8), d["pasante-acumulado"], "")
+  d["indice-80"]   = IF(
+    AND(EQUAL(MIN(DVALUES("superior-80")), d["pasante-acumulado"]),
+        EQUAL(d["usar-valor"], VERDADEIRO())),
+    DINDEX(),
+    IF(
+      AND(EQUAL(MAX(DVALUES("inferior-80")), d["pasante-acumulado"]),
+          EQUAL(d["usar-valor"], VERDADEIRO())),
+      DINDEX(), ""
+    )
+  )
+
+  // Resultado P80 con interpolación log-log:
+  r["p-80"] = IF(
+    GT(DATTR("pasante-acumulado", MAX(DVALUES("indice-80"))), 0),
+    IF(
+      EQUAL(MIN(DVALUES("indice-80")), MAX(DVALUES("indice-80"))),
+      DATTR("tamano", MIN(DVALUES("indice-80"))),
+      DATTR("tamano", MAX(DVALUES("indice-80"))) *
+      POWER(10,
+        LOG(0.8 / DATTR("pasante-acumulado", MAX(DVALUES("indice-80"))), 10) *
+        LOG(DATTR("tamano", MIN(DVALUES("indice-80"))) /
+            DATTR("tamano", MAX(DVALUES("indice-80"))), 10) /
+        LOG(DATTR("pasante-acumulado", MIN(DVALUES("indice-80"))) /
+            DATTR("pasante-acumulado", MAX(DVALUES("indice-80"))), 10)
+      )
+    )
+  )
+
+── P9. PROMEDIO FILTRADO ─────────────────────────────────────────────
+  DMEDIA("humedad", "usar-valor")
+
+── P10. ESPEJAMIENTO LÍNEA A LÍNEA DESDE OTRO PROC ───────────────────
+  d["humedad"] = AVALUE(DETERMINACOES("otro-proc", "humedad"), DINDEX())
+
+── P11. JALAR DE OTRO PROC POR CLAVE ─────────────────────────────────
+  DETERMINACAO("otro-proc", "humedad", ["punto"], [d["punto"]])
+
+── P12. JALAR DE OTRO PROC POR ETAPA ─────────────────────────────────
+  PARAMETRO("den-humedad", "humedad", ["estagio"], [DINDEX()])
+  RESULTADO("den-densidad", "compactacion", ["estagio"], [DINDEX()])
+
+── P13. FLAG "USAR VALOR" PARA FILTRAR ───────────────────────────────
+  d["usar-valor"] = AND(
+    NOT(EMPTY(d["peso-retenido"])),
+    NOT(EMPTY(d["abertura"]))
+  )
+  // Luego se filtra con DMEDIA/DSOMA usando "usar-valor" como filtro
+
+── P14. NOMBRE DE PUNTO BASADO EN ETAPA ──────────────────────────────
+  p["punto"] = CONCAT("Punto ", EINDEX())
+
+── P15. PROMEDIO DE 1, 2 O 3 VALORES (cuenta los presentes) ──────────
+  IF(
+    AND(EMPTY(d["v1"]), AND(EMPTY(d["v2"]), EMPTY(d["v3"]))),
+    "",
+    (
+      IF(NOT(EMPTY(d["v1"])), d["v1"], 0) +
+      IF(NOT(EMPTY(d["v2"])), d["v2"], 0) +
+      IF(NOT(EMPTY(d["v3"])), d["v3"], 0)
+    ) / (
+      IF(NOT(EMPTY(d["v1"])), 1, 0) +
+      IF(NOT(EMPTY(d["v2"])), 1, 0) +
+      IF(NOT(EMPTY(d["v3"])), 1, 0)
+    )
+  )
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. GRÁFICOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Estructura básica de un gráfico:
+
+{
+  "proporcao": { "x": 4, "y": 1 } | null,
+  "eixos": {
+    "principal": {
+      "x": {
+        "titulo": "Texto",
+        "escala": "linear" | "log",
+        "tipo": "Numérico" | "Porcentagem",
+        "casasDecimais": 0..3
+      },
+      "y": { ... }
+    },
+    "secundario": { "x": {"titulo": null}, "y": {"titulo": null} }
+  },
+  "titulo": "",
+  "tipo": "linha" | "barras" | "dispersao",
+  "series": [
+    {
+      "campos": {
+        "x": { /* objeto campo completo */ },
+        "y": { /* objeto campo completo */ }
+      },
+      "eixos": { "x": "principal", "y": "principal" },
+      "suavizacao": { "habilitado": false, "ordenacao": true },
+      "interpolacao": { "habilitado": false, "tipo": "polinomial" },
+      "filtroPontos": {
+        "habilitado": true,
+        "campo": { /* objeto del campo Booleano "usar-valor" */ }
+      },
+      "titulo": "Nombre de la serie",
+      "exibirNaLegenda": false,
+      "exibirEspecificacaoTecnicaNaLegenda": false,
+      "corFixa": true,
+      "cor": "#1f77b4",  // hex color
+      "linha": "Contínuo",
+      "ponto": "circulo pequeno" | "asterisco" | "triangulo",
+      "tracarReta": true,
+      "_id": "<ObjectId>"
+    }
+  ],
+  "configuracoesPadrao": {
+    "intervalos": {
+      "principal": {
+        "x": { "casasDecimais": 0, "intervalo": [min, max], "tipo": "...",
+               "labelTicks": 1 },
+        "y": { ... }
+      }
+    }
+  },
+  "_id": "<ObjectId>"
+}
+
+OBSERVACIONES:
+- "escala": "log" para granulometrías (eje X tamaño de partícula).
+- "filtroPontos.habilitado: true" + campo Booleano: solo grafica puntos donde
+  ese campo sea true (patrón "usar-valor").
+- "tracarReta: true" conecta los puntos con líneas rectas.
+- "suavizacao.habilitado: true" suaviza la línea.
+- El objeto "campo" en series.campos.x/y duplica todos los atributos del campo
+  original (no es una referencia).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. CONVENCIONES PARA NUEVOS JSONS (AL GENERAR)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- "versao": 1 para todos los procs y workflow al crearlo (salvo indicación
+  contraria del usuario).
+- "publicada": false en el workflow al crear (se publica desde la UI).
+- "responsavel": usar el ObjectId que el usuario provea (placeholder por
+  defecto: "000000000000000000000000" si no hay otro).
+- "dataPublicacao": fecha actual en formato ISO ("2026-05-26T00:00:00.000Z").
+- "justificativa": "Criação do procedimento." al crear; cambiar al actualizar.
+- "__v": 0 siempre.
+- "_id" / ObjectIds: son MongoDB ObjectIds (24 caracteres hex). Estructura:
+
+      AAAAAAAA  BBBBBBBBBBBB  CCCCCC
+      └──┬───┘  └─────┬────┘  └─┬──┘
+      timestamp  máquina/pid  contador
+      (8 chars)   (12 chars)  (6 chars)
+
+  REGLA CRÍTICA: dentro de un MISMO JSON, todos los IDs comparten la misma
+  base de 18 chars (timestamp + máquina) y solo varía el contador final de
+  6 chars. Esto refleja que se crearon en una misma sesión/proceso.
+
+  Procedimiento para generar IDs en un JSON nuevo (verificado con análisis
+  cuantitativo de 5 ensayos reales):
+    1) Elegir UN solo "random portion" de 10 chars hex para todo el JSON
+       (simula la máquina/proceso que creó el archivo). Ej: "a3c4b5e6f7".
+    2) Para el timestamp (8 chars), partir de la fecha actual en hex
+       (int(unix_time) → hex de 8 chars) e INCREMENTAR ligeramente con cada
+       nuevo ID (ej: +1 por ID, simula segundos sucesivos de creación). Esto
+       hace que los IDs no tengan timestamp idéntico (lo cual es lo natural).
+    3) Para el counter (6 chars), arrancar desde un valor base aleatorio
+       (ej: "100000") e incrementar +1 por cada ID.
+    4) Concatenar: timestamp_actual + random_constante + counter.
+
+  Ejemplo de un JSON nuevo con 4 entidades (timestamp base 683ad000):
+    _id #1: "683ad000" + "a3c4b5e6f7" + "100000" → "683ad000a3c4b5e6f7100000"
+    _id #2: "683ad001" + "a3c4b5e6f7" + "100001" → "683ad001a3c4b5e6f7100001"
+    _id #3: "683ad002" + "a3c4b5e6f7" + "100002" → "683ad002a3c4b5e6f7100002"
+    _id #4: "683ad003" + "a3c4b5e6f7" + "100003" → "683ad003a3c4b5e6f7100003"
+
+  ALTERNATIVA SIMPLIFICADA (también válida, observada en bursts reales):
+  Si el JSON es pequeño (< 30 IDs), se puede usar TIMESTAMP CONSTANTE para
+  simular un "burst" de creación rápida. Los archivos reales hacen esto:
+    _id #1: "683ad000a3c4b5e6f7100000"
+    _id #2: "683ad000a3c4b5e6f7100001"
+    _id #3: "683ad000a3c4b5e6f7100002"
+  Esto es válido (CPN tiene 9 IDs con el mismo timestamp "69f78356").
+
+  ESTADÍSTICAS VERIFICADAS en archivos reales:
+    HUM (17 IDs): 1 random cubre 94% de IDs, 15 timestamps únicos
+    DEN (104 IDs): 1 random cubre 79% de IDs, 78 timestamps únicos
+    PDL (17 IDs): 1 random cubre 82% de IDs, 15 timestamps únicos
+    Patrón: el random portion es CONSTANTE para la mayoría, los timestamps
+    varían naturalmente, el counter incrementa.
+
+  Mantener coherencia entre referencias dentro del JSON:
+  - El "_id" del proc en tiposProcedimentosPublicados debe coincidir con el
+    "versao" en workflow.atividades.atributosProcedimento.
+  - La "referencia" del proc en tiposProcedimentosPublicados es un _id
+    distinto (el del tipoProcedimento, no de la versión) y debe coincidir
+    con el "tipo" en workflow.atividades.atributosProcedimento.
+  - Las "atividade" en workflow.telaResultados deben coincidir con los "_id"
+    de las atividades en workflow.atividades.
+  - Las "dependencias" del proc deben coincidir con el "referencia" del proc
+    dependido (no su "_id").
+
+  NOTA: el "responsavel" es el ÚNICO ObjectId que NO se genera nuevo en cada
+  JSON — corresponde a un usuario del sistema y debe ser provisto por el
+  usuario final (o usar placeholder si no se conoce).
+
+CONVENCIÓN DE NOMBRES DE PROCEDIMIENTOS:
+- "SIGLA - Nombre del Procedimiento" para el "nome".
+- "sigla-nombre-procedimiento" para el "identificador".
+- Ej: "CPN - Densidad" → "cpn-densidad"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13.5. REGLAS DE BUENAS PRÁCTICAS (críticas — del revisor experto SimpleLab)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ Estas 5 reglas son CRÍTICAS para fichas profesionales y reutilizables. Las
+recibimos del revisor experto de SimpleLab al evaluar el primer set de fichas
+de Cerro Verde. Deben aplicarse SIEMPRE en fichas nuevas.
+
+REGLA 1 — EQUIPOS: usar tipo Referência, NUNCA tabla auxiliar
+  - Tipo Referência apunta al equipo registrado en el módulo de Equipos del
+    sistema. Trae calibraciones, certificados, alertas, trazabilidad.
+  - NO usar tablas auxiliares para listar moldes, taras, densímetros, conos,
+    picnómetros, frascos, anillos, etc.
+  - Patrón correcto: campo Referência → equipo "Moldes"; lookup atributo con
+    p["n-de-molde"]["peso"] o d["tara-n"]["peso"].
+  - Equipos típicos: Moldes, Taras, Densímetros, Conos de Arena, Picnómetros,
+    Anillos/Marcos, Bandejas, Termómetros, etc.
+
+REGLA 2 — TABLAS AUXILIARES solo para datos normativos
+  - Permitido: tablas de tamices (mallas ASTM, aberturas), tablas de viscosidad
+    del agua por temperatura, densidad del agua por temperatura, factores de
+    corrección por método, tablas indices del sistema, etc.
+  - PROHIBIDO: tablas para almacenar resultados de ensayos (ej. tabla
+    "curvas-proctor" con MDS y OCM). Esto convierte la tabla en una base de
+    datos operativa con riesgo de inconsistencias.
+  - Si necesitas datos de un ensayo previo: o el operador los tipea como
+    entrada (con código de trazabilidad), o se referencian con
+    PARAMETRO/RESULTADO entre fichas (cuando el sistema lo soporte).
+
+REGLA 3 — NO duplicar info de muestra/obra/ubicación en Datos Iniciales
+  - Estos datos viven en las entidades del sistema (Muestra, Obra, Ubicación
+    de Toma de Muestra). La ficha NO debe pedirlos de nuevo.
+  - NO incluir en la ficha: Proyecto, Propietario, Gerencia, Área, Producto
+    Entregable, N° Sistema, Código Facilidad, Especificación, Ubicación de la
+    muestra, Material, Tipo de material, Procedencia.
+  - SÍ incluir en la ficha: solo lo específico de la ejecución del ensayo:
+    N° de registro, fecha de ensayo, código del ensayo, número de prueba,
+    profundidad de toma, identificadores únicos del ensayo.
+
+REGLA 4 — NO info fija de proyecto/obra como constantes
+  - NO hardcodear nombres específicos como "TL SADDLE DAM", "Sociedad Minera
+    Cerro Verde", códigos de proyecto específicos, normas con sufijos del
+    proyecto, etc.
+  - La ficha debe ser reutilizable en cualquier proyecto/obra.
+  - Excepción: la norma de ensayo (ej. "ASTM D1556") sí es universal y puede
+    ir como constante en la metadata del ensayo (tipoEnsaio.normasReferencia)
+    o como Resultado fijo si se quiere mostrar.
+
+REGLA 5 — NO listas fijas de colaboradores/personal
+  - NO incluir listas con nombres de técnicos, supervisores, operadores,
+    revisores, verificadores, contratistas, ensayadores, muestreadores.
+  - El personal pertenece al registro de usuarios del sistema. SimpleLab
+    maneja quién ejecuta cada paso del ensayo.
+  - NO incluir campos: Operador, Ensayado por, Muestreado por, Revisado por,
+    Verificado por, Supervisor, Cono ensayado por, Granulometría ensayada
+    por, etc.
+  - El operario inicia sesión y queda automáticamente trazado.
+
+PATRÓN MÍNIMO de Datos Iniciales (siguiendo las 5 reglas):
+  - Norma de ensayo (constante, opcional)
+  - N° Registro / Código del ensayo (entrada Textual)
+  - Fecha de ensayo (entrada Data)
+  - Identificadores únicos del ensayo (N° prueba, N° capa, profundidad,
+    coordenadas si aplica, etc.)
+  - SUFICIENTE. Cualquier campo que duplique algo del Sistema, fuera.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. NOTAS CRÍTICAS Y BUGS CONOCIDOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Strings con acento ("Pasó", "Falló") PUEDEN romper el parser. Preferir sin
+   acento: "Paso", "Fallo". (Aunque en algunos ensayos como PDL usan
+   "Conforme/No conforme" sin problema — sin acentos siempre seguro.)
+
+2. Funciones case-insensitive: IF = if = If.
+
+3. Identificadores SIEMPRE entre comillas dobles: d["nombre-del-campo"].
+
+4. Valores de texto SIEMPRE entre comillas dobles: EQUAL(p["x"], "A").
+
+5. Valores de Lista llegan como TEXTO. Para filtrar TABELA() hay DOS opciones:
+   a) RECOMENDADO (probado, funciona): definir la columna de filtro en la tabla
+      como tipo TEXTUAL (no Numérico). Entonces:
+        TABELA("...", "...", ["numero"], [p["lista-campo"]])
+      Esta es la práctica de TODOS los ensayos reales (CPN, DEN, GRA, etc.).
+   b) Documentación dice usar NUMERO(p["lista-campo"], 0), pero NINGÚN ensayo
+      real usa esta función — puede no estar implementada. EVITAR.
+   ⚠️ AL DEFINIR TABLAS AUXILIARES: las columnas que serán filtro por valor
+   de Lista deben ser TEXTUAL, no Numérico. Los valores numéricos quedan
+   como "12", "13", "14" — funcionan igual.
+
+   REGLA GENERAL para tipo de columna en tabla auxiliar:
+   - Filtro con CAMPO LISTA  → columna TEXTUAL (Lista devuelve texto)
+   - Filtro con DINDEX()/EINDEX() → columna NUMÉRICA (índices son número)
+   - Filtro con CAMPO NUMÉRICO → columna NUMÉRICA
+   - Columnas que solo se LEEN (no se filtran) → su tipo natural
+     (texto para nombres, número para valores)
+
+   Ejemplos verificados:
+   - moldes(orden, numero, peso, volumen):
+       orden=Num, numero=TEXTUAL (filtra contra Lista), peso=Num, volumen=Num
+   - pr-tamices(orden, malla, abertura):
+       orden=Num (filtra contra DINDEX), malla=Textual, abertura=Num
+
+   ⚠️ NUEVA FUNCIONALIDAD (descubierta en CAP): EQUIPOS COMO REFERENCIA
+   Para EQUIPOS (conos, densímetros, moldes, taras, etc.) el sistema ahora
+   soporta el tipo "Referência" en vez de Lista + TABELA. Es MÁS LIMPIO y
+   más natural — usar siempre que apliquen.
+
+   PATRÓN VIEJO (Lista + TABELA):
+     Campo "N° de molde" tipo Lista con valores ["12","13","14"]
+     Campo "Peso molde" Resultado:
+       TABELA("moldes", "peso", ["numero"], [p["n-de-molde"]])
+
+   PATRÓN NUEVO (Referência + acceso directo):
+     Campo "N° de molde" tipo Referência → apunta al equipo "Moldes"
+       JSON: {
+         "tipo": "Referência",
+         "attrsEntrada": {
+           "tipoLista": "Valores", "lista": [],
+           "referencia": {
+             "_id": "<ObjectId del tipo de equipo>",
+             "nome": "Moldes",
+             "identificador": "equipamento_moldes"
+           },
+           "valorDefault": false
+         },
+         ...
+       }
+     Campo "Peso molde" Resultado:
+       p["n-de-molde"]["peso"]    ← acceso directo al atributo del equipo
+
+   Para acceder al atributo desde OTRO procedimiento:
+     PARAMETRO("cap-datos-iniciales", "cono-numero")["peso-arena"]
+
+   Para acceder desde Determinaciones (d[]) sigue el mismo patrón:
+     d["n-tara"]["peso"]
+
+   EQUIPOS DISPONIBLES Y SUS ATRIBUTOS (Cerro Verde):
+   - "Cono de Arena" (conos)  → atributos: numero, peso-arena, densidad
+   - "Densímetros" (densimetros) → atributos: numero, k
+   - "Moldes" (moldes) → atributos: numero, peso, volumen
+   - "Taras" (taras) → atributos: numero, peso
+
+   IMPORTANTE: el ID del equipo (referencia._id) y el identificador interno
+   (ej "equipamento_cono-de-arena") se obtienen del admin del sistema. Si
+   no se conocen al generar el JSON, dejar placeholder y el usuario los
+   ajusta manualmente al importar. O mejor: hacer la indicación al
+   usuario y que él configure el campo Referência en la UI.
+
+6. Valores Booleanos comparar SIN comillas: EQUAL(d["flag"], VERDADEIRO()) o
+   simplemente d["flag"] dentro de IF.
+
+7. IF con 2 argumentos retorna VACÍO si la condición es falsa (no error).
+
+8. Porcentagem: la fórmula opera en fracción (0.131 = 13.1%). No multiplicar
+   por 100. PARAMETRO/RESULTADO/DETERMINACAO de Porcentagem retornan fracción.
+
+9. Todos los índices (DINDEX, EINDEX, AVALUE) empiezan en 1.
+   PERO "ordem" empieza en 0.
+
+10. PUBLICACIÓN: las referencias cruzadas requieren AMBOS procedimientos
+    publicados. Las fórmulas internas no.
+
+11. NO existe función HOY()/AHORA(). Auto-llenar fecha requiere config UI o
+    valor por defecto en la definición del campo (no en fórmula).
+
+12. NO existe contador global de ejecuciones. Auto-numerar códigos requiere
+    config UI a nivel de procedimiento (máscara/prefijo). No se puede hacer
+    con fórmula.
+
+13. Bug detectado en CPN: la curva-de-compactacion referencia
+    p["densidad-de-campo-seca-maxima"] que no existe (debería ser
+    "densidad-seca-maxima"). Cuidado al copiar.
+
+14. Las tablas auxiliares (TABELA / EQUIPAMENTO) las gestiona el admin del
+    sistema. SimpleLab necesita tabla creada ANTES de importar el JSON.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. TABLAS AUXILIARES DETECTADAS (estructura conocida)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  indices         orden | indice | punto-dos-determinaciones |
+                  punto-tres-determinaciones | dos-determinaciones |
+                  tres-determinaciones
+                  (Sistema: reorganiza filas cuando hay múltiples
+                  determinaciones por punto.)
+
+  gra-tamices     orden | malla (Tyler) | abertura (µm)
+                  (Granulometría general — análisis granulométrico)
+
+  den-tamices    orden | malla (Tyler) | abertura (µm)
+                  (Granulometría dentro del ensayo de densidad in situ)
+
+  Otras conocidas (proyecto Cerro Verde):
+  taras           orden | numero | peso (24 entradas conocidas)
+  moldes          orden | numero | peso | volumen
+  conos           orden | numero | peso-arena | densidad
+  densimetros     orden | numero | k
+  curvas-proctor  orden | codigo | mds | ocm
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+16. ARQUITECTURA TÍPICA DE UN ENSAYO COMPLEJO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para un ensayo con datos en serie (varios puntos/etapas):
+
+  GRUPO "Datos Iniciales" (sin etapas)
+    └── Procedimiento de cabecera/configuración
+
+  GRUPO "Mediciones" (CON ETAPAS, possuiEstagios: true, quantidadeMinima: N)
+    ├── Procedimiento de identificación del punto/etapa
+    ├── Procedimiento de medición A (depende de B, C con mesmoEstagio: true)
+    ├── Procedimiento de medición B
+    └── Procedimiento de medición C
+
+  GRUPO "Resultados" (sin etapas)
+    └── Procedimiento que JALA con
+        PARAMETRO/RESULTADO(..., ["estagio"], [DINDEX()])
+        y promedia con DMEDIA.
+
+Para un ensayo más simple:
+
+  GRUPO único (sin etapas)
+    ├── Procedimiento principal
+    └── Procedimiento de cálculo/curva (depende del principal)
+
+O incluso:
+
+  Procedimiento único sin grupo (workflow.atividades[0].tipo: "Procedimento")
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+17. ENSAYOS YA ANALIZADOS (referencias para patrones)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HUM - Humedad
+  1 proc (hum-humedades), 8 determinaciones por defecto, sin gráficos.
+  Patrón: cálculo simple ASTM D2216.
+
+PDL - Placa Dinámica Ligera
+  1 proc (pdl-resultado), minimoDeterminacoes 100, 1 parámetro criterio.
+  Patrón: conformidad GTE → "Conforme" / "No conforme".
+
+GRA - Análisis Granulométrico
+  2 procs en un grupo (gra-tamizado, gra-curva), maximoDeterminacoes 8.
+  Gráfico log-X con filtroPontos. Cálculos P50/P80 interpolación log-log.
+  Tabla aux: gra-tamices.
+
+CPN - Compactación Proctor Normal
+  3 procs en un grupo (cpn-humedades, cpn-densidad, cpn-curva-de-compactacion).
+  cpn-densidad calcula MDS/HOP con MAX(DVALUES) + GETINDEX(MAX(DVALUES)).
+  Gráfico de la curva con punto rojo para el máximo.
+  Tabla aux: indices.
+
+DEN - Densidades In Situ
+  5 procs en 3 grupos. Grupo central CON ETAPAS (quantidadeMinima: 3).
+  Usa PARAMETRO/RESULTADO con ["estagio"], [DINDEX()].
+  Promedios con DMEDIA. EINDEX() para nombrar puntos.
+  Tabla aux: den-tamices.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+18. FLUJO DE TRABAJO RECOMENDADO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USUARIO → entrega:
+  - Excel del ensayo (con fórmulas para ver dependencias)
+  - Fotos del formato (para entender el layout visual)
+  - Indicaciones específicas (qué procs quiere, restricciones, etc.)
+
+IA → entrega:
+  1) Análisis rápido del Excel (qué celdas son entrada, cuáles cálculo, qué
+     tablas auxiliares hace falta).
+  2) Propuesta de arquitectura (cuántos procs, qué hace cada uno, etapas).
+  3) Confirmación con el usuario antes de generar JSON.
+  4) JSON completo del ensayo (un solo archivo).
+  5) ⚠️ OBLIGATORIO al finalizar: recordatorio explícito de las tablas
+     auxiliares (nuevas y existentes que se reutilizan) que el admin debe
+     verificar/crear ANTES de importar el JSON. Incluir nombre, columnas,
+     tipos y filas exactas. Si no se mencionan, las fórmulas TABELA() van
+     a fallar silenciosamente.
+  6) ⚠️ OBLIGATORIO: TODAS las tablas auxiliares se entregan como archivos
+     .csv (uno por tabla) con cabecera de columnas y filas listas para
+     importar. El usuario sube directo el CSV al sistema sin transcribir
+     manualmente. Convención de nombre: el mismo identificador de la tabla
+     con extensión .csv (ej: pr-tamices.csv, moldes.csv, taras.csv).
+     Encoding UTF-8, separador coma. Sin BOM.
+
+PUBLICACIÓN:
+  1) Admin crea las tablas auxiliares.
+  2) Usuario importa el JSON al sistema.
+  3) Sistema asigna IDs (los placeholders del JSON se reemplazan).
+  4) Usuario publica los procedimientos para activar referencias cruzadas.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+19. CHECKLIST AL GENERAR UN JSON DE ENSAYO COMPLETO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] referencia (string en raíz) coincide con tipoEnsaio.nome
+[ ] tipoEnsaio: sigla 3 letras, categoría correcta, normasReferencia listas
+[ ] workflow.versao: 1 (al crear)
+[ ] workflow.publicada: false
+[ ] workflow.atividades: orden lógico de ejecución
+[ ] workflow.atividades[].atributosProcedimento.tipo coincide con un
+    tiposProcedimentosPublicados[]._id
+[ ] workflow.atividades[].atributosProcedimento.versao coincide con un
+    tiposProcedimentosPublicados[]._id (mismo proc, no la "referencia")
+[ ] workflow.atividades[].atributosProcedimento.dependencias.referencia
+    coincide con tiposProcedimentosPublicados[].referencia del dependido
+[ ] workflow.atividades[].atributosProcedimento.dependencias.atividade
+    coincide con workflow.atividades[]._id del dependido
+[ ] workflow.atividades[].atributosProcedimento.dependencias.mesmoEstagio
+    se setea true si están en el mismo grupo con etapas, false si no
+[ ] Grupos con etapas: possuiEstagios: true + quantidadeMinima: N
+[ ] minimoDeterminacoes / maximoDeterminacoes apropiados por proc
+[ ] workflow.telaResultados: 1 entrada por proc visible, con tipo "Estágios"
+    para grupos con etapas
+[ ] Cada proc tiene: _id, nome, identificador, layout, colunasParametros,
+    dependencias, parametros, determinacoes, resultados, graficos,
+    versao: 1, referencia, dataPublicacao, responsavel, justificativa
+[ ] Campos: ordem único por sección, casasDecimais correcto por tipo,
+    attrsEntrada/attrsResultado bien diferenciados
+[ ] Fórmulas: validar acceso entre secciones (p[] no lee d[]/r[] del mismo proc)
+[ ] Fórmulas: cierre de paréntesis correcto
+[ ] Strings: sin tildes en valores tipo "Paso/Fallo"
+[ ] Porcentagem: fracciones, no multiplicar por 100
+[ ] Lista: usar NUMERO() para filtros numéricos en TABELA
+[ ] Si usa tablas auxiliares: listar las que el admin debe crear
+[ ] Todos los _id del JSON comparten la misma base de 18 hex chars
+    (timestamp + máquina) y solo difieren en el contador final (6 chars)
+[ ] El único _id que NO sigue esta regla es "responsavel" (es el usuario)
+[ ] ⚠️ CRÍTICO: para CADA campo, sanitize(nome) == identificador.
+    Implementar con assert en el script de generación. Sin excepciones.
+    Casos típicos que se olvidan: "N° ..." → "n-...", "% ..." → "..."
+    (renombrar a algo descriptivo), nombres con paréntesis, acentos, etc.
+[ ] TODAS las fórmulas que usan d[]/p[]/r[] referencian identificadores que
+    EXISTEN en el procedimiento (sin typos, sin IDs viejos olvidados).
+
+
+==============================================================================
+20. LECCIONES SGS - PATRONES DEFINITIVOS PARA FICHAS COMPLEJAS
+==============================================================================
+
+Esta sección captura el aprendizaje doloroso de migrar los Excel SGS
+(CA12 - Cono de Arena, RA - Reemplazo de Agua, GR - Granulometría D6913)
+desde su estructura visual hacia SimpleLab. Léelo ANTES de generar fichas
+con varios procs y dependencias cruzadas.
+
+------------------------------------------------------------------------------
+20.1  REGLA #1 (DOLOROSA): PARAMETRO/RESULTADO entre procs NO basta con
+      tenerlos publicados - la dep DEBE estar declarada DENTRO de cada proc
+------------------------------------------------------------------------------
+
+  proc.dependencias  != workflow.atividades[].atributosProcedimento.dependencias
+
+  Son DOS estructuras distintas y AMBAS deben coincidir:
+
+  A) Dependencia INTERNA del proc (dentro de tipoProcedimentoPublicado):
+     formato SIMPLE: referencia + nome + identificador + _id.
+     NO lleva mesmoCP, mesmoEstagio, atividade.
+
+  B) Dependencia del WORKFLOW (atividade.atributosProcedimento.dependencias):
+     formato EXTENDIDO: lleva mesmoCP, mesmoEstagio y referencia al
+     atividade._id del workflow.
+
+  Si declaras la dependencia SOLO en el workflow, PARAMETRO devuelve
+  vacío y la fórmula nunca evalúa. Esto se manifiesta como "-" en la
+  ficha de ejecución y horas perdidas debugueando.
+
+  SINTOMA TIPICO: el campo destino muestra "-" aunque la fórmula está
+  bien escrita y el proc origen está publicado.
+
+  FIX: agregar la dependencia INTERNA al proc.dependencias.
+
+------------------------------------------------------------------------------
+20.2  REGLA #2 - ESTRATEGIA ANTI-CICLO: cálculos complejos centralizados
+      en UN proc + espejos simples en el resto
+------------------------------------------------------------------------------
+
+  PATRON GANADOR (probado en GR SGS0):
+
+  1) Un proc "motor" CENTRAL que contiene:
+     - La tabla de determinaciones (donde se hace DSOMA, DATTR, DVALUES)
+     - TODOS los cálculos complejos con AND/IF múltiples + PARAMETRO
+
+  2) Procs "auxiliares" (vista por sección del Excel):
+     - SOLO entradas crudas del operador
+     - Cálculos LOCALES simples con p[] del mismo proc
+     - SIN espejos del proc motor (eso crearía ciclo)
+
+  3) Procs "Resultados" finales:
+     - Solo espejos simples: formula = PARAMETRO("motor", "campo")
+     - Ningún cálculo complejo (esos ya se hicieron en el motor)
+
+  Dependencias UNI-direccionales:
+     auxiliares -> motor -> resultados
+
+  ANTI-PATRON (no hacer):
+     proc A calcula X usando dato de B
+     proc B calcula Y usando dato de A
+     -> CICLO
+
+------------------------------------------------------------------------------
+20.3  REGLA #3 - DSOMA con flag booleano para sumas filtradas
+------------------------------------------------------------------------------
+
+  DSOMA("campo", "filtro") suma "campo" en filas donde "filtro" es TRUE.
+
+  Para sumar las primeras N filas de una determinación:
+
+  1) Crear columna boolean "es-grava" en la determinación con fórmula:
+       LTE(DINDEX(), 13)   <- TRUE para filas 1..13
+     (marcar exibirTelaExecucao=False y exibirTelaResultados=False)
+
+  2) Sumar con: DSOMA("peso-retenido", "es-grava")
+
+  Similar "es-fraccion-fina" con AND(GTE(DINDEX(),14), LTE(DINDEX(),24))
+  para excluir la fila de Fondo.
+
+  ALTERNATIVA mas robusta - filtrar por valor de abertura:
+       es-grava        = GTE(d["abertura"], 4.75)
+       es-fraccion-fina = AND(GT(d["abertura"], 0), LT(d["abertura"], 4.75))
+
+------------------------------------------------------------------------------
+20.4  REGLA #4 - IF de 2 argumentos NO acepta valor vacío entre comas
+------------------------------------------------------------------------------
+
+  INVALIDO (error "Unexpected token ','"):
+       IF(EMPTY(d["peso"]), , IF(...))
+
+  VALIDO (negar + IF de 2 args, retorna vacío automáticamente):
+       IF(NOT(EMPTY(d["peso"])), IF(...))
+
+  Regla en SimpleLab:
+  - 3 args: IF(cond, valor_true, valor_false)
+  - 2 args: IF(cond, valor_true)  <- devuelve VACIO si cond es false
+  - No se puede pasar "vacío explícito" con dos comas seguidas.
+
+------------------------------------------------------------------------------
+20.5  REGLA #5 - Determinaciones se modelan como CAMPOS individuales,
+      NO como sub-tabla con "colunas"
+------------------------------------------------------------------------------
+
+  Patron CORRECTO (modelo GRA confirmado):
+    proc.determinacoes = [
+        {nome: "Malla", identificador: "malla", categoria: "Resultado", ...},
+        {nome: "Abertura", identificador: "abertura", ...},
+        {nome: "Peso Retenido", identificador: "peso-retenido",
+         categoria: "Entrada", ...},
+        {nome: "Retenido Parcial", identificador: "retenido-parcial",
+         categoria: "Resultado", formula: ..., ...},
+        ...
+    ]
+
+  Cada elemento de proc.determinacoes ES UNA COLUMNA. NO una sub-tabla
+  con su lista "colunas".
+
+  El número de filas se controla con:
+    workflow.atividades[].atributosProcedimento.minimoDeterminacoes = N
+    workflow.atividades[].atributosProcedimento.maximoDeterminacoes = N
+  <- va en el workflow (atividade), no en el proc.
+
+------------------------------------------------------------------------------
+20.6  REGLA #6 - Tabla auxiliar: identificador SIN sufijo de versión
+------------------------------------------------------------------------------
+
+  BUENO:  gr-tamices-sgs        <- genérico, reutilizable
+  MALO:   gr-tamices-sgs-5      <- obliga a recrear en cada versión
+
+  Cuando subes una nueva versión del JSON del ensayo, la tabla aux ya
+  existe en SimpleLab. NO la incluyas en el JSON nuevo. Solo referénciala
+  desde las fórmulas TABELA("tabela-id", ...).
+
+------------------------------------------------------------------------------
+20.7  REGLA #7 - Comillas dobles en CSV: SimpleLab no escapa
+------------------------------------------------------------------------------
+
+  Si el CSV tiene una columna con comilla doble (ej. malla = pulgada),
+  Python (csv.writer) las escapa con dobles comillas. SimpleLab NO
+  entiende ese escape y muestra el escape literal en la ficha.
+
+  FIX: escribir el CSV SIN envolver entre comillas (sin escape).
+  En Python: usar f.write(linea) manualmente, NO csv.writer.
+
+------------------------------------------------------------------------------
+20.8  REGLA #8 - DIVISION POR SECCIONES DEL EXCEL
+------------------------------------------------------------------------------
+
+  Cuando el Excel tiene "cajas" o "secciones" visuales (PESOS TOTALES,
+  CORRECCION POR HUMEDAD, FRACCION LAVADO FINO, etc.), conviene
+  reflejarlas como PROCS SEPARADOS dentro del grupo "Ensayo".
+
+  Estructura recomendada:
+    Grupo "Datos Iniciales"
+      - 1 proc cabecera
+    Grupo "Ensayo"
+      - 1 proc por sección del Excel (3-5 procs)
+      - 1 proc "motor" con la tabla de determinaciones + cálculos complejos
+    Grupo "Resultados"
+      - 1 proc por sección lógica de la ficha final (4-6 procs)
+      - 1 proc final con el gráfico (si aplica)
+
+------------------------------------------------------------------------------
+20.9  REGLA #9 - VISIBILIDAD: separar pantalla de EJECUCION y RESULTADOS
+------------------------------------------------------------------------------
+
+  Cada campo tiene DOS toggles independientes:
+    exibirTelaExecucao   -> se muestra en la ficha de ejecución
+    exibirTelaResultados -> se muestra en la pantalla de resultados final
+
+  Casos tipicos:
+
+  A) Datos crudos del operador (las "celdas rojas" del Excel):
+       exibirTelaExecucao = True
+       exibirTelaResultados = False
+
+  B) Resultados finales para informe:
+       exibirTelaExecucao = True
+       exibirTelaResultados = True
+
+  C) Espejos ocultos / flags booleanos (es-grava, es-fraccion-fina):
+       exibirTelaExecucao = False
+       exibirTelaResultados = False
+
+------------------------------------------------------------------------------
+20.10  REGLA #10 - CONDICIONALES EN DETERMINACIONES SEGUN DINDEX
+------------------------------------------------------------------------------
+
+  Caso tipico (granulometría D6913): el % retenido parcial usa fórmulas
+  distintas según la malla:
+    - Mallas grandes (1..13): peso / Masa Total Global Seca
+    - Mallas finas (14..25):  peso / Fraccion Seca x Pasante N4
+
+  Implementación con DINDEX + IF anidados + DATTR:
+    IF(
+        NOT(EMPTY(d["peso-retenido"])),
+        IF(
+            LTE(DINDEX(), 13),
+            IF(
+                AND(NOT(EMPTY(p["masa-total-global-seca"])),
+                    GT(p["masa-total-global-seca"], 0)),
+                d["peso-retenido"] / p["masa-total-global-seca"]
+            ),
+            IF(
+                AND(NOT(EMPTY(p["fraccion-seca"])),
+                    GT(p["fraccion-seca"], 0)),
+                d["peso-retenido"] / p["fraccion-seca"] *
+                    DATTR("pasante-acumulado", 13)
+            )
+        )
+    )
+
+  Truco clave: DATTR("pasante-acumulado", 13) lee el valor ya calculado
+  de la fila 13. No genera ciclo porque la fila 14 se evalúa DESPUES
+  de la fila 13 en la cascada de la tabla.
+
+------------------------------------------------------------------------------
+20.11  REGLA #11 - DATTR para acumulados (suma corrida)
+------------------------------------------------------------------------------
+
+  Para calcular un acumulado fila por fila:
+    retenido-acumulado:
+      IF(
+          GT(DINDEX(), 1),
+          DATTR("retenido-acumulado", DINDEX()-1) + d["retenido-parcial"],
+          IF(EMPTY(d["retenido-parcial"]), 0, d["retenido-parcial"])
+      )
+
+  Primera fila (DINDEX=1): es el primer parcial.
+  Filas siguientes: acumulado anterior + parcial actual.
+
+  Pasante acumulado = 1 - retenido acumulado (Porcentagem fracción).
+
+------------------------------------------------------------------------------
+20.12  REGLA #12 - GRAFICOS LOG (curva granulométrica)
+------------------------------------------------------------------------------
+
+  Estructura del gráfico en proc.graficos[0]:
+    - eixos.principal.x.escala = "log"
+    - eixos.principal.y.escala = "linear"
+    - tipo = "linha"
+    - series[0].campos.x.formula = AVALUE(DETERMINACOES("motor", "abertura"), DINDEX())
+    - series[0].campos.y.formula = AVALUE(DETERMINACOES("motor", "pasante-acumulado"), DINDEX())
+    - series[0].filtroPontos.habilitado = true
+    - series[0].filtroPontos.campo.formula = AND(NOT(EMPTY(d["abertura"])), GT(d["abertura"], 0))
+      (para excluir el Fondo con abertura=0)
+
+  El proc de la curva debe tener su propia determinación con N filas
+  (mismas que el motor) que ESPEJEN los valores via:
+     AVALUE(DETERMINACOES("motor-proc", "campo"), DINDEX())
+
+  Y forzar el mismo N de filas con minimoDeterminacoes/maximoDeterminacoes
+  en el workflow.
+
+------------------------------------------------------------------------------
+20.13  REGLA #13 - SUFIJO DE VERSION EN IDENTIFICADORES + IDs MongoDB
+------------------------------------------------------------------------------
+
+  Si vas a subir varias versiones al mismo SimpleLab, los identificadores
+  DEBEN ser distintos. Patron recomendado:
+
+    Nombre visible: "GR - Tamizado SGS"   (final, sin sufijo de versión)
+    Identificador:  "gr-tamizado-sgs-0"   (con sufijo -0, -1, -2 para iterar)
+
+  Para el sistema oficial: mantén el sufijo más bajo (ej. -0).
+
+  Cada nueva versión que vayas a SUBIR (no sobrescribir) debe usar:
+  - Identificadores nuevos (cambio de sufijo)
+  - _id MongoDB nuevos (cambiar BASE_TIMESTAMP y/o RANDOM_PART del generador)
+  - Tabla aux puede ser la misma (gr-tamices-sgs sin sufijo)
+
+------------------------------------------------------------------------------
+20.14  REGLA #14 - PORCENTAJES Y EL /100 OCULTO
+------------------------------------------------------------------------------
+
+  En Excel los % se calculan como (a/b) y el formato de celda añade "%".
+  En SimpleLab, si el campo es de tipo Porcentagem, la fórmula opera
+  en FRACCION (0.072 = 7.2%).
+
+  Cuando portas "= a/b" de Excel a SimpleLab tipo Porcentagem, el valor
+  sale 100x más grande en el informe.
+
+  FIX: dividir entre 100 explícitamente:
+       formula: (a / b) / 100
+
+  Aplica al "% de Error" y similares donde Excel ya mostraba el % final.
+
+------------------------------------------------------------------------------
+20.15  PATRON COMPLETO RECOMENDADO PARA ENSAYO GRANULOMETRICO
+------------------------------------------------------------------------------
+
+  Grupo "Datos Iniciales"
+    [P1] datos-iniciales      (cabecera: registro, fecha, ubicación)
+
+  Grupo "Ensayo"
+    [P2] pesos-totales        (Peso Inicial - entrada cruda)
+    [P3] correccion-humedad   (4 entradas + % Humedad calc local)
+    [P4] fraccion-lavado-fino (4 entradas + Fraccion Humeda Neta calc local)
+    [P5] tamizado (MOTOR)     (espejos de P2/P3/P4 ocultos +
+                               tabla 25 mallas + DSOMA + cálculos complejos)
+                              dep internas: P2, P3, P4
+
+  Grupo "Resultados"
+    [P6]  descripcion-muestra        (espejos: pesos)         dep: P5
+    [P7]  fraccion-pasa-n200         (espejos: fracciones)    dep: P5
+    [P8]  humedad                    (espejo % humedad)       dep: P3
+    [P9]  caracteristicas            (bolonería/grava/arena)  dep: P5
+    [P10] descripcion-material       (texto libre)
+    [P11] curva-granulometrica       (gráfico log)            dep: P5
+
+  Visibilidad:
+    - Procs P2-P4 (entradas crudas): exibirTelaResultados=False
+    - Proc P5 parámetros: exibirTelaResultados=False
+    - Proc P5 determinaciones (la tabla): exibirTelaResultados=True
+    - Procs P6-P11: todo exibirTelaResultados=True
+
+  Sin ciclos. Probado y funcionando en GR SGS0.
+
+------------------------------------------------------------------------------
+20.16  CHECKLIST EXTRA "FICHA SGS"
+------------------------------------------------------------------------------
+
+[ ] Dependencias INTERNAS declaradas en proc.dependencias de cada proc
+    que use PARAMETRO/RESULTADO/DETERMINACAO (no solo workflow)
+[ ] Sin ciclos: cada proc tiene un único sentido de dependencia
+[ ] Cálculos complejos centralizados en un proc "motor"
+[ ] Espejos simples (1 sola llamada PARAMETRO) en procs de resultados
+[ ] DSOMA con flag booleano para sumas filtradas (es-grava, es-fina)
+[ ] IF nunca lleva dos comas seguidas con vacío en medio
+[ ] Determinaciones modeladas como CAMPOS individuales, no sub-tablas
+[ ] Tabla auxiliar con identificador SIN sufijo de versión
+[ ] CSV sin escape de comillas (escribir manualmente sin csv.writer)
+[ ] Datos crudos: exibirTelaResultados=False
+[ ] Resultados finales: exibirTelaResultados=True
+[ ] Tabla determinaciones del motor: visible en resultados
+[ ] minimoDeterminacoes/maximoDeterminacoes en workflow.atividade (no proc)
+[ ] Si hay gráfico log: escala "log" en eje X, filtroPontos para excluir
+    abertura=0 (Fondo)
+[ ] Porcentagem: dividir entre 100 si Excel tenía la escala ya en %
+[ ] Sufijo de versión en identificadores (-sgs-0, -sgs-1...) para
+    iterar sin chocar; tabla aux puede quedarse sin sufijo
+[ ] _id MongoDB con prefijo (BASE_TIMESTAMP + RANDOM_PART) nuevo en cada
+    versión que se va a subir como nueva al sistema
+
+
+
+------------------------------------------------------------------------------
+20.17  REGLA #17 - RESPETAR TODAS LAS FILAS DEL EXCEL EN SU SECCION ORIGINAL
+------------------------------------------------------------------------------
+
+ERROR FRECUENTE: mover una fila a otro proc por "facilidad" o por evitar
+ciclo. NO HACER. El usuario espera ver TODAS las filas del Excel en el
+proc que corresponde a su seccion gris original.
+
+Ejemplos de filas que tienden a moverse mal:
+  - "Densidad seca" (depende de % humedad total que está en otra seccion)
+  - "% humedad muestra total" (depende de la seccion Correccion)
+
+SOLUCION CORRECTA: poner ESPEJOS visibles en el proc origen + el calculo
+real en el proc motor.
+  - En la seccion origen (ej. Densidad in Situ), poner la fila como
+    Resultado con formula PARAMETRO("motor-proc", "campo-calc-en-motor")
+  - El usuario VE la fila en su seccion original
+  - El calculo real ocurre en el motor (sin ciclo)
+
+Si los nombres de proc/campo entre la fila visible y el motor coinciden,
+todo bien. El usuario no nota que es un espejo.
+
+------------------------------------------------------------------------------
+20.18  REGLA #18 - USAR NOMBRES COMPLETOS DE SECCIONES DEL EXCEL
+------------------------------------------------------------------------------
+
+El nombre del proc debe ser el TITULO GRIS COMPLETO de la seccion en el
+Excel, no una version abreviada.
+
+  Mal: "Correccion"
+  Bien: "CORRECCION DE LA DENSIDAD SECA Y CONTENIDO DE HUMEDAD (ASTM D4718)"
+
+  Mal: "Densidad in Situ"
+  Bien: "DENSIDAD IN SITU DE LA MUESTRA TOTAL"
+
+  Mal: "Humedad"
+  Bien: "CONTENIDO DE HUMEDAD (ASTM D2216)"
+
+Los identificadores sanitizados sí pueden ser cortos para no exceder
+limites, pero el "nome" debe ser el titulo completo del Excel.
+
+------------------------------------------------------------------------------
+20.19  REGLA #19 - PROCTOR DE REFERENCIA EN GRUPO SEPARADO
+------------------------------------------------------------------------------
+
+En ensayos de densidad in situ (CA12, RA, etc.), el Proctor de Referencia
+debe ir en su PROPIO GRUPO del workflow, no dentro del grupo "Ensayo".
+
+Estructura recomendada:
+  Grupo "Datos Iniciales"      <- cabecera
+  Grupo "Proctor de Referencia" <- datos del Proctor previo
+  Grupo "Ensayo"                <- procs del ensayo en si
+  Grupo "Resultados"            <- ficha final
+
+Esto refleja que el Proctor es un "ensayo previo" cuyos datos se
+referencian, NO parte del ensayo actual.
+
+
+------------------------------------------------------------------------------
+20.20  REGLA #20 - FUSION DE PROCS PARA ROMPER CICLOS LOGICOS INSALVABLES
+------------------------------------------------------------------------------
+
+CONTEXTO: SimpleLab verifica ciclos a nivel de PROCEDIMIENTO, no de campo.
+Excel los acepta porque verifica a nivel de celda individual.
+
+Si un Excel tiene secciones grises con dependencias mutuas (la seccion A
+necesita datos de B y viceversa), separarlas en procs distintos crea
+ciclo aunque las CELDAS internas formen una cascada lineal valida.
+
+DIAGNOSTICO RAPIDO: si tu ensayo tiene 3 secciones donde cada una necesita
+algo de las otras dos, fusionar solo 2 NO resuelve el ciclo - la tercera
+seguira cerrandolo.
+
+SOLUCION DEFINITIVA: fusionar las 3 (o N) secciones cicladas en UN SOLO
+proc grande, con CAMPOS DE TIPO ENCABEZADO para separacion visual.
+
+PATRON "PROC GRANDE CON ENCABEZADOS VISUALES":
+
+  parametros = [
+      # ENCABEZADO 1
+      field("DENSIDAD IN SITU DE LA MUESTRA TOTAL", "encabezado-densidad",
+            0, "Resultado", "Textual",
+            formula='"DENSIDAD IN SITU DE LA MUESTRA TOTAL"'),
+      # Filas 10-14 (entradas + calculos)
+      field("Peso muestra extraida del hoyo + recipiente", ..., 1, "Entrada", ...),
+      field("Peso del recipiente", ..., 2, "Entrada", ...),
+      field("Peso muestra humeda extraida del hoyo", ..., 3, "Resultado", ...),
+      field("Densidad Humeda", ..., 4, "Resultado", ...),
+      field("Densidad seca", ..., 5, "Resultado", ...),
+
+      # ENCABEZADO 2
+      field("CONTENIDO DE HUMEDAD (ASTM D2216)", "encabezado-humedad",
+            6, "Resultado", "Textual",
+            formula='"CONTENIDO DE HUMEDAD (ASTM D2216)"'),
+      # Filas 15-21
+      ...
+
+      # ENCABEZADO 3
+      field("CORRECCION DE LA DENSIDAD SECA Y CONTENIDO DE HUMEDAD (ASTM D4718)",
+            "encabezado-correccion",
+            13, "Resultado", "Textual",
+            formula='"CORRECCION DE LA DENSIDAD SECA Y CONTENIDO DE HUMEDAD (ASTM D4718)"'),
+      # Filas 22-31
+      ...
+  ]
+
+VENTAJAS:
+  - Cliente ve TODAS las filas en su orden Excel correcto
+  - Cliente ve los TITULOS de las secciones grises como encabezados
+  - Sin ciclos (todos los calculos dentro del mismo proc usan p[] local)
+  - Cada fila esta en su orden numerico exacto
+
+TRADE-OFF:
+  - Es un proc visualmente grande (puede tener 20-30 campos)
+  - Pero la separacion con encabezados lo hace navegable
+
+CUANDO USAR ESTE PATRON:
+  - 3+ secciones del Excel con dependencias mutuas (Densidad - Humedad -
+    Correccion en RA, similares en CA12, etc.)
+  - Cuando el cliente NO acepta mover filas a otra seccion
+  - Cuando los espejos no resuelven el ciclo por dependencias mutuas
+
+CUANDO NO USAR:
+  - Si solo 2 secciones tienen dependencia (basta con espejos + dependencias
+    internas declaradas en una sola direccion)
+  - Si el cliente acepta cierta flexibilidad en el orden (entonces patron
+    motor centralizado funciona mejor)
+
+EJEMPLO CONFIRMADO: RA (Reemplazo de Agua) SGS3 fusiona Densidad in Situ +
+Contenido de Humedad + Correccion en un proc grande con 3 encabezados.
+
+
+------------------------------------------------------------------------------
+20.21  REGLA #21 (CRITICA) - TODAS LAS FILAS DEL EXCEL VISIBLES POR DEFECTO
+------------------------------------------------------------------------------
+
+REGLA TAJANTE: TODAS las filas del Excel deben aparecer VISIBLES en la
+pantalla (exibirTelaResultados=True Y exibirTelaExecucao=True), incluso
+si vienen de otro proc via espejo PARAMETRO.
+
+EJEMPLOS DE LO QUE NO HAY QUE HACER:
+   - Ocultar fila 28 (Peso Especifico) porque "viene del Proctor"
+   - Ocultar fila 29 (% absorcion) porque "es solo espejo"
+   - Ocultar filas calculadas porque "ya se ven en Resultados"
+
+UNICAS EXCEPCIONES VALIDAS (ocultar solo si):
+   a) El usuario lo pide EXPLICITAMENTE
+   b) Es un campo "interno" que SOLO sirve para calculos intermedios y
+      NO esta numerado en el Excel. Ejemplos:
+        - Campos EFECTIVOS (IF oficial vs operativo) - son utilidad interna
+        - Espejos puros de PARAMETRO que duplican una fila ya mostrada
+          en el mismo proc
+        - Flags booleanos como "es-grava", "es-fraccion-fina"
+
+REGLA DE ORO: Si en el Excel hay un numero de fila (01, 02, ..., 33),
+ese campo TIENE que estar visible en la ficha SimpleLab.
+
+CHECKLIST PRACTICO al generar fichas:
+  [ ] Contar las filas numeradas del Excel (ej. RA tiene 33 filas + algunas
+      sub-secciones)
+  [ ] Contar las filas visibles en mi proc (excluyendo encabezados visuales)
+  [ ] Si los numeros NO coinciden, hay filas ocultas incorrectamente
+
+CASO CONFIRMADO: RA SGS0 omitia filas 28 y 29 (Peso Especifico y %
+Absorcion) porque venian del Proctor. Tuvieron que regenerarse VISIBLES
+porque el cliente reporta que SI quiere verlas en la ficha.
+
+
+------------------------------------------------------------------------------
+20.22  REGLA #22 (CRITICA) - _id MongoDB DEBE TENER EXACTAMENTE 24 CARACTERES
+------------------------------------------------------------------------------
+
+SimpleLab valida que cada _id sea un ObjectId MongoDB valido: exactamente
+24 caracteres hexadecimales. Si algun _id excede 24 chars, SimpleLab
+rechaza la importacion con error "Identificador invalido" o "No se puede
+encontrar el recurso".
+
+CAUSA TIPICA: el generador `new_id` usa contador con formato `{counter:06x}`
+pero permite que el contador exceda 6 digitos hex (0xffffff = 16M).
+
+FIX EN EL GENERADOR:
+
+  BASE_TIMESTAMP = "6ac49200"    # 8 hex chars
+  RANDOM_PART = "8d2befc417"     # 10 hex chars
+  counter = 0x100000             # NO EXCEDER 0xffffff
+
+  def new_id():
+      global counter
+      assert counter <= 0xffffff, "counter desbordado"
+      ts_int = int(BASE_TIMESTAMP, 16) + counter - 0x100000
+      ts_hex = format(ts_int, "08x")
+      out = f"{ts_hex}{RANDOM_PART}{counter:06x}"
+      assert len(out) == 24, f"_id debe ser 24 chars, generé {len(out)}"
+      counter += 1
+      return out
+
+SUMA: 8 (timestamp) + 10 (random) + 6 (counter) = 24 chars exactos.
+
+VERIFICAR ANTES DE SUBIR: contar longitud de algun _id del JSON.
+Si tiene 25 o mas chars, todos los _id estan mal y hay que regenerarlos.
+
+CASO CONFIRMADO: CA12 SGS10 inicial fallo con error "Identificador
+invalido" porque counter inicial era 0x2000000 (7 hex chars) y todos
+los _id quedaron de 25 chars. Tras corregir a 24 chars, importo bien.
+
+==============================================================================
+  FIN DEL PROMPT MAESTRO
+  Ultima actualizacion: 2 de junio de 2026 (sesion SGS - GR/CA12/RA)
+==============================================================================

@@ -1,0 +1,1210 @@
+{
+  "referencia": "GD-CV2 - Granulometría de Descarga",
+  "tipoEnsaio": {
+    "_id": "6b7a8b66d6f1b4e2c3100066",
+    "nome": "Granulometría de Descarga CV2",
+    "categoria": "Caracterización",
+    "sigla": "GD-CV2",
+    "unidade": "Ensaio",
+    "normasReferencia": [],
+    "versaoAtual": "6b7a8b67d6f1b4e2c3100067",
+    "ultimaVersaoAprovada": "6b7a8b68d6f1b4e2c3100068",
+    "habilitadoParaCampo": true,
+    "permiteCriacaoExclusaoCpDuranteExecucao": false,
+    "investigacaoGeotecnica": false,
+    "arquivado": false,
+    "__v": 0,
+    "ultimaVersaoPublicada": "6b7a8b69d6f1b4e2c3100069"
+  },
+  "workflow": {
+    "_id": "6b7a8b67d6f1b4e2c3100067",
+    "tipoEnsaio": "6b7a8b66d6f1b4e2c3100066",
+    "versao": 1,
+    "publicada": false,
+    "atividades": [
+      {
+        "atributosProcedimento": {
+          "sequencialTipo": 1,
+          "possuiAnexos": false,
+          "possuiFotos": false,
+          "ehObrigatorioFotos": false,
+          "fotosPorLinha": 4,
+          "possuiDocumentos": false,
+          "dependencias": []
+        },
+        "atributosGrupo": {
+          "tipo": "Simples",
+          "titulo": "Granulometría de Descarga",
+          "possuiEstagios": null,
+          "graficos": [],
+          "atividades": [
+            {
+              "atributosProcedimento": {
+                "tipo": "6b7a8b00d6f1b4e2c3100000",
+                "versao": "6b7a8b01d6f1b4e2c3100001",
+                "sequencialTipo": 1,
+                "titulo": "Datos Iniciales",
+                "identificador": "gd-datos-iniciales-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": []
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6b7a8b02d6f1b4e2c3100002"
+            },
+            {
+              "atributosProcedimento": {
+                "tipo": "6b7a8b03d6f1b4e2c3100003",
+                "versao": "6b7a8b04d6f1b4e2c3100004",
+                "sequencialTipo": 1,
+                "titulo": "Datos del Ensayo",
+                "identificador": "gd-datos-del-ensayo-cv2",
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": []
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6b7a8b05d6f1b4e2c3100005"
+            },
+            {
+              "atributosProcedimento": {
+                "tipo": "6b7a8b06d6f1b4e2c3100006",
+                "versao": "6b7a8b07d6f1b4e2c3100007",
+                "sequencialTipo": 1,
+                "titulo": "Granulometría",
+                "identificador": "gd-granulometria-cv2",
+                "minimoDeterminacoes": 9,
+                "maximoDeterminacoes": 9,
+                "possuiAnexos": false,
+                "possuiFotos": false,
+                "ehObrigatorioFotos": false,
+                "fotosPorLinha": 4,
+                "possuiDocumentos": false,
+                "dependencias": [
+                  {
+                    "referencia": "6b7a8b03d6f1b4e2c3100003",
+                    "nome": "GD - Datos del Ensayo CV2",
+                    "identificador": "gd-datos-del-ensayo-cv2",
+                    "mesmoCP": false,
+                    "mesmoEstagio": false,
+                    "atividade": "6b7a8b05d6f1b4e2c3100005",
+                    "_id": "6b7a8b5fd6f1b4e2c310005f"
+                  }
+                ]
+              },
+              "atributosGrupo": {
+                "tipo": "Simples",
+                "possuiEstagios": null,
+                "graficos": [],
+                "atividades": []
+              },
+              "tipo": "Procedimento",
+              "nivel": 1,
+              "_id": "6b7a8b08d6f1b4e2c3100008"
+            }
+          ]
+        },
+        "tipo": "Grupo",
+        "nivel": 0,
+        "_id": "6b7a8b5ed6f1b4e2c310005e"
+      }
+    ],
+    "telaResultados": [
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Datos Iniciales",
+            "largura": 100,
+            "atividade": "6b7a8b02d6f1b4e2c3100002",
+            "_id": "6b7a8b60d6f1b4e2c3100060"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6b7a8b61d6f1b4e2c3100061",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": false,
+          "campanha": false
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Datos del Ensayo",
+            "largura": 100,
+            "atividade": "6b7a8b05d6f1b4e2c3100005",
+            "_id": "6b7a8b62d6f1b4e2c3100062"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6b7a8b63d6f1b4e2c3100063",
+        "linhas": []
+      },
+      {
+        "quebraPagina": {
+          "ensaio": true,
+          "campanha": true
+        },
+        "tipo": "Simples",
+        "colunas": [
+          {
+            "tipo": "Procedimento",
+            "titulo": "Granulometría",
+            "largura": 100,
+            "atividade": "6b7a8b08d6f1b4e2c3100008",
+            "_id": "6b7a8b64d6f1b4e2c3100064"
+          }
+        ],
+        "ocultada": false,
+        "_id": "6b7a8b65d6f1b4e2c3100065",
+        "linhas": []
+      }
+    ],
+    "investigacaoGeotecnica": false,
+    "__v": 0
+  },
+  "tiposProcedimentosPublicados": [
+    {
+      "_id": "6b7a8b01d6f1b4e2c3100001",
+      "nome": "GD - Datos Iniciales CV2",
+      "identificador": "gd-datos-iniciales-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 2,
+      "dependencias": [],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Norma",
+          "identificador": "norma",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b09d6f1b4e2c3100009",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "\"ASTM D6913 / ASTM D1140\""
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código de ensayo",
+          "identificador": "codigo-de-ensayo",
+          "ordem": 1,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b0ad6f1b4e2c310000a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "1",
+                "_id": "6b7a8b0bd6f1b4e2c310000b"
+              },
+              {
+                "item": "2",
+                "_id": "6b7a8b0cd6f1b4e2c310000c"
+              },
+              {
+                "item": "3",
+                "_id": "6b7a8b0dd6f1b4e2c310000d"
+              },
+              {
+                "item": "4",
+                "_id": "6b7a8b0ed6f1b4e2c310000e"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Guardia N°",
+          "identificador": "guardia-n",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b0fd6f1b4e2c310000f",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Fecha de ensayo",
+          "identificador": "fecha-de-ensayo",
+          "ordem": 3,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Data",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b10d6f1b4e2c3100010",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "A",
+                "_id": "6b7a8b11d6f1b4e2c3100011"
+              },
+              {
+                "item": "B",
+                "_id": "6b7a8b12d6f1b4e2c3100012"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Turno de ensayo",
+          "identificador": "turno-de-ensayo",
+          "ordem": 4,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b13d6f1b4e2c3100013",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Código de fecha",
+          "identificador": "codigo-de-fecha",
+          "ordem": 5,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b14d6f1b4e2c3100014",
+          "validacoes": [],
+          "exibirTelaResultados": false,
+          "exibirTelaExecucao": true,
+          "documentacao": "6 dígitos AAMMDD (ej: 260609) para el Reporte N°. SimpleLab no extrae año/mes/día de una fecha."
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Reporte N°",
+          "identificador": "reporte-n",
+          "ordem": 6,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b15d6f1b4e2c3100015",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"codigo-de-fecha\"])), NOT(EMPTY(p[\"turno-de-ensayo\"]))), CONCAT(\"CV-DRE-QC-RGD-\", p[\"codigo-de-fecha\"], \"-\", p[\"turno-de-ensayo\"]))"
+          },
+          "documentacao": "Concatenado: prefijo + código de fecha + turno -> CV-DRE-QC-RGD-260609-A"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "Anderson Apaza",
+                "_id": "6b7a8b16d6f1b4e2c3100016"
+              },
+              {
+                "item": "Blanca Ccari",
+                "_id": "6b7a8b17d6f1b4e2c3100017"
+              },
+              {
+                "item": "Brian Fernandez",
+                "_id": "6b7a8b18d6f1b4e2c3100018"
+              },
+              {
+                "item": "Edwin Chullo",
+                "_id": "6b7a8b19d6f1b4e2c3100019"
+              },
+              {
+                "item": "Fatima Vargas",
+                "_id": "6b7a8b1ad6f1b4e2c310001a"
+              },
+              {
+                "item": "Felix Tarqui M",
+                "_id": "6b7a8b1bd6f1b4e2c310001b"
+              },
+              {
+                "item": "Francisco Vilcapaza",
+                "_id": "6b7a8b1cd6f1b4e2c310001c"
+              },
+              {
+                "item": "Gerson Gallegos",
+                "_id": "6b7a8b1dd6f1b4e2c310001d"
+              },
+              {
+                "item": "Guillermo Perez",
+                "_id": "6b7a8b1ed6f1b4e2c310001e"
+              },
+              {
+                "item": "Hebert Asqui",
+                "_id": "6b7a8b1fd6f1b4e2c310001f"
+              },
+              {
+                "item": "Juan Carlos Marín",
+                "_id": "6b7a8b20d6f1b4e2c3100020"
+              },
+              {
+                "item": "Juan Herrera",
+                "_id": "6b7a8b21d6f1b4e2c3100021"
+              },
+              {
+                "item": "Niuler Mamani",
+                "_id": "6b7a8b22d6f1b4e2c3100022"
+              },
+              {
+                "item": "Pablo Hinojosa",
+                "_id": "6b7a8b23d6f1b4e2c3100023"
+              },
+              {
+                "item": "Paul Paz",
+                "_id": "6b7a8b24d6f1b4e2c3100024"
+              },
+              {
+                "item": "Sergio Zapana",
+                "_id": "6b7a8b25d6f1b4e2c3100025"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Ensayado por",
+          "identificador": "ensayado-por",
+          "ordem": 7,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b26d6f1b4e2c3100026",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "Brian Fernandez",
+                "_id": "6b7a8b27d6f1b4e2c3100027"
+              },
+              {
+                "item": "Francisco Vilcapaza",
+                "_id": "6b7a8b28d6f1b4e2c3100028"
+              },
+              {
+                "item": "Guillermo Torres",
+                "_id": "6b7a8b29d6f1b4e2c3100029"
+              },
+              {
+                "item": "Gustavo Muñoz",
+                "_id": "6b7a8b2ad6f1b4e2c310002a"
+              },
+              {
+                "item": "Juan Carlos Marín",
+                "_id": "6b7a8b2bd6f1b4e2c310002b"
+              },
+              {
+                "item": "Robert Salas",
+                "_id": "6b7a8b2cd6f1b4e2c310002c"
+              },
+              {
+                "item": "Sergio Zapana",
+                "_id": "6b7a8b2dd6f1b4e2c310002d"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Revisado por",
+          "identificador": "revisado-por",
+          "ordem": 8,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b2ed6f1b4e2c310002e",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [
+              {
+                "item": "Augusto Cotrina",
+                "_id": "6b7a8b2fd6f1b4e2c310002f"
+              },
+              {
+                "item": "Baltazar Huayllani",
+                "_id": "6b7a8b30d6f1b4e2c3100030"
+              },
+              {
+                "item": "Dilman Arenas",
+                "_id": "6b7a8b31d6f1b4e2c3100031"
+              },
+              {
+                "item": "Edgar Valenzuela",
+                "_id": "6b7a8b32d6f1b4e2c3100032"
+              },
+              {
+                "item": "Edgard Sutta",
+                "_id": "6b7a8b33d6f1b4e2c3100033"
+              },
+              {
+                "item": "Einor Arenas",
+                "_id": "6b7a8b34d6f1b4e2c3100034"
+              },
+              {
+                "item": "Fernando Valenzuela",
+                "_id": "6b7a8b35d6f1b4e2c3100035"
+              },
+              {
+                "item": "Jaime Villanueva",
+                "_id": "6b7a8b36d6f1b4e2c3100036"
+              },
+              {
+                "item": "Jesus Zeballos",
+                "_id": "6b7a8b37d6f1b4e2c3100037"
+              },
+              {
+                "item": "Jilmer Chavez",
+                "_id": "6b7a8b38d6f1b4e2c3100038"
+              },
+              {
+                "item": "Juan Occ",
+                "_id": "6b7a8b39d6f1b4e2c3100039"
+              },
+              {
+                "item": "Luis Diaz",
+                "_id": "6b7a8b3ad6f1b4e2c310003a"
+              },
+              {
+                "item": "Luis Tapia M.",
+                "_id": "6b7a8b3bd6f1b4e2c310003b"
+              },
+              {
+                "item": "Octavio Castro",
+                "_id": "6b7a8b3cd6f1b4e2c310003c"
+              },
+              {
+                "item": "Orlando Huanqui",
+                "_id": "6b7a8b3dd6f1b4e2c310003d"
+              },
+              {
+                "item": "Philippe Lopez",
+                "_id": "6b7a8b3ed6f1b4e2c310003e"
+              },
+              {
+                "item": "Rafael Pampachura",
+                "_id": "6b7a8b3fd6f1b4e2c310003f"
+              },
+              {
+                "item": "Renzo Valdeiglesias",
+                "_id": "6b7a8b40d6f1b4e2c3100040"
+              },
+              {
+                "item": "Roger Dávila",
+                "_id": "6b7a8b41d6f1b4e2c3100041"
+              },
+              {
+                "item": "Victor Yañez",
+                "_id": "6b7a8b42d6f1b4e2c3100042"
+              }
+            ],
+            "valorDefault": false
+          },
+          "nome": "Verificado por (STANTEC)",
+          "identificador": "verificado-por-stantec",
+          "ordem": 9,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Lista",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b43d6f1b4e2c3100043",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6b7a8b00d6f1b4e2c3100000",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6b7a8b04d6f1b4e2c3100004",
+      "nome": "GD - Datos del Ensayo CV2",
+      "identificador": "gd-datos-del-ensayo-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Cancha",
+          "identificador": "cancha",
+          "ordem": 0,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b44d6f1b4e2c3100044",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "documentacao": "Zona + especificación (ej: '4 / 2da.Est.')"
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Hora de muestreo",
+          "identificador": "hora-de-muestreo",
+          "ordem": 1,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Hora",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b45d6f1b4e2c3100045",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "N° Tara",
+          "identificador": "n-tara",
+          "ordem": 2,
+          "unidade": "",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b46d6f1b4e2c3100046",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso suelo húmedo + tara",
+          "identificador": "peso-suelo-humedo-tara",
+          "ordem": 3,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b47d6f1b4e2c3100047",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso suelo seco + tara",
+          "identificador": "peso-suelo-seco-tara",
+          "ordem": 4,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b48d6f1b4e2c3100048",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso de la tara",
+          "identificador": "peso-de-la-tara",
+          "ordem": 5,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b49d6f1b4e2c3100049",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso del suelo seco",
+          "identificador": "peso-del-suelo-seco",
+          "ordem": 6,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4ad6f1b4e2c310004a",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"peso-suelo-seco-tara\"])), NOT(EMPTY(p[\"peso-de-la-tara\"]))), p[\"peso-suelo-seco-tara\"] - p[\"peso-de-la-tara\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Porcentaje de sólidos",
+          "identificador": "porcentaje-de-solidos",
+          "ordem": 7,
+          "unidade": "%",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4bd6f1b4e2c310004b",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(p[\"peso-del-suelo-seco\"])), NOT(EMPTY(p[\"peso-suelo-humedo-tara\"])), NOT(EMPTY(p[\"peso-de-la-tara\"])), GT(p[\"peso-suelo-humedo-tara\"] - p[\"peso-de-la-tara\"], 0)), p[\"peso-del-suelo-seco\"] / (p[\"peso-suelo-humedo-tara\"] - p[\"peso-de-la-tara\"]))"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Porcentaje de finos ciclones",
+          "identificador": "porcentaje-de-finos-ciclones",
+          "ordem": 8,
+          "unidade": "%",
+          "categoria": "Entrada",
+          "tipo": "Porcentagem",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4cd6f1b4e2c310004c",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Porcentaje de sólidos ciclones",
+          "identificador": "porcentaje-de-solidos-ciclones",
+          "ordem": 9,
+          "unidade": "%",
+          "categoria": "Entrada",
+          "tipo": "Porcentagem",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4dd6f1b4e2c310004d",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true
+        }
+      ],
+      "determinacoes": [],
+      "resultados": [],
+      "graficos": [],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6b7a8b03d6f1b4e2c3100003",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    },
+    {
+      "_id": "6b7a8b07d6f1b4e2c3100007",
+      "nome": "GD - Granulometría CV2",
+      "identificador": "gd-granulometria-cv2",
+      "layout": "vertical",
+      "visibilidadeCabecalhoDeterminacoes": false,
+      "colunasParametros": 1,
+      "dependencias": [
+        {
+          "referencia": "6b7a8b03d6f1b4e2c3100003",
+          "nome": "GD - Datos del Ensayo CV2",
+          "identificador": "gd-datos-del-ensayo-cv2",
+          "_id": "6b7a8b5dd6f1b4e2c310005d"
+        }
+      ],
+      "parametros": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso del suelo seco",
+          "identificador": "peso-del-suelo-seco",
+          "ordem": 0,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 2,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4ed6f1b4e2c310004e",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "PARAMETRO(\"gd-datos-del-ensayo-cv2\", \"peso-del-suelo-seco\")"
+          }
+        }
+      ],
+      "determinacoes": [
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Malla",
+          "identificador": "malla",
+          "ordem": 0,
+          "unidade": "ASTM",
+          "categoria": "Resultado",
+          "tipo": "Textual",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b4fd6f1b4e2c310004f",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "TABELA(\"gd-tamices\", \"malla\", [\"orden\"], [DINDEX()])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Abertura",
+          "identificador": "abertura",
+          "ordem": 1,
+          "unidade": "µm",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 0,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b50d6f1b4e2c3100050",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "TABELA(\"gd-tamices\", \"abertura\", [\"orden\"], [DINDEX()])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso retenido ingresado",
+          "identificador": "peso-retenido-ingresado",
+          "ordem": 2,
+          "unidade": "g",
+          "categoria": "Entrada",
+          "tipo": "Numérico",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b51d6f1b4e2c3100051",
+          "validacoes": [],
+          "exibirTelaResultados": false,
+          "exibirTelaExecucao": true,
+          "documentacao": "Para N°8 a N°200 escriba el peso. Para Fondo deje vacío -> se calcula automático."
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Peso retenido",
+          "identificador": "peso-retenido",
+          "ordem": 3,
+          "unidade": "g",
+          "categoria": "Resultado",
+          "tipo": "Numérico",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b52d6f1b4e2c3100052",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(EQUAL(DINDEX(), 9), p[\"peso-del-suelo-seco\"] - (DATTR(\"peso-retenido-ingresado\", 1) + DATTR(\"peso-retenido-ingresado\", 2) + DATTR(\"peso-retenido-ingresado\", 3) + DATTR(\"peso-retenido-ingresado\", 4) + DATTR(\"peso-retenido-ingresado\", 5) + DATTR(\"peso-retenido-ingresado\", 6) + DATTR(\"peso-retenido-ingresado\", 7) + DATTR(\"peso-retenido-ingresado\", 8)), d[\"peso-retenido-ingresado\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Retenido parcial",
+          "identificador": "retenido-parcial",
+          "ordem": 4,
+          "unidade": "%",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b53d6f1b4e2c3100053",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(AND(NOT(EMPTY(d[\"peso-retenido\"])), NOT(EMPTY(p[\"peso-del-suelo-seco\"])), GT(p[\"peso-del-suelo-seco\"], 0)), d[\"peso-retenido\"] / p[\"peso-del-suelo-seco\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Retenido acumulado",
+          "identificador": "retenido-acumulado",
+          "ordem": 5,
+          "unidade": "%",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b54d6f1b4e2c3100054",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(GT(DINDEX(), 1), DATTR(\"retenido-acumulado\", DINDEX()-1) + d[\"retenido-parcial\"], IF(EMPTY(d[\"retenido-parcial\"]), 0, d[\"retenido-parcial\"]))"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Pasante acumulado",
+          "identificador": "pasante-acumulado",
+          "ordem": 6,
+          "unidade": "%",
+          "categoria": "Resultado",
+          "tipo": "Porcentagem",
+          "casasDecimais": 1,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b55d6f1b4e2c3100055",
+          "validacoes": [],
+          "exibirTelaResultados": true,
+          "exibirTelaExecucao": true,
+          "attrsResultado": {
+            "formula": "IF(NOT(EMPTY(d[\"retenido-acumulado\"])), 1 - d[\"retenido-acumulado\"])"
+          }
+        },
+        {
+          "attrsEntrada": {
+            "tipoLista": "Valores",
+            "lista": [],
+            "valorDefault": false
+          },
+          "nome": "Usar valor",
+          "identificador": "usar-valor",
+          "ordem": 7,
+          "unidade": "",
+          "categoria": "Resultado",
+          "tipo": "Booleano",
+          "casasDecimais": null,
+          "aceitaNegativo": false,
+          "_id": "6b7a8b56d6f1b4e2c3100056",
+          "validacoes": [],
+          "exibirTelaResultados": false,
+          "exibirTelaExecucao": false,
+          "attrsResultado": {
+            "formula": "AND(NOT(EMPTY(d[\"peso-retenido\"])), NOT(EMPTY(d[\"abertura\"])))"
+          }
+        }
+      ],
+      "resultados": [],
+      "graficos": [
+        {
+          "proporcao": null,
+          "eixos": {
+            "principal": {
+              "x": {
+                "titulo": "Abertura (µm)",
+                "escala": "log",
+                "tipo": "Numérico",
+                "casasDecimais": 0
+              },
+              "y": {
+                "titulo": "Pasante Acumulado (%)",
+                "escala": "linear",
+                "tipo": "Porcentagem",
+                "casasDecimais": 0
+              }
+            }
+          },
+          "tipo": "linha",
+          "series": [
+            {
+              "campos": {
+                "x": {
+                  "attrsEntrada": {
+                    "tipoLista": "Valores",
+                    "lista": [],
+                    "valorDefault": false
+                  },
+                  "nome": "Abertura",
+                  "identificador": "abertura",
+                  "ordem": 1,
+                  "unidade": "µm",
+                  "categoria": "Resultado",
+                  "tipo": "Numérico",
+                  "casasDecimais": 0,
+                  "aceitaNegativo": false,
+                  "_id": "6b7a8b57d6f1b4e2c3100057",
+                  "validacoes": [],
+                  "exibirTelaResultados": false,
+                  "exibirTelaExecucao": false,
+                  "attrsResultado": {
+                    "formula": "TABELA(\"gd-tamices\", \"abertura\", [\"orden\"], [DINDEX()])"
+                  }
+                },
+                "y": {
+                  "attrsEntrada": {
+                    "tipoLista": "Valores",
+                    "lista": [],
+                    "valorDefault": false
+                  },
+                  "nome": "Pasante acumulado",
+                  "identificador": "pasante-acumulado",
+                  "ordem": 6,
+                  "unidade": "%",
+                  "categoria": "Resultado",
+                  "tipo": "Porcentagem",
+                  "casasDecimais": 1,
+                  "aceitaNegativo": false,
+                  "_id": "6b7a8b58d6f1b4e2c3100058",
+                  "validacoes": [],
+                  "exibirTelaResultados": false,
+                  "exibirTelaExecucao": false,
+                  "attrsResultado": {
+                    "formula": "IF(NOT(EMPTY(d[\"retenido-acumulado\"])), 1 - d[\"retenido-acumulado\"])"
+                  }
+                }
+              },
+              "eixos": {
+                "x": "principal",
+                "y": "principal"
+              },
+              "suavizacao": {
+                "habilitado": true,
+                "ordenacao": false
+              },
+              "interpolacao": {
+                "habilitado": false,
+                "tipo": "polinomial"
+              },
+              "filtroPontos": {
+                "habilitado": true,
+                "campo": {
+                  "attrsEntrada": {
+                    "tipoLista": "Valores",
+                    "lista": [],
+                    "valorDefault": false
+                  },
+                  "nome": "Usar valor",
+                  "identificador": "usar-valor",
+                  "ordem": 7,
+                  "unidade": "",
+                  "categoria": "Resultado",
+                  "tipo": "Booleano",
+                  "casasDecimais": null,
+                  "aceitaNegativo": false,
+                  "_id": "6b7a8b59d6f1b4e2c3100059",
+                  "validacoes": [],
+                  "exibirTelaResultados": false,
+                  "exibirTelaExecucao": false,
+                  "attrsResultado": {
+                    "formula": "AND(NOT(EMPTY(d[\"peso-retenido\"])), NOT(EMPTY(d[\"abertura\"])))"
+                  }
+                }
+              },
+              "titulo": "Curva Granulométrica",
+              "exibirNaLegenda": false,
+              "exibirEspecificacaoTecnicaNaLegenda": false,
+              "corFixa": true,
+              "cor": "#1f77b4",
+              "linha": "Contínuo",
+              "ponto": "circulo pequeno",
+              "tracarReta": true,
+              "_id": "6b7a8b5ad6f1b4e2c310005a"
+            }
+          ],
+          "configuracoesPadrao": {
+            "intervalos": {
+              "principal": {
+                "x": {
+                  "casasDecimais": 0,
+                  "intervalo": [
+                    10,
+                    10000
+                  ],
+                  "labelTicks": 1,
+                  "tipo": "Numérico"
+                },
+                "y": {
+                  "casasDecimais": 0,
+                  "intervalo": [
+                    0,
+                    1
+                  ],
+                  "labelTicks": 0.1,
+                  "tipo": "Porcentagem"
+                }
+              },
+              "secundario": {
+                "x": {
+                  "intervalo": []
+                },
+                "y": {
+                  "intervalo": []
+                }
+              }
+            },
+            "_id": "6b7a8b5bd6f1b4e2c310005b"
+          },
+          "_id": "6b7a8b5cd6f1b4e2c310005c"
+        }
+      ],
+      "investigacaoGeotecnica": false,
+      "versao": 1,
+      "__v": 0,
+      "referencia": "6b7a8b06d6f1b4e2c3100006",
+      "dataPublicacao": "2026-06-08T00:00:00.000Z",
+      "responsavel": "000000000000000000000000",
+      "justificativa": "Criação do procedimento."
+    }
+  ]
+}

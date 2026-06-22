@@ -94,6 +94,24 @@ ipcMain.handle('delete-local-file', (_event, s3Key) => {
 });
 
 /**
+ * Abre un diálogo nativo para elegir una ortofoto (TIFF/JPG/PNG) y devuelve su
+ * ruta local + tamaño. El procesamiento pesado (resize/recompresión) lo hace la
+ * ruta API leyendo del disco — el archivo de varios GB NUNCA viaja por HTTP.
+ */
+ipcMain.handle('pick-orthophoto', async () => {
+  const res = await dialog.showOpenDialog({
+    title: 'Seleccionar ortofoto',
+    filters: [{ name: 'Ortofoto', extensions: ['tif', 'tiff', 'jpg', 'jpeg', 'png', 'webp', 'kml', 'kmz'] }],
+    properties: ['openFile'],
+  });
+  if (res.canceled || !res.filePaths[0]) return null;
+  const filePath = res.filePaths[0];
+  let sizeBytes = 0;
+  try { sizeBytes = fs.statSync(filePath).size; } catch { /* ignore */ }
+  return { path: filePath, sizeBytes, name: path.basename(filePath) };
+});
+
+/**
  * Lista todos los archivos de una carpeta local (ej: plans/ o plansdwg/).
  * s3Prefix: "projects/{proj}/plans" o "projects/{proj}/plansdwg"
  */

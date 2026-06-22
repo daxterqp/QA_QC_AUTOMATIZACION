@@ -15,7 +15,9 @@
       "@context/*": ["src/context/*"],
       "@navigation/*": ["src/navigation/*"],
       "@config/*": ["src/config/*"],
-      "@components/*": ["src/components/*"]
+      "@components/*": ["src/components/*"],
+      "@utils/*": ["src/utils/*"],
+      "@i18n/*": ["src/i18n/*"]
     }
   },
   "include": ["src", "index.js", "app.json"]

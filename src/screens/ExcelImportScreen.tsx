@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
+import { useI18n } from '@i18n/index';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { REQUIRED_COLUMNS } from '@services/ExcelImporter';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -36,6 +37,7 @@ export default function ExcelImportScreen({
   onClose,
   onImportSuccess,
 }: ExcelImportScreenProps) {
+  const { t } = useI18n();
   const { importState, startImport, reset } = useExcelImport(projectId, projectName);
 
   const isActive =
@@ -44,7 +46,7 @@ export default function ExcelImportScreen({
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Cargar Excel Maestro"
+        title={t('excelImport.title')}
         subtitle={projectName}
         rightContent={
           <TouchableOpacity onPress={onClose} disabled={isActive} style={{ opacity: isActive ? 0.4 : 1 }}>
@@ -56,14 +58,14 @@ export default function ExcelImportScreen({
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Info del proyecto */}
         <View style={styles.projectBadge}>
-          <Text style={styles.projectBadgeLabel}>Proyecto</Text>
+          <Text style={styles.projectBadgeLabel}>{t('excelImport.projectLabel')}</Text>
           <Text style={styles.projectBadgeName}>{projectName}</Text>
         </View>
 
         {/* Instrucciones / columnas requeridas */}
         {importState.status === 'idle' && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Columnas requeridas en el Excel</Text>
+            <Text style={styles.sectionTitle}>{t('excelImport.requiredColumnsTitle')}</Text>
             {REQUIRED_COLUMNS.map((col: string) => (
               <View key={col} style={styles.columnRow}>
                 <Text style={styles.columnBullet}>●</Text>
@@ -71,8 +73,7 @@ export default function ExcelImportScreen({
               </View>
             ))}
             <Text style={styles.hint}>
-              La columna "Protocolo" agrupa las actividades. Cada valor unico
-              genera un protocolo independiente en el sistema.
+              {t('excelImport.protocolHint')}
             </Text>
           </View>
         )}
@@ -81,7 +82,7 @@ export default function ExcelImportScreen({
         {importState.status === 'picking' && (
           <View style={styles.stateBox}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.stateText}>Seleccionando archivo...</Text>
+            <Text style={styles.stateText}>{t('excelImport.pickingFile')}</Text>
           </View>
         )}
 
@@ -90,7 +91,7 @@ export default function ExcelImportScreen({
           <View style={styles.stateBox}>
             <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.stateText}>
-              Importando protocolo {importState.current} de {importState.total}...
+              {t('excelImport.importingProgress', { current: importState.current, total: importState.total })}
             </Text>
             <View style={styles.progressBar}>
               <View
@@ -106,21 +107,21 @@ export default function ExcelImportScreen({
         {/* Estado: exito */}
         {importState.status === 'success' && (
           <View style={[styles.stateBox, styles.stateSuccess]}>
-            <Text style={styles.stateTitle}>Importacion exitosa</Text>
+            <Text style={styles.stateTitle}>{t('excelImport.successTitle')}</Text>
             <Text style={styles.statStat}>
-              {importState.totalProtocols} protocolo{importState.totalProtocols !== 1 ? 's' : ''}
+              {t(importState.totalProtocols !== 1 ? 'excelImport.protocolsCount' : 'excelImport.protocolsCount_one', { count: importState.totalProtocols })}
             </Text>
             <Text style={styles.statStat}>
-              {importState.totalActivities} actividade{importState.totalActivities !== 1 ? 's' : ''}
+              {t(importState.totalActivities !== 1 ? 'excelImport.activitiesCount' : 'excelImport.activitiesCount_one', { count: importState.totalActivities })}
             </Text>
             <TouchableOpacity
               style={[styles.btn, styles.btnPrimary]}
               onPress={() => { reset(); onImportSuccess?.(); }}
             >
-              <Text style={styles.btnText}>Ver protocolos</Text>
+              <Text style={styles.btnText}>{t('excelImport.viewProtocols')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={reset}>
-              <Text style={styles.btnText}>Cargar otro archivo</Text>
+              <Text style={styles.btnText}>{t('excelImport.loadAnotherFile')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -128,18 +129,18 @@ export default function ExcelImportScreen({
         {/* Estado: error */}
         {importState.status === 'error' && (
           <View style={[styles.stateBox, styles.stateError]}>
-            <Text style={styles.stateTitle}>Error al importar</Text>
+            <Text style={styles.stateTitle}>{t('excelImport.errorTitle')}</Text>
             <Text style={styles.errorMessage}>{importState.message}</Text>
             {importState.missingColumns && importState.missingColumns.length > 0 && (
               <View style={styles.missingCols}>
-                <Text style={styles.missingColsLabel}>Columnas faltantes:</Text>
+                <Text style={styles.missingColsLabel}>{t('excelImport.missingColumnsLabel')}</Text>
                 {importState.missingColumns.map((col: string) => (
                   <Text key={col} style={styles.missingColItem}>• {col}</Text>
                 ))}
               </View>
             )}
             <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={reset}>
-              <Text style={styles.btnText}>Intentar de nuevo</Text>
+              <Text style={styles.btnText}>{t('excelImport.tryAgain')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -149,7 +150,7 @@ export default function ExcelImportScreen({
       {(importState.status === 'idle') && (
         <View style={styles.footer}>
           <TouchableOpacity style={[styles.btn, styles.btnPrimary, styles.btnFull]} onPress={startImport}>
-            <Text style={styles.btnText}>Seleccionar archivo Excel</Text>
+            <Text style={styles.btnText}>{t('excelImport.selectExcelFile')}</Text>
           </TouchableOpacity>
         </View>
       )}

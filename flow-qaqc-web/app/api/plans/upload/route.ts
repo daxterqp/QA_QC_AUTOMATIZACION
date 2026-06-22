@@ -109,14 +109,17 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
         if (!existing) {
           const { error: insertErr } = await supabase.from('plans').insert({
-            project_id:  projectId,
-            name:        planName,
-            s3_key:      s3Key,
-            file_type:   fileType,
-            location_id: loc.id,
-            s3_etag:     etag,
-            created_at:  now,
-            updated_at:  now,
+            id:             crypto.randomUUID(),
+            project_id:     projectId,
+            name:           planName,
+            file_uri:       '',
+            s3_key:         s3Key,
+            file_type:      fileType,
+            location_id:    loc.id,
+            s3_etag:        etag,
+            uploaded_by_id: '',
+            created_at:     now,
+            updated_at:     now,
           });
           if (insertErr) console.error('[plans/upload] insert error:', insertErr);
         }
@@ -132,14 +135,17 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       if (!existing) {
         const { error: insertErr } = await supabase.from('plans').insert({
-          project_id:  projectId,
-          name:        planName,
-          s3_key:      s3Key,
-          file_type:   fileType,
-          location_id: null,
-          s3_etag:     etag,
-          created_at:  now,
-          updated_at:  now,
+          id:             crypto.randomUUID(),
+          project_id:     projectId,
+          name:           planName,
+          file_uri:       '',
+          s3_key:         s3Key,
+          file_type:      fileType,
+          location_id:    null,
+          s3_etag:        etag,
+          uploaded_by_id: '',
+          created_at:     now,
+          updated_at:     now,
         });
         if (insertErr) console.error('[plans/upload] insert error (unlinked):', insertErr);
       }

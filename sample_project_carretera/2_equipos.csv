@@ -1,0 +1,35 @@
+﻿Código,Nombre,Tipo,Categoría,Marca,Modelo,Serie,Capacidad,Resolución,Última calibración,Próxima calibración,Notas
+BAL-001,Balanza electrónica de campo 5 kg,balanza,laboratorio,Ohaus,Defender 5000,B5K-2024-01,5 kg,0.1 g,15/01/2026,15/01/2027,Calibrada por SENAMHI
+BAL-002,Balanza analítica de laboratorio,balanza,laboratorio,Mettler Toledo,XSR2202,MT-2023-09,2200 g,0.001 g,10/02/2026,10/02/2027,Para humedad ASTM D2216
+BAL-003,Balanza de plataforma 60 kg,balanza,laboratorio,Sartorius,EB60,SR-2024-04,60 kg,5 g,01/05/2026,01/05/2027,Para muestras de agregados gruesos
+PREN-001,Prensa CBR 50 kN,prensa,laboratorio,Humboldt,HM-3000,HM-2024-05,50 kN,10 N,20/03/2026,20/03/2027,Certificado INACAL
+PREN-002,Prensa Marshall 30 kN,prensa,laboratorio,Controls,76-B0042,CO-2024-08,30 kN,5 N,11/06/2026,11/06/2027,Para diseño de mezclas asfálticas
+HOR-001,Horno de secado 110 °C,horno,laboratorio,Memmert,UNB 500,MM-2023-11,300 °C,1 °C,05/04/2026,05/04/2027,Para humedad ASTM D2216
+HOR-002,Horno de extracción asfáltica,horno,laboratorio,Gilson,HM-385,GS-2024-10,600 °C,1 °C,18/07/2026,18/07/2027,Para % asfalto NLT 164
+TAM-001,Juego de tamices ASTM gruesos,tamiz,laboratorio,Gilson,SS-3,GS-2024-02,N/A,N/A,12/03/2026,12/03/2027,Tamices 3" a N°4
+TAM-002,Juego de tamices ASTM finos,tamiz,laboratorio,Gilson,SS-4,GS-2024-06,N/A,N/A,12/03/2026,12/03/2027,Tamices N°4 a N°200
+COND-001,Cono de arena 6 pulgadas,otros,laboratorio,ELE,29-3725,EL-2024-07,N/A,N/A,18/04/2026,18/04/2027,Para densidad in situ MTC E-117
+PIC-001,Picnómetro de vacío 1000 ml,otros,laboratorio,Humboldt,H-3380,HM-2024-09,1000 ml,N/A,20/02/2026,20/02/2027,Para densidad relativa de finos
+TERM-001,Termómetro digital de inmersión,termometro,laboratorio,Fluke,52-II,FL-2024-03,-40 a 150 °C,0.1 °C,22/05/2026,22/05/2027,Verificado anualmente
+TERM-002,Termómetro infrarrojo,termometro,laboratorio,Testo,830-T1,TS-2024-11,-30 a 400 °C,1 °C,15/08/2026,15/08/2027,Para temperatura asfalto
+NIV-001,Nivel topográfico automático,otros,laboratorio,Leica,NA532,LE-2023-08,N/A,N/A,30/01/2026,30/01/2027,Calibrado por proveedor
+GPS-001,GPS topográfico RTK,otros,laboratorio,Trimble,R12i,TR-2024-12,Precisión ±1 cm,N/A,28/02/2026,28/02/2027,Para replanteo de eje
+ESC-001,Esclerómetro de hormigón,otros,laboratorio,Proceq,N-Type,PQ-2024-03,N/A,1 R,03/06/2026,03/06/2027,NTP 339.181 (no usado en vía pero para obras complementarias)
+EXC-001,Excavadora hidráulica 20 t,excavadora,maquinaria_pesada,Caterpillar,320 GC,CAT-320-2023,20 t,N/A,,,Uso: excavación de subrasante y zanjas
+EXC-002,Excavadora hidráulica 30 t,excavadora,maquinaria_pesada,Komatsu,PC300LC-8,KM-PC300-2024,30 t,N/A,,,Uso: cortes profundos y carguío
+COMP-001,Compactador vibratorio liso CA250,compactador,maquinaria_pesada,Dynapac,CA250D,DY-CA250-2024,10 t,N/A,,,Uso: compactación de capas granulares
+COMP-002,Compactador pata de cabra CP142,compactador,maquinaria_pesada,Caterpillar,CP142,CAT-CP142-2023,12 t,N/A,,,Uso: compactación de subrasante cohesiva
+MOT-001,Motoniveladora 140K,motoniveladora,maquinaria_pesada,Caterpillar,140K,CAT-140K-2024,N/A,N/A,,,Uso: nivelación y conformación
+MOT-002,Motoniveladora 16M3,motoniveladora,maquinaria_pesada,Caterpillar,16M3,CAT-16M-2023,N/A,N/A,,,Uso: refinos y peinados de subrasante
+ROD-001,Rodillo neumático PS300,rodillo,maquinaria_pesada,Hamm,PS300,HM-PS300-2023,18 t,N/A,,,Uso: sellado carpeta asfáltica
+ROD-002,Rodillo tándem vibratorio HD12,rodillo,maquinaria_pesada,Hamm,HD12,HM-HD12-2024,12 t,N/A,,,Uso: compactación inicial carpeta asfáltica
+RETRO-001,Retroexcavadora 416F2,retroexcavadora,maquinaria_pesada,Caterpillar,416F2,CAT-416-2023,8 t,N/A,,,Uso: zanjas y drenajes menores
+VOLQ-001,Volquete Volvo FMX 8x4 — Unidad A,volquete,maquinaria_pesada,Volvo,FMX 460,VL-FMX-2024-A,18 m³,N/A,,,Uso: transporte de material
+VOLQ-002,Volquete Volvo FMX 8x4 — Unidad B,volquete,maquinaria_pesada,Volvo,FMX 460,VL-FMX-2024-B,18 m³,N/A,,,Uso: transporte de material
+VOLQ-003,Volquete Volvo FMX 8x4 — Unidad C,volquete,maquinaria_pesada,Volvo,FMX 460,VL-FMX-2024-C,18 m³,N/A,,,Uso: transporte de material
+CIST-001,Cisterna de agua 5000 gal,cisterna,maquinaria_pesada,Iveco,Trakker AT720T44,IV-CIST-2024-A,5000 gal,N/A,,,Uso: humectación de capas
+CIST-002,Cisterna de agua 8000 gal,cisterna,maquinaria_pesada,Mercedes-Benz,Actros 4144,MB-CIST-2023,8000 gal,N/A,,,Uso: humectación + control de polvo
+CARG-001,Cargador frontal 950M,cargador_frontal,maquinaria_pesada,Caterpillar,950M,CAT-950-2024,4 m³,N/A,,,Uso: carguío de material en cantera
+CARG-002,Cargador frontal WA320,cargador_frontal,maquinaria_pesada,Komatsu,WA320-8,KM-WA320-2024,3.5 m³,N/A,,,Uso: alimentación de planta chancadora
+PAV-001,Pavimentadora de asfalto,otros,maquinaria_pesada,Vögele,Super 1800-3i,VO-SUP1800-2024,8 m ancho,N/A,,,Uso: extendido carpeta asfáltica
+PLAN-001,Planta chancadora primaria,otros,maquinaria_pesada,Metso,Lokotrack LT106,MT-LT106-2023,200 t/h,N/A,,,Uso: producción de agregados (cantera)

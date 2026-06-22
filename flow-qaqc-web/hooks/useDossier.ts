@@ -9,6 +9,22 @@ export interface DossierProtocol extends Protocol {
   location: Location | null;
   filledByName: string | null;
   signedByName: string | null;
+  /** Nombre del sector asignado (para el encabezado del PDF). */
+  sectorName?: string | null;
+  /** id_protocolo de la plantilla (para el filtro "Tipo de ensayo" del Dossier). */
+  templateLabel?: string | null;
+}
+
+// Cache de nombres de sector por id (1 query por sector distinto en toda la
+// exportación, en vez de N+1). Se llena perezosamente en fetchDossierProtocolFull.
+const _sectorNameCache = new Map<string, string | null>();
+async function resolveSectorName(sectorId: string | null | undefined): Promise<string | null> {
+  if (!sectorId) return null;
+  if (_sectorNameCache.has(sectorId)) return _sectorNameCache.get(sectorId) ?? null;
+  const { data } = await supabase.from('project_sectors').select('name').eq('id', sectorId).single();
+  const name = (data as { name?: string } | null)?.name ?? null;
+  _sectorNameCache.set(sectorId, name);
+  return name;
 }
 
 // ── Protocol list (non-draft) ─────────────────────────────────────────────────
@@ -90,6 +106,7 @@ export function useDossierProtocols(projectId: string) {
         location: p.location_id ? (locMap[p.location_id] ?? null) : null,
         filledByName:  p.filled_by_id ? (userMap[p.filled_by_id] ?? null) : null,
         signedByName:  p.signed_by_id ? (userMap[p.signed_by_id]  ?? null) : null,
+        templateLabel: p.template_id ? (tmplUuidToIdProto[p.template_id] ?? null) : null,
       }));
 
       // Sort by location template_ids order (same as activity table)
@@ -112,10 +129,33 @@ export function useDossierProtocols(projectId: string) {
 
 // ── Full protocol data for PDF export ────────────────────────────────────────
 
+/** Aprobación por nivel (v23). Si el proyecto tiene approval_levels > 1,
+ *  el PDF dossier muestra una sección con las N firmas. */
+export interface DossierApproval {
+  level: number;
+  signer_id: string | null;
+  signed_at: number | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  signer_name?: string;
+  signer_apellido?: string | null;
+}
+
+/** Equipo asociado al protocolo (v24). El PDF muestra una sección "Equipos
+ *  utilizados" con código + nombre + última calibración para acreditación ISO 17025. */
+export interface DossierEquipment {
+  code: string;
+  name: string;
+  type: string;
+  last_calibration_at: number | null;
+  next_calibration_at: number;
+}
+
 export interface DossierProtocolFull {
   protocol: DossierProtocol;
   items: ProtocolItem[];
   evidences: Evidence[];
+  approvals?: DossierApproval[];
+  equipment?: DossierEquipment[];
 }
 
 export async function fetchDossierProtocolFull(
@@ -139,11 +179,17 @@ export async function fetchDossierProtocolFull(
     // Fallback: fetch from Supabase (original behavior)
     const [{ data: proto }, { data: items }] = await Promise.all([
       supabase.from('protocols').select('*').eq('id', protocolId).single(),
-      supabase.from('protocol_items').select('*').eq('protocol_id', protocolId).order('created_at', { ascending: true }),
+      supabase.from('protocol_items').select('*').eq('protocol_id', protocolId),
     ]);
     if (!proto) throw new Error('Protocol not found');
     p = proto as Protocol;
-    its = (items ?? []) as ProtocolItem[];
+    its = [...((items ?? []) as ProtocolItem[])].sort((x, y) => {
+      const a = String(x.partida_item ?? '').trim();
+      const b = String(y.partida_item ?? '').trim();
+      const cmp = a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return Number(x.created_at ?? 0) - Number(y.created_at ?? 0);
+    });
 
     const itemIds = its.map(i => i.id);
     evidences = [];
@@ -163,7 +209,36 @@ export async function fetchDossierProtocolFull(
     location: p.location_id ? (locMap[p.location_id] ?? null) : null,
     filledByName:  p.filled_by_id ? (userMap[p.filled_by_id] ?? null) : null,
     signedByName:  p.signed_by_id ? (userMap[p.signed_by_id]  ?? null) : null,
+    sectorName: await resolveSectorName((p as { sector_id?: string | null }).sector_id),
   };
 
-  return { protocol: dossierProto, items: its, evidences };
+  // Aprobaciones jerárquicas (v23). Si no hay filas, queda undefined → PDF usa render legacy.
+  const { data: apvData } = await supabase
+    .from('protocol_approvals')
+    .select('*, users:signer_id(name, apellido)')
+    .eq('protocol_id', protocolId)
+    .order('level', { ascending: true });
+  const approvals: DossierApproval[] | undefined = apvData && apvData.length > 0
+    ? (apvData as any[]).map((r) => ({
+        level: r.level,
+        signer_id: r.signer_id,
+        signed_at: r.signed_at,
+        status: r.status,
+        signer_name: r.users?.name,
+        signer_apellido: r.users?.apellido ?? null,
+      }))
+    : undefined;
+
+  // v24 — Equipos calibrados usados en el protocolo (para sección PDF).
+  const { data: equipData } = await supabase
+    .from('protocol_equipment')
+    .select('equipment:equipment_id(code, name, type, last_calibration_at, next_calibration_at)')
+    .eq('protocol_id', protocolId);
+  const equipment: DossierEquipment[] | undefined = equipData && equipData.length > 0
+    ? (equipData as any[])
+        .map(r => r.equipment as DossierEquipment | null)
+        .filter((e): e is DossierEquipment => !!e)
+    : undefined;
+
+  return { protocol: dossierProto, items: its, evidences, approvals, equipment };
 }

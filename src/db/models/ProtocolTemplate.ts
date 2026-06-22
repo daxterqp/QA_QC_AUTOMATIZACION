@@ -15,6 +15,10 @@ export default class ProtocolTemplate extends Model {
   @field('id_protocolo') idProtocolo!: string;
   /** Nombre del protocolo, ej: "PROTOCOLO DE CIMENTACIÓN" */
   @field('name') name!: string;
+  /** v38 — config de Tabla Resumen (hoja RESUMEN del Excel), JSON string. */
+  @field('summary_config_json') summaryConfigJson!: string | null;
+  /** v39 — tipo de ensayo oculto: no creable, pero sus registros siguen visibles. */
+  @field('is_hidden') isHidden!: boolean | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

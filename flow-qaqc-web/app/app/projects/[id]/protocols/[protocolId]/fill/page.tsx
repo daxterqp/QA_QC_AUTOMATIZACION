@@ -16,7 +16,7 @@ import {
   useResubmitProtocol,
   saveItemComment,
 } from '@hooks/useProtocolFill';
-import { useProjects } from '@hooks/useProjects';
+import { useProjects, useProjectFlags } from '@hooks/useProjects';
 import { useLocations } from '@hooks/useLocations';
 import { usePlansByReference } from '@hooks/usePlanViewer';
 import { useAuth } from '@lib/auth-context';
@@ -24,7 +24,47 @@ import { cn } from '@lib/utils';
 import { applyStamp } from '@lib/stamp';
 import { uploadBlobToS3, sanitizeFilename, seq, s3ProjectPrefix } from '@lib/s3-upload';
 import { useS3Url } from '@hooks/useS3Url';
+import { isNumericProtocol, parseNumericRow, parseNumeric, splitRowComments, diagnoseInvalidNumericItems } from '@lib/numericProtocol';
+import { NumericTable } from '@components/numeric/NumericTable';
+import { ExtraPhotos } from '@components/ExtraPhotos';
+import { useUpdateProtocolGeneralComment } from '@hooks/useUpdateProtocolGeneralComment';
+import { useQuery } from '@tanstack/react-query';
+import { createClient } from '@lib/supabase/client';
+import { useI18n } from '@lib/i18n';
 import type { ProtocolItem, Evidence } from '@/types';
+
+const _sb = createClient();
+
+/** Celda del encabezado "Datos Generales" (replica el grid del audit/PDF). */
+function InfoCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex-1 min-w-[120px] bg-[#f4f6f9] rounded-md px-2.5 py-1.5">
+      <div className="text-[9px] font-bold text-[#888] tracking-wider uppercase mb-0.5">{label}</div>
+      <div className="text-[12px] font-bold text-[#1a1a2e] line-clamp-2">{value}</div>
+    </div>
+  );
+}
+
+/** Datos extra del encabezado: supervisor, id_protocolo y nombre del sector. */
+function useFillMeta(filledById: string | null, templateId: string | null, sectorId: string | null) {
+  return useQuery({
+    queryKey: ['fill-meta', filledById, templateId, sectorId],
+    queryFn: async () => {
+      const result = { filledByName: '—', idProtocolo: '', sectorName: '' };
+      const [filled, tmpl, sector] = await Promise.all([
+        filledById ? _sb.from('users').select('name, apellido').eq('id', filledById).single() : Promise.resolve({ data: null }),
+        templateId ? _sb.from('protocol_templates').select('id_protocolo').eq('id', templateId).single() : Promise.resolve({ data: null }),
+        sectorId   ? _sb.from('project_sectors').select('name').eq('id', sectorId).single() : Promise.resolve({ data: null }),
+      ]);
+      if (filled?.data) result.filledByName = [filled.data.name, filled.data.apellido].filter(Boolean).join(' ').trim() || '—';
+      if ((tmpl?.data as { id_protocolo?: string } | null)?.id_protocolo) result.idProtocolo = (tmpl!.data as { id_protocolo: string }).id_protocolo;
+      if ((sector?.data as { name?: string } | null)?.name) result.sectorName = (sector!.data as { name: string }).name;
+      return result;
+    },
+    enabled: !!(filledById || templateId || sectorId),
+    staleTime: 60_000,
+  });
+}
 
 // ── Tipos locales ─────────────────────────────────────────────────────────────
 
@@ -40,6 +80,7 @@ type ListRow =
   | { type: 'item'; item: ProtocolItem; index: number };
 
 export default function ProtocolFillPage() {
+  const { t } = useI18n();
   const { id: projectId, protocolId } = useParams<{ id: string; protocolId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -54,6 +95,12 @@ export default function ProtocolFillPage() {
   const deleteEvidence = useDeleteEvidence(protocolId);
   const submitProtocol = useSubmitProtocol(protocolId);
   const resubmitProtocol = useResubmitProtocol(protocolId);
+  const updateGeneralComment = useUpdateProtocolGeneralComment(protocolId);
+  const [generalComment, setGeneralComment] = useState('');
+  useEffect(() => {
+    const p: any = fillData?.protocol;
+    if (p) setGeneralComment(p.general_comment ?? '');
+  }, [fillData?.protocol]);
 
   // Estado local de respuestas (optimistic UI)
   const [answers, setAnswers] = useState<Record<string, ItemAnswer>>({});
@@ -65,14 +112,22 @@ export default function ProtocolFillPage() {
   const [hasChanges, setHasChanges] = useState(false);
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const commentTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // v42e (M8) — escrituras de celdas en vuelo (saveAnswer fire-and-forget). El submit
+  // las espera ANTES de congelar, porque freezeProtocolItems re-lee comments de Supabase
+  // y podría leer un valor viejo si el último guardado no terminó.
+  const pendingSaves = useRef<Promise<unknown>[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeItemIdRef = useRef<string | null>(null);
 
   const project = projects.find(p => p.id === projectId);
+  const { data: projectFlags } = useProjectFlags(projectId);
 
   // Derivar locationObj y planes ANTES de cualquier early return (Rules of Hooks)
   const locationObj = fillData?.location ?? locations.find(l => l.id === fillData?.protocol.location_id);
   const { data: refPlans = [] } = usePlansByReference(projectId, locationObj?.reference_plan);
+  // Datos Generales del encabezado (supervisor, id_protocolo, sector).
+  const fp: any = fillData?.protocol;
+  const { data: fillMeta } = useFillMeta(fp?.filled_by_id ?? null, fp?.template_id ?? null, fp?.sector_id ?? null);
 
   // Auto-edit si viene ?edit=true (desde audit page)
   useEffect(() => {
@@ -126,15 +181,15 @@ export default function ProtocolFillPage() {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4 p-6 text-center">
         <AlertTriangle size={40} className="text-warning" />
-        <p className="text-navy font-bold text-base">No se pudo cargar el protocolo</p>
+        <p className="text-navy font-bold text-base">{t('webProto.loadFailed')}</p>
         <p className="text-gray-500 text-sm max-w-xs">
-          Verifica tu conexión o que tengas acceso a este protocolo.
+          {t('webProto.loadFailedHint')}
         </p>
         <button
           onClick={() => window.history.back()}
           className="mt-2 px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-bold"
         >
-          Volver
+          {t('webProto.back')}
         </button>
       </div>
     );
@@ -145,6 +200,13 @@ export default function ProtocolFillPage() {
   const isJefe = ['CREATOR', 'RESIDENT'].includes(currentUser?.role ?? '');
   const canEdit = isJefe && (protocol.status === 'APPROVED' || protocol.status === 'SUBMITTED');
   const isReadOnly = canEdit ? !editing : (protocol.status === 'APPROVED' || protocol.status === 'SUBMITTED');
+
+  // ── Modo protocolo numérico ─────────────────────────────────────────────
+  const numericMode = isNumericProtocol(items);
+  // Si el protocolo intentó ser numérico pero algunos items tienen sintaxis
+  // mal formada, diagnoseInvalidNumericItems devuelve los items problemáticos
+  // para mostrarle al usuario qué corregir en el template.
+  const invalidNumericItems = numericMode ? [] : diagnoseInvalidNumericItems(items);
 
   const handleOpenPlans = () => {
     if (refPlans.length === 0) return;
@@ -167,12 +229,37 @@ export default function ProtocolFillPage() {
     itemIndex++;
   }
 
-  // Todos respondidos cuando has_answer === true para cada uno (o en estado local)
-  const allAnswered = items.every(item => {
-    const a = answers[item.id];
-    if (!a) return item.has_answer;
-    return a.isNa || a.isCompliant !== null;
-  });
+  // Todos respondidos cuando has_answer === true para cada uno (o en estado local).
+  // En protocolos numéricos: items manuales requieren valor; fx y gr no exigen entrada.
+  const allAnswered = numericMode
+    ? (() => {
+        // v42e (M2) — un protocolo numérico NO se considera respondido si no tiene
+        // NINGUNA celda de ingreso. Las reglas de completitud (manual + list) se
+        // mantienen idénticas; solo se añade la exigencia de ≥1 celda de ingreso.
+        let hasAnyInput = false;
+        const allOk = items.every(it => {
+          const spec = parseNumericRow(it.validation_method);
+          if (!spec) return false;
+          if (spec.kind !== 'row') return true; // graph, header, matrix-* no requieren respuesta
+          // row: manual + list requieren valor; formula/lookup se computan solas
+          const cellVals = splitRowComments(it.comments, spec.cells.length);
+          for (let i = 0; i < spec.cells.length; i++) {
+            const ck = spec.cells[i].kind;
+            if (ck === 'manual' || ck === 'percent' || ck === 'free' || ck === 'text'
+              || ck === 'list' || ck === 'bool' || ck === 'equipment'
+              || ck === 'date' || ck === 'time') hasAnyInput = true;
+            if (ck === 'manual' && parseNumeric(cellVals[i]) == null) return false;
+            if (ck === 'list' && (cellVals[i] ?? '').trim() === '') return false;
+          }
+          return true;
+        });
+        return allOk && hasAnyInput;
+      })()
+    : items.every(item => {
+        const a = answers[item.id];
+        if (!a) return item.has_answer;
+        return a.isNa || a.isCompliant !== null;
+      });
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -256,19 +343,40 @@ export default function ProtocolFillPage() {
   };
 
   const handleDeleteEvidence = async (ev: Evidence) => {
-    if (!confirm(`¿Eliminar esta foto? (${ev.s3_url_placeholder?.split('/').pop() ?? 'foto'})`)) return;
+    if (!confirm(t('webProto.confirmDeletePhoto', { name: ev.s3_url_placeholder?.split('/').pop() ?? t('webProto.photoFallback') }))) return;
     await deleteEvidence.mutateAsync(ev.id);
   };
+
+  // v31 — Instancias de los modos nuevos no tienen ubicación: la ruta de
+  // retorno se ramifica (sector → ensayos/sector, fecha → ensayos/date, menú).
+  const backRoute = protocol.location_id
+    ? `/app/projects/${projectId}/locations/${protocol.location_id}/protocols`
+    : (protocol as { sector_id?: string | null }).sector_id
+      ? `/app/projects/${projectId}/ensayos/sector`
+      : (protocol as { ensayo_date?: string | null }).ensayo_date
+        ? `/app/projects/${projectId}/ensayos/date`
+        : `/app/projects/${projectId}/menu`;
 
   const handleSubmit = async () => {
     if (!allAnswered || !currentUser) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
+      // v42e (M8) — ANTES de enviar: flushear los comentarios con debounce pendiente
+      // y esperar TODAS las escrituras en vuelo. freezeProtocolItems re-lee comments de
+      // Supabase, así que sin esto podría congelar el valor anterior (carrera).
+      for (const [itemId, timer] of Object.entries(commentTimers.current)) {
+        clearTimeout(timer);
+        delete commentTimers.current[itemId];
+        pendingSaves.current.push(saveItemComment(itemId, answers[itemId]?.comment ?? '').catch(() => {}));
+      }
+      if (pendingSaves.current.length) {
+        await Promise.allSettled(pendingSaves.current.splice(0));
+      }
       await submitProtocol.mutateAsync(currentUser.id);
-      router.push(`/app/projects/${projectId}/locations/${protocol.location_id}/protocols`);
+      router.push(backRoute);
     } catch {
-      setSubmitError('No se pudo enviar el protocolo. Intenta nuevamente.');
+      setSubmitError(t('webProto.submitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -279,12 +387,12 @@ export default function ProtocolFillPage() {
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <PageHeader
-        title={protocol.protocol_number ?? 'Protocolo'}
+        title={((protocol as { protocol_code?: string | null }).protocol_code ? `${(protocol as { protocol_code?: string | null }).protocol_code} — ` : '') + (protocol.protocol_number ?? t('webProto.protocol'))}
         subtitle={new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
         crumbs={[
-          { label: 'Proyectos', href: '/app/projects' },
+          { label: t('webProto.projects'), href: '/app/projects' },
           { label: project?.name ?? '...', href: `/app/projects/${projectId}/locations` },
-          { label: locationObj?.name ?? '...', href: `/app/projects/${projectId}/locations/${protocol.location_id}/protocols` },
+          { label: locationObj?.name ?? protocol.location_reference ?? '...', href: backRoute },
         ]}
         rightContent={
           <div className="flex items-center gap-2">
@@ -310,7 +418,7 @@ export default function ProtocolFillPage() {
                 )}
               >
                 <Pencil size={12} />
-                {editing ? (hasChanges ? 'Guardar cambios' : 'Dejar de editar') : 'Editar'}
+                {editing ? (hasChanges ? t('webProto.saveChanges') : t('webProto.stopEditing')) : t('webProto.edit')}
               </button>
             )}
             {refPlans.length > 0 && (
@@ -319,17 +427,30 @@ export default function ProtocolFillPage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-white/10 text-white border border-white/20 hover:bg-white/20 transition"
               >
                 <FileText size={13} />
-                Planos
+                {t('webProto.plans')}
               </button>
             )}
           </div>
         }
       />
 
-      {/* Banner ubicación */}
+      {/* Datos Generales (mismo grid que el audit/PDF). Sector solo si el ensayo
+          tiene sector; Ubicación/Especialidad solo si trabaja por ubicaciones. */}
       <div className="bg-white border-b border-divider px-5 py-3">
-        <p className="text-[10px] font-bold text-[#8896a5] uppercase tracking-wider">Ubicación</p>
-        <p className="text-navy font-semibold text-sm mt-0.5">{locationObj?.name ?? '—'}</p>
+        <div className="text-[10px] font-extrabold text-[#8896a5] uppercase tracking-wider mb-1.5">{t('webProto.generalData')}</div>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
+            <InfoCell label={t('webProto.project')} value={project?.name ?? '—'} />
+            <InfoCell label={t('webProto.date')} value={fp?.ensayo_date ? new Date(fp.ensayo_date + 'T12:00:00').toLocaleDateString('es-PE') : new Date().toLocaleDateString('es-PE')} />
+            <InfoCell label={t('webProto.code')} value={fp?.protocol_code || fillMeta?.idProtocolo || protocol.protocol_number || '—'} />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <InfoCell label={t('webProto.supervisor')} value={fillMeta?.filledByName ?? '—'} />
+            {fillMeta?.sectorName && <InfoCell label={t('webProto.sector')} value={fillMeta.sectorName} />}
+            {locationObj && <InfoCell label={t('webProto.location')} value={(locationObj as any).location_only ?? locationObj.name ?? '—'} />}
+            {locationObj && (locationObj as any).specialty && <InfoCell label={t('webProto.specialty')} value={(locationObj as any).specialty} />}
+          </div>
+        </div>
       </div>
 
       {/* Banner rechazo */}
@@ -337,7 +458,7 @@ export default function ProtocolFillPage() {
         <div className="bg-danger/10 border-l-4 border-danger px-5 py-3 flex gap-2">
           <AlertTriangle size={16} className="text-danger flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-danger font-bold text-xs">Protocolo rechazado</p>
+            <p className="text-danger font-bold text-xs">{t('webProto.protocolRejected')}</p>
             <p className="text-danger/80 text-xs mt-0.5">{protocol.rejection_reason}</p>
           </div>
         </div>
@@ -349,47 +470,116 @@ export default function ProtocolFillPage() {
           <Lock size={14} className="text-primary" />
           <p className="text-primary font-semibold text-xs">
             {protocol.status === 'APPROVED'
-              ? 'Protocolo aprobado y bloqueado'
-              : 'En revisión por el Jefe de Calidad'}
+              ? t('webProto.approvedLocked')
+              : t('webProto.underQualityReview')}
           </p>
         </div>
       )}
 
-      {/* Lista de ítems */}
-      <div className="flex-1 px-4 py-3 flex flex-col gap-3 pb-6">
-        {listData.map((row, ri) => {
-          if (row.type === 'section') {
-            return (
-              <div key={`sec-${row.title}-${ri}`} className="mt-2 first:mt-0">
-                <div className="bg-primary/10 border-l-4 border-primary rounded-md px-3 py-2">
-                  <p className="text-primary font-bold text-xs uppercase tracking-wider">{row.title}</p>
-                </div>
-              </div>
-            );
-          }
+      {/* Banner: items numéricos malformados forzaron el modo clásico */}
+      {invalidNumericItems.length > 0 && (
+        <div className="mx-4 mt-3 rounded-md border border-warning/40 bg-amber-50 px-3 py-2.5 text-xs">
+          <p className="font-bold text-warning mb-1">
+            {t('webProto.invalidNumericTitle', { n: invalidNumericItems.length, s: invalidNumericItems.length !== 1 ? 's' : '' })}
+          </p>
+          <p className="text-textPrimary mb-1.5"
+            dangerouslySetInnerHTML={{ __html: t('webProto.invalidNumericClassicFill') }}
+          />
+          <ul className="list-disc pl-4 text-[11px] text-textSecondary leading-relaxed">
+            {invalidNumericItems.slice(0, 5).map(it => (
+              <li key={it.idx}>
+                <b>{t('webProto.invalidNumericItem', { partida: it.partidaItem ?? t('webProto.invalidNumericItemFallback', { idx: it.idx }) })}</b>: <code className="text-danger font-mono">{it.method ?? t('webProto.invalidNumericEmpty')}</code>
+              </li>
+            ))}
+            {invalidNumericItems.length > 5 && <li>{t('webProto.invalidNumericMore', { n: invalidNumericItems.length - 5 })}</li>}
+          </ul>
+        </div>
+      )}
 
-          const { item, index } = row;
-          const answer = answers[item.id] ?? { isCompliant: null, isNa: false, comment: item.comments ?? '' };
-          const evList = evidenceMap[item.id] ?? [];
-          const uploading = uploadingItemId === item.id;
-
-          return (
-            <ItemCard
-              key={item.id}
-              item={item}
-              index={index}
-              answer={answer}
-              evidences={evList}
-              isReadOnly={isReadOnly}
-              uploading={uploading}
-              onAnswer={btn => handleAnswer(item.id, btn)}
-              onCommentChange={t => handleCommentChange(item.id, t)}
-              onPhotoClick={() => handlePhotoClick(item.id)}
-              onDeleteEvidence={handleDeleteEvidence}
+      {/* Lista de ítems — gap-6 en numérico: tabla / comentario general / fotos
+          respiran como bloques separados (antes iban pegados con gap-3). */}
+      <div className={numericMode ? 'flex-1 px-4 py-3 flex flex-col gap-6 pb-6' : 'flex-1 px-4 py-3 flex flex-col gap-3 pb-6'}>
+        {numericMode ? (
+          <>
+            <NumericTable
+              protocolCode={(protocol as { protocol_code?: string | null })?.protocol_code ?? null}
+              items={items}
+              readOnly={isReadOnly}
+              projectId={projectId}
+              enableXrefs={true /* v29 — protocol_linking deprecated, siempre activo */}
+              onChangeManual={({ itemId, comments, isCompliant, hasAnswer }) => {
+                // Persiste directo (UI ya lo refleja vía estado local en NumericTable).
+                // v42e (M8) — guardamos la promesa para que el submit la espere antes
+                // de congelar (evita congelar el comments anterior por la carrera).
+                pendingSaves.current.push(
+                  saveAnswer.mutateAsync({ itemId, isCompliant, isNa: false, comments }).catch(() => {}),
+                );
+                setHasChanges(true);
+                // Forzar refetch para que items.comments quede sincronizado
+                void hasAnswer;
+              }}
+            />
+            {/* Comentario general */}
+            <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-2">
+              <label className="text-xs font-bold text-gray-700">{t('webProto.generalComments')}</label>
+              <textarea
+                rows={3}
+                value={generalComment}
+                disabled={isReadOnly}
+                onChange={e => setGeneralComment(e.target.value)}
+                onBlur={() => updateGeneralComment.mutate(generalComment)}
+                placeholder={t('webProto.generalCommentsPlaceholder')}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+            {/* Evidencia fotográfica extra */}
+            <ExtraPhotos
+              bucketId={protocolId}
+              projectName={project?.name ?? ''}
+              projectId={projectId}
+              logoKey={(project as any)?.logo_s3_key ?? null}
+              stampComment={(project as any)?.stamp_comment ?? null}
+              subSeg={protocol.protocol_number ?? protocol.id}
+              locSeg={locationObj?.name ?? undefined}
+              canEdit={!isReadOnly}
               onOpenLightbox={url => setLightbox(url)}
             />
-          );
-        })}
+          </>
+        ) : (
+          listData.map((row, ri) => {
+            if (row.type === 'section') {
+              return (
+                <div key={`sec-${row.title}-${ri}`} className="mt-2 first:mt-0">
+                  <div className="bg-primary/10 border-l-4 border-primary rounded-md px-3 py-2">
+                    <p className="text-primary font-bold text-xs uppercase tracking-wider">{row.title}</p>
+                  </div>
+                </div>
+              );
+            }
+
+            const { item, index } = row;
+            const answer = answers[item.id] ?? { isCompliant: null, isNa: false, comment: item.comments ?? '' };
+            const evList = evidenceMap[item.id] ?? [];
+            const uploading = uploadingItemId === item.id;
+
+            return (
+              <ItemCard
+                key={item.id}
+                item={item}
+                index={index}
+                answer={answer}
+                evidences={evList}
+                isReadOnly={isReadOnly}
+                uploading={uploading}
+                onAnswer={btn => handleAnswer(item.id, btn)}
+                onCommentChange={t => handleCommentChange(item.id, t)}
+                onPhotoClick={() => handlePhotoClick(item.id)}
+                onDeleteEvidence={handleDeleteEvidence}
+                onOpenLightbox={url => setLightbox(url)}
+              />
+            );
+          })
+        )}
 
         {/* Botón submit */}
         {!isReadOnly && (
@@ -411,11 +601,11 @@ export default function ProtocolFillPage() {
                 ? <Loader2 size={16} className="animate-spin" />
                 : <Send size={16} />
               }
-              {submitting ? 'Enviando...' : 'Enviar para aprobación'}
+              {submitting ? t('webProto.submitting') : t('webProto.submitForApproval')}
             </button>
             {!allAnswered && (
               <p className="text-center text-[11px] text-[#8896a5] mt-2">
-                Responde Sí, No o N/A en todos los ítems para poder enviar.
+                {t('webProto.answerAllHint')}
               </p>
             )}
           </div>
@@ -441,8 +631,8 @@ export default function ProtocolFillPage() {
                 <Pencil size={18} className="text-warning" />
               </div>
               <div>
-                <p className="text-navy font-bold text-sm">Modo edición</p>
-                <p className="text-gray-500 text-xs mt-0.5">Los cambios realizados pasarán por la revisión del jefe antes de ser aprobados.</p>
+                <p className="text-navy font-bold text-sm">{t('webProto.editModeTitle')}</p>
+                <p className="text-gray-500 text-xs mt-0.5">{t('webProto.editModeBody')}</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -450,13 +640,13 @@ export default function ProtocolFillPage() {
                 onClick={() => setShowEditConfirm(false)}
                 className="flex-1 border border-border rounded-lg py-2.5 text-sm font-semibold text-gray-500 hover:bg-surface transition"
               >
-                Cancelar
+                {t('webProto.cancel')}
               </button>
               <button
                 onClick={() => { setShowEditConfirm(false); setEditing(true); }}
                 className="flex-1 bg-primary text-white rounded-lg py-2.5 text-sm font-bold hover:bg-navy transition"
               >
-                Aceptar
+                {t('webProto.accept')}
               </button>
             </div>
           </div>
@@ -506,6 +696,7 @@ function ItemCard({
   onDeleteEvidence: (ev: Evidence) => void;
   onOpenLightbox: (url: string) => void;
 }) {
+  const { t } = useI18n();
   const siActive = answer.isCompliant === true && !answer.isNa;
   const noActive = answer.isCompliant === false && !answer.isNa;
   const naActive = answer.isNa;
@@ -533,8 +724,8 @@ function ItemCard({
         <div className="px-4 py-2 flex items-center justify-center w-[130px] flex-shrink-0">
           {!isReadOnly ? (
             <div className="flex gap-1">
-              <AnswerBtn label="Sí"  active={siActive} color="success" onClick={() => onAnswer('SI')} />
-              <AnswerBtn label="No"  active={noActive} color="danger"  onClick={() => onAnswer('NO')} />
+              <AnswerBtn label={t('webProto.answerYes')} active={siActive} color="success" onClick={() => onAnswer('SI')} />
+              <AnswerBtn label={t('webProto.answerNo')} active={noActive} color="danger"  onClick={() => onAnswer('NO')} />
               <AnswerBtn label="N/A" active={naActive} color="gray"    onClick={() => onAnswer('NA')} />
             </div>
           ) : (
@@ -548,7 +739,7 @@ function ItemCard({
             value={answer.comment}
             onChange={e => onCommentChange(e.target.value)}
             disabled={isReadOnly}
-            placeholder="Observación"
+            placeholder={t('webProto.observation')}
             rows={1}
             className="w-full text-xs border-0 text-navy placeholder:text-[#8896a5] focus:outline-none resize-none bg-transparent disabled:text-[#4a5568]"
           />
@@ -580,6 +771,7 @@ function PhotosCell({
   onDeleteEvidence: (ev: Evidence) => void;
   onOpenLightbox: (url: string) => void;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const total = evidences.length;
   const maxVisible = total <= 4 ? 4 : 3;
@@ -630,7 +822,7 @@ function PhotosCell({
             onClick={onPhotoClick}
             disabled={uploading}
             className="w-8 h-8 rounded border border-dashed border-border text-primary flex items-center justify-center hover:border-primary hover:bg-primary/5 transition disabled:opacity-50"
-            title="Agregar foto"
+            title={t('webProto.addPhoto')}
           >
             {uploading ? <Loader2 size={11} className="animate-spin" /> : <Camera size={11} />}
           </button>
@@ -716,8 +908,9 @@ function EvidenceThumb({
 }
 
 function ReadOnlyBadge({ isCompliant, isNa }: { isCompliant: boolean | null; isNa: boolean }) {
+  const { t } = useI18n();
   if (isNa) return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500">N/A</span>;
-  if (isCompliant === true) return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-success/20 text-success">Sí</span>;
-  if (isCompliant === false) return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-danger/20 text-danger">No</span>;
+  if (isCompliant === true) return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-success/20 text-success">{t('webProto.answerYes')}</span>;
+  if (isCompliant === false) return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-danger/20 text-danger">{t('webProto.answerNo')}</span>;
   return <span className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#d4dde8] text-[#4a5568]">—</span>;
 }

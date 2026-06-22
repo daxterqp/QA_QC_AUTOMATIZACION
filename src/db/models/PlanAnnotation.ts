@@ -20,6 +20,8 @@ export default class PlanAnnotation extends Model {
   @field('status') status!: string;
   /** Página del PDF (1-based). null = legacy sin página */
   @field('page') page!: number | null;
+  /** Prioridad opcional: 'low' | 'medium' | 'high' | null (sin prioridad) */
+  @field('priority') priority!: string | null;
   @field('created_by_id') createdById!: string;
 
   @readonly @date('created_at') createdAt!: Date;

@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { LOCATIONS_REQUIRED_COLUMNS } from '@services/ExcelLocationsImporter';
+import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 interface LocationsImportScreenProps {
@@ -35,6 +36,7 @@ export default function LocationsImportScreen({
   onClose,
   onImportSuccess,
 }: LocationsImportScreenProps) {
+  const { t } = useI18n();
   const { importState, startImport, reset } = useLocationsImport(projectId, projectName);
 
   const isActive = importState.status === 'picking' || importState.status === 'importing';
@@ -42,7 +44,7 @@ export default function LocationsImportScreen({
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Cargar Ubicaciones"
+        title={t('locImport.title')}
         subtitle={projectName}
         rightContent={
           <TouchableOpacity onPress={onClose}>
@@ -54,7 +56,7 @@ export default function LocationsImportScreen({
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Badge del proyecto */}
         <View style={styles.projectBadge}>
-          <Text style={styles.projectBadgeLabel}>Proyecto</Text>
+          <Text style={styles.projectBadgeLabel}>{t('locImport.projectLabel')}</Text>
           <Text style={styles.projectBadgeName}>{projectName}</Text>
         </View>
 
@@ -62,7 +64,7 @@ export default function LocationsImportScreen({
         {importState.status === 'idle' && (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Columnas requeridas</Text>
+              <Text style={styles.sectionTitle}>{t('locImport.requiredColumns')}</Text>
               {LOCATIONS_REQUIRED_COLUMNS.map((col: string) => (
                 <View key={col} style={styles.columnRow}>
                   <Text style={styles.columnBullet}>●</Text>
@@ -73,12 +75,12 @@ export default function LocationsImportScreen({
 
             {/* Ejemplo visual */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Ejemplo de estructura</Text>
+              <Text style={styles.sectionTitle}>{t('locImport.structureExample')}</Text>
               <View style={styles.tableExample}>
                 <View style={styles.tableHeader}>
-                  <Text style={styles.tableHeaderCell}>Ubicación</Text>
-                  <Text style={styles.tableHeaderCell}>PLANO DE REFERENCIA</Text>
-                  <Text style={styles.tableHeaderCell}>ID_Protocolos</Text>
+                  <Text style={styles.tableHeaderCell}>{t('locImport.colLocation')}</Text>
+                  <Text style={styles.tableHeaderCell}>{t('locImport.colReferenceDrawing')}</Text>
+                  <Text style={styles.tableHeaderCell}>{t('locImport.colProtocolIds')}</Text>
                 </View>
                 {[
                   ['P1-Sector1-Cimiento', 'CIM', '1,2'],
@@ -93,8 +95,7 @@ export default function LocationsImportScreen({
                 ))}
               </View>
               <Text style={styles.hint}>
-                En ID_Protocolos coloca los ID_Protocolo del Excel maestro separados por coma.
-                Cada ubicacion mostrara exactamente los protocolos vinculados.
+                {t('locImport.protocolIdsHint')}
               </Text>
             </View>
           </>
@@ -106,8 +107,8 @@ export default function LocationsImportScreen({
             <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.stateText}>
               {importState.status === 'picking'
-                ? 'Seleccionando archivo...'
-                : 'Importando ubicaciones...'}
+                ? t('locImport.picking')
+                : t('locImport.importing')}
             </Text>
           </View>
         )}
@@ -115,22 +116,24 @@ export default function LocationsImportScreen({
         {/* Estado: exito */}
         {importState.status === 'success' && (
           <View style={[styles.stateBox, styles.stateSuccess]}>
-            <Text style={styles.stateTitle}>Importacion exitosa</Text>
+            <Text style={styles.stateTitle}>{t('locImport.successTitle')}</Text>
             <Text style={styles.statNumber}>{importState.totalLocations}</Text>
             <Text style={styles.statLabel}>
-              ubicacion{importState.totalLocations !== 1 ? 'es' : ''} agregada{importState.totalLocations !== 1 ? 's' : ''}
+              {importState.totalLocations !== 1
+                ? t('locImport.locationsAddedMany')
+                : t('locImport.locationsAddedOne')}
             </Text>
             <Text style={styles.hint}>
-              Las duplicadas fueron omitidas automaticamente.
+              {t('locImport.duplicatesSkipped')}
             </Text>
             <TouchableOpacity
               style={[styles.btn, styles.btnPrimary]}
               onPress={() => { reset(); onImportSuccess?.(); }}
             >
-              <Text style={styles.btnText}>Ver ubicaciones</Text>
+              <Text style={styles.btnText}>{t('locImport.viewLocations')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={reset}>
-              <Text style={styles.btnText}>Cargar otro archivo</Text>
+              <Text style={styles.btnText}>{t('locImport.loadAnotherFile')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -138,18 +141,18 @@ export default function LocationsImportScreen({
         {/* Estado: error */}
         {importState.status === 'error' && (
           <View style={[styles.stateBox, styles.stateError]}>
-            <Text style={styles.stateTitle}>Error al importar</Text>
+            <Text style={styles.stateTitle}>{t('locImport.errorTitle')}</Text>
             <Text style={styles.errorMessage}>{importState.message}</Text>
             {importState.missingColumns && importState.missingColumns.length > 0 && (
               <View style={styles.missingCols}>
-                <Text style={styles.missingColsLabel}>Columnas faltantes:</Text>
+                <Text style={styles.missingColsLabel}>{t('locImport.missingColumnsLabel')}</Text>
                 {importState.missingColumns.map((col: string) => (
                   <Text key={col} style={styles.missingColItem}>• {col}</Text>
                 ))}
               </View>
             )}
             <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={reset}>
-              <Text style={styles.btnText}>Intentar de nuevo</Text>
+              <Text style={styles.btnText}>{t('locImport.tryAgain')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -162,7 +165,7 @@ export default function LocationsImportScreen({
             style={[styles.btn, styles.btnPrimary, styles.btnFull]}
             onPress={startImport}
           >
-            <Text style={styles.btnText}>Seleccionar archivo Excel</Text>
+            <Text style={styles.btnText}>{t('locImport.selectExcelFile')}</Text>
           </TouchableOpacity>
         </View>
       )}

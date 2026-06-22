@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import AppHeader from '@components/AppHeader';
 import { Ionicons } from '@expo/vector-icons';
+import { PriorityChip, PRIORITY_META, Priority } from '@components/PriorityChip';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import {
@@ -23,6 +24,7 @@ import type AnnotationComment from '@models/AnnotationComment';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud, pushProjectToSupabase } from '@services/SupabaseSyncService';
 import { notifyAnnotationClosed } from '@services/NotificationService';
+import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AnnotationComments'>;
 
@@ -41,6 +43,7 @@ interface AnnRow {
 
 export default function AnnotationCommentsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour } = useTour();
@@ -59,6 +62,21 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
   const [rows, setRows] = useState<AnnRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fullscreenPhoto, setFullscreenPhoto] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [priorityFilter, setPriorityFilter] = useState<'all' | Priority | 'none'>('all');
+
+  const filteredRows = React.useMemo(() => {
+    return rows.filter((r) => {
+      const ann = r.annotation as any;
+      const isClosed = ann.isOk || ann.status === 'CLOSED';
+      if (statusFilter === 'open' && isClosed) return false;
+      if (statusFilter === 'closed' && !isClosed) return false;
+      const p = ann.priority as Priority | null | undefined;
+      if (priorityFilter === 'none' && p) return false;
+      if (priorityFilter !== 'all' && priorityFilter !== 'none' && p !== priorityFilter) return false;
+      return true;
+    });
+  }, [rows, statusFilter, priorityFilter]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -84,7 +102,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
           const name = `${(u as any).name} ${(u as any).apellido ?? ''}`.trim();
           userCache[uid] = name;
           return name;
-        } catch { userCache[uid] = 'Inspector'; return 'Inspector'; }
+        } catch { const fallback = t('annotComments.inspector'); userCache[uid] = fallback; return fallback; }
       };
 
       const result: AnnRow[] = [];
@@ -156,7 +174,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useFocusEffect(useCallback(() => {
@@ -178,11 +196,11 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
 
   const handleDelete = (row: AnnRow) => {
     Alert.alert(
-      'Eliminar observación',
-      `¿Estás seguro de eliminar la viñeta ${(row.annotation as any).sequenceNumber}? Se eliminarán también todos sus comentarios y fotos.`,
+      t('annotComments.delete.title'),
+      t('annotComments.delete.message', { number: (row.annotation as any).sequenceNumber }),
       [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Eliminar', style: 'destructive', onPress: async () => {
+        { text: t('annotComments.delete.cancel'), style: 'cancel' },
+        { text: t('annotComments.delete.confirm'), style: 'destructive', onPress: async () => {
           await database.write(async () => {
             const comments = await annotationCommentsCollection
               .query(Q.where('annotation_id', row.annotation.id))
@@ -215,7 +233,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Observaciones"
+        title={t('annotComments.title')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
@@ -225,16 +243,97 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
         }
       />
 
+      {/* Barra de filtros */}
+      {!loading && rows.length > 0 && (
+        <View style={styles.filterBar}>
+          <View style={styles.filterSection}>
+            <View style={styles.filterGroup}>
+            {([
+              { key: 'all',    label: t('annotComments.filter.all'),    count: rows.length },
+              { key: 'open',   label: t('annotComments.filter.open'), count: rows.filter((r) => !((r.annotation as any).isOk || (r.annotation as any).status === 'CLOSED')).length },
+              { key: 'closed', label: t('annotComments.filter.closed'), count: rows.filter((r) =>  ((r.annotation as any).isOk || (r.annotation as any).status === 'CLOSED')).length },
+            ] as const).map((opt) => {
+              const active = statusFilter === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setStatusFilter(opt.key)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                    {opt.label} · {opt.count}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            </View>
+          </View>
+
+          <View style={styles.filterDivider} />
+
+          <View style={styles.filterSection}>
+            <View style={styles.filterGroup}>
+            {([
+              { key: 'all',    label: t('annotComments.filter.all') },
+              { key: 'high',   label: PRIORITY_META.high.label,   color: PRIORITY_META.high.bg,   icon: PRIORITY_META.high.icon },
+              { key: 'medium', label: PRIORITY_META.medium.label, color: PRIORITY_META.medium.bg, icon: PRIORITY_META.medium.icon },
+              { key: 'low',    label: PRIORITY_META.low.label,    color: PRIORITY_META.low.bg,    icon: PRIORITY_META.low.icon },
+              { key: 'none',   label: t('annotComments.priority.none'), color: '#6b7a8c' },
+            ] as const).map((opt) => {
+              const active = priorityFilter === opt.key;
+              const color = (opt as any).color as string | undefined;
+              const icon = (opt as any).icon as keyof typeof Ionicons.glyphMap | undefined;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.filterChip,
+                    color ? { borderColor: color } : null,
+                    active && (color ? { backgroundColor: color, borderColor: color } : styles.filterChipActive),
+                  ]}
+                  onPress={() => setPriorityFilter(opt.key)}
+                  activeOpacity={0.8}
+                >
+                  {icon ? (
+                    <Ionicons
+                      name={icon}
+                      size={12}
+                      color={active ? Colors.white : (color ?? Colors.navy)}
+                      style={{ marginRight: 4 }}
+                    />
+                  ) : null}
+                  <Text style={[
+                    styles.filterChipText,
+                    color && !active ? { color } : null,
+                    active && styles.filterChipTextActive,
+                  ]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            </View>
+          </View>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
       ) : (
         <FlatList
-          data={rows}
+          data={filteredRows}
           keyExtractor={(r) => r.annotation.id}
           contentContainerStyle={styles.list}
-          ListEmptyComponent={<Text style={styles.empty}>No hay observaciones en los planos de este proyecto.</Text>}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {rows.length === 0
+                ? t('annotComments.empty.noAnnotations')
+                : t('annotComments.empty.noMatch')}
+            </Text>
+          }
           renderItem={({ item: row, index }) => {
             const ann = row.annotation as any;
             const isClosed = ann.isOk || ann.status === 'CLOSED';
@@ -279,11 +378,14 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
                       ) : null}
                     </View>
                   </View>
+                  {(ann as any).priority ? (
+                    <PriorityChip value={(ann as any).priority} size="sm" />
+                  ) : null}
                 </View>
 
                 {/* Comentario inicial */}
                 <Text style={styles.commentText} numberOfLines={3}>
-                  {row.initialComment || '(sin descripción)'}
+                  {row.initialComment || t('annotComments.noDescription')}
                 </Text>
 
                 {/* Fotos del comentario inicial (del creador) */}
@@ -303,7 +405,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
                 {/* Última respuesta (solo comentarios posteriores al inicial) */}
                 {row.lastReply && (
                   <View style={styles.lastReplyRow}>
-                    <Text style={styles.lastReplyLabel}>Última respuesta:</Text>
+                    <Text style={styles.lastReplyLabel}>{t('annotComments.lastReply')}</Text>
                     <Text style={styles.lastReplyText}>
                       {row.lastReply.authorName} · {row.lastReply.date.toLocaleString('es-CL')}
                     </Text>
@@ -326,7 +428,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
                 {!isClosed && isJefe && (
                   <View style={styles.cardActions}>
                     <TouchableOpacity style={styles.okBtn} onPress={() => handleOk(row)}>
-                      <Text style={styles.okBtnText}>Completado</Text>
+                      <Text style={styles.okBtnText}>{t('annotComments.completed')}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -351,6 +453,35 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 16, gap: 12 },
+  filterBar: {
+    marginHorizontal: 12, marginTop: 10, marginBottom: 4,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    borderWidth: 1, borderColor: Colors.divider,
+    paddingHorizontal: 12, paddingVertical: 10,
+    ...Shadow.subtle,
+  },
+  filterSection: { gap: 6 },
+  filterSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  filterSectionLabel: {
+    fontSize: 10, fontWeight: '800', color: Colors.textMuted,
+    letterSpacing: 1.2,
+  },
+  filterDivider: {
+    height: 1, backgroundColor: Colors.divider, marginVertical: 10,
+  },
+  filterGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 999, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  filterChipActive: {
+    backgroundColor: Colors.navy, borderColor: Colors.navy,
+  },
+  filterChipText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, letterSpacing: 0.2 },
+  filterChipTextActive: { color: Colors.white },
   empty: { textAlign: 'center', color: Colors.textMuted, marginTop: 40, lineHeight: 24 },
   card: {
     backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14,

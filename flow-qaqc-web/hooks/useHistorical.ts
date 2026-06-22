@@ -87,11 +87,16 @@ export function useDashboardNotes(projectId: string) {
 export function useAddDashboardNote(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ text, userId }: { text: string; userId: string }) => {
+    // `content` y `created_by_id` deben coincidir con el schema Supabase (mismo que móvil).
+    mutationFn: async ({ content, userId }: { content: string; userId: string }) => {
+      const now = Date.now();
       const { error } = await supabase.from('dashboard_notes').insert({
+        id: crypto.randomUUID(),
         project_id: projectId,
-        user_id: userId,
-        text: text.trim(),
+        created_by_id: userId,
+        content: content.trim(),
+        created_at: now,
+        updated_at: now,
       });
       if (error) throw error;
     },
@@ -102,10 +107,10 @@ export function useAddDashboardNote(projectId: string) {
 export function useUpdateDashboardNote(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ noteId, text }: { noteId: string; text: string }) => {
+    mutationFn: async ({ noteId, content }: { noteId: string; content: string }) => {
       const { error } = await supabase
         .from('dashboard_notes')
-        .update({ text: text.trim(), updated_at: Date.now() })
+        .update({ content: content.trim(), updated_at: Date.now() })
         .eq('id', noteId);
       if (error) throw error;
     },

@@ -7,6 +7,7 @@ export interface ProjectMetrics {
   openObservations: number;
   pendingReview: number;
   approvedProtocols: number;
+  rejectedProtocols: number;
   totalExpected: number;      // location × template combinations
   progressPercent: number;    // approved / totalExpected * 100
 }
@@ -18,7 +19,7 @@ export function useProjectMetrics(projectId: string) {
       const [protocolsRes, plansRes, locationsRes] = await Promise.all([
         supabase
           .from('protocols')
-          .select('status')
+          .select('status, location_id')
           .eq('project_id', projectId),
         supabase
           .from('plans')
@@ -53,12 +54,20 @@ export function useProjectMetrics(projectId: string) {
 
       const approvedProtocols = protocols.filter((p: { status: string }) => p.status === 'APPROVED').length;
       const pendingReview = protocols.filter((p: { status: string }) => p.status === 'SUBMITTED').length;
-      const progressPercent = totalExpected > 0 ? Math.round((approvedProtocols / totalExpected) * 100) : 0;
+      const rejectedProtocols = protocols.filter((p: { status: string }) => p.status === 'REJECTED').length;
+      // v31 — totalExpected sale de template_ids POR UBICACIÓN: las instancias
+      // de los modos nuevos (sector/tipo/fecha, location_id null) no cuentan
+      // contra ese esperado o el progreso superaría el 100%.
+      const approvedLocationBound = protocols.filter(
+        (p: { status: string; location_id: string | null }) => p.status === 'APPROVED' && p.location_id != null,
+      ).length;
+      const progressPercent = totalExpected > 0 ? Math.round((approvedLocationBound / totalExpected) * 100) : 0;
 
       return {
         openObservations,
         pendingReview,
         approvedProtocols,
+        rejectedProtocols,
         totalExpected,
         progressPercent,
       };

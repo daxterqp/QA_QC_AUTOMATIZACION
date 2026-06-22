@@ -1,28 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  Search, FolderOpen, ClipboardList, BookOpen,
-  Upload, Phone, Eye, AlertCircle, CheckCircle2, TrendingUp,
+  Search, FolderOpen, BookOpen,
+  Upload, Phone, Eye, ChevronRight, LayoutGrid, Users as UsersIcon, EyeOff, RefreshCw, Settings,
 } from 'lucide-react';
-import { useProjects } from '@hooks/useProjects';
-import { useProjectMetrics, type ProjectMetrics } from '@hooks/useProjectMetrics';
+import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
+import { useProjectMetrics } from '@hooks/useProjectMetrics';
 import { useAuth } from '@lib/auth-context';
 import { cn, formatDate } from '@lib/utils';
+import { useI18n } from '@lib/i18n';
+import { ProjectConfigModal } from '@components/project/ProjectConfigModal';
 import type { Project } from '@/types';
 
 export default function ProjectsPage() {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
-  const { data: projects = [], isLoading } = useProjects();
+  const qc = useQueryClient();
+  const { data: projects = [], isLoading, isFetching, refetch } = useProjects();
+  const [manualRefresh, setManualRefresh] = useState(false);
+  const showSkeleton = isLoading || manualRefresh;
+
+  async function handleManualRefresh() {
+    if (manualRefresh) return;
+    setManualRefresh(true);
+    qc.invalidateQueries({ queryKey: ['projects'] });
+    qc.invalidateQueries({ queryKey: ['project-metrics'] });
+    try { await refetch(); } finally { setManualRefresh(false); }
+  }
 
   const [search, setSearch] = useState('');
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
 
-  const filtered = projects.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  // Cargar proyectos ocultos del usuario actual (localStorage, espejo del móvil).
+  useEffect(() => {
+    if (!currentUser) return;
+    try {
+      const raw = localStorage.getItem(`hidden_projects_${currentUser.id}`);
+      if (raw) setHiddenIds(new Set(JSON.parse(raw)));
+    } catch { /* ignore */ }
+  }, [currentUser?.id]);
+
+  const toggleHidden = (projectId: string) => {
+    if (!currentUser) return;
+    const next = new Set(hiddenIds);
+    if (next.has(projectId)) next.delete(projectId);
+    else next.add(projectId);
+    setHiddenIds(next);
+    try {
+      localStorage.setItem(`hidden_projects_${currentUser.id}`, JSON.stringify(Array.from(next)));
+    } catch { /* ignore */ }
+  };
+
+  const filtered = projects
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(p => showHidden || !hiddenIds.has(p.id));
+  const hiddenCount = projects.filter(p => hiddenIds.has(p.id)).length;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -58,10 +96,42 @@ export default function ProjectsPage() {
           </svg>
         </div>
         <div className="relative z-10">
-          <h1 className="text-white text-xl font-black tracking-wide">Mis Proyectos</h1>
-          <p className="text-light text-xs mt-0.5">
-            {projects.length} proyecto{projects.length !== 1 ? 's' : ''} disponible{projects.length !== 1 ? 's' : ''}
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h1 className="text-white text-xl font-black tracking-wide">{t('webMisc.myProjects')}</h1>
+              <p className="text-light text-xs mt-0.5">
+                {t(projects.length !== 1 ? 'webMisc.projectsAvailableMany' : 'webMisc.projectsAvailableOne', { count: projects.length })}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleManualRefresh}
+                title={t('webMisc.refreshList')}
+                disabled={manualRefresh}
+                className="p-2 rounded-lg text-white border border-white/20 hover:bg-white/20 transition disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={manualRefresh ? 'animate-spin' : ''} />
+              </button>
+              {currentUser?.role === 'CREATOR' && (
+                <Link
+                  href="/app/users"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 text-white border border-white/20 hover:bg-white/20 transition"
+                >
+                  <UsersIcon size={13} />
+                  {t('webMisc.users')}
+                </Link>
+              )}
+              {currentUser && (
+                <Link
+                  href="/app/me"
+                  className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20 flex items-center justify-center text-xs font-black transition"
+                  title={t('webMisc.myAccount')}
+                >
+                  {(currentUser.name?.[0] ?? '') + (currentUser.apellido?.[0] ?? '')}
+                </Link>
+              )}
+            </div>
+          </div>
 
           {/* Buscador */}
           <div className="mt-4 relative">
@@ -69,7 +139,7 @@ export default function ProjectsPage() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar proyecto..."
+              placeholder={t('webMisc.searchProjectPlaceholder')}
               className="w-full bg-white/10 border border-white/20 rounded-md pl-8 pr-3 py-2.5 text-sm text-white placeholder:text-light/60 focus:outline-none focus:bg-white/15 transition"
             />
           </div>
@@ -78,7 +148,7 @@ export default function ProjectsPage() {
 
       {/* Lista */}
       <div className="p-4 flex flex-col gap-3 pb-10">
-        {isLoading ? (
+        {showSkeleton ? (
           [...Array(3)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl shadow-card p-4 flex flex-col gap-3 animate-pulse">
               <div className="flex items-start gap-2">
@@ -97,152 +167,174 @@ export default function ProjectsPage() {
           <div className="flex flex-col items-center py-16 gap-3">
             <FolderOpen size={40} className="text-[#8896a5]" />
             <p className="text-[#8896a5] font-semibold">
-              {search ? 'Sin resultados' : 'Sin proyectos aún'}
+              {search ? t('webMisc.noResultsShort') : t('webMisc.noProjectsYet')}
             </p>
           </div>
         ) : (
-          filtered.map(project => (
-            <ProjectCard key={project.id} project={project} isJefe={isJefe} />
-          ))
+          <>
+            {hiddenCount > 0 && (
+              <button
+                onClick={() => setShowHidden(v => !v)}
+                className="self-end text-[11px] font-bold text-muted hover:text-navy flex items-center gap-1 mb-1"
+              >
+                {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                {showHidden ? t('webMisc.hideHiddenProjects', { count: hiddenCount, plural: hiddenCount !== 1 ? 's' : '' })
+                            : t('webMisc.showHiddenProjects', { count: hiddenCount, plural: hiddenCount !== 1 ? 's' : '' })}
+              </button>
+            )}
+            {filtered.map(project => (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                isJefe={isJefe}
+                isCreator={currentUser?.role === 'CREATOR'}
+                isHidden={hiddenIds.has(project.id)}
+                onToggleHidden={() => toggleHidden(project.id)}
+              />
+            ))}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// ── Barra de avance ─────────────────────────────────────────────────────────
-function ProgressBar({ projectId }: { projectId: string }) {
-  const { data: metrics, isLoading } = useProjectMetrics(projectId);
+// ── Tarjeta de proyecto (versión paridad con móvil) ─────────────────────────
+function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
+  project: Project;
+  isJefe: boolean;
+  isCreator: boolean;
+  isHidden: boolean;
+  onToggleHidden: () => void;
+}) {
+  const { t } = useI18n();
+  const { data: metrics } = useProjectMetrics(project.id);
+  const isActive = (project.status ?? 'ACTIVE') === 'ACTIVE';
 
-  if (isLoading || !metrics) {
-    return <div className="w-40 h-5 bg-gray-100 rounded-lg animate-pulse" />;
-  }
-
-  const pct = metrics.progressPercent;
-  const barColor = pct >= 100 ? 'bg-emerald-500' : pct >= 50 ? 'bg-primary' : 'bg-amber-400';
-  const textColor = pct >= 100 ? 'text-emerald-600' : pct >= 50 ? 'text-primary' : 'text-gray-500';
+  const obs = metrics?.openObservations ?? 0;
+  const approved = metrics?.approvedProtocols ?? 0;
+  const submitted = metrics?.pendingReview ?? 0;
+  const rejected = metrics?.rejectedProtocols ?? 0;
 
   return (
-    <div className="flex items-center gap-2 flex-shrink-0">
-      <TrendingUp size={13} className={textColor} />
-      <span className={cn('text-[10px] font-medium text-gray-400')}>Avance</span>
-      <span className={cn('font-bold text-[13px]', textColor)}>{pct}%</span>
-      <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div
-          className={cn('h-full rounded-full transition-all duration-500', barColor)}
-          style={{ width: `${Math.min(pct, 100)}%` }}
+    <div
+      className={cn(
+        'bg-white rounded-xl shadow-card overflow-hidden border-t-[3px] hover:shadow-lg transition-shadow',
+        isHidden && 'opacity-60',
+      )}
+      style={{ borderTopColor: 'var(--color-primary, #00bcb4)' }}
+    >
+      {/* Cabecera: nombre + estado + chevron + toggle hidden */}
+      <div className="flex items-center gap-2 px-4 pt-4 pb-2.5">
+        <Link
+          href={`/app/projects/${project.id}/menu`}
+          className="flex-1 min-w-0 flex flex-col gap-1.5 hover:opacity-80 transition"
+        >
+          <h2 className="text-navy font-bold text-[16px] leading-tight truncate">{project.name}</h2>
+          <span
+            className={cn(
+              'self-start rounded-[3px] px-1.5 py-[2px] text-[9px] font-bold tracking-wider text-white',
+              isActive ? 'bg-emerald-500' : 'bg-gray-400',
+            )}
+          >
+            {isActive ? t('webMisc.statusActive') : t('webMisc.statusClosed')}{isHidden && t('webMisc.hiddenSuffix')}
+          </span>
+          <p className="text-[11px] text-[#8896a5]">{t('webMisc.createdOn', { date: formatDate(project.created_at) })}</p>
+        </Link>
+        <button
+          onClick={onToggleHidden}
+          title={isHidden ? t('webMisc.showInMyList') : t('webMisc.hideFromMyList')}
+          className="p-2 rounded-lg text-muted hover:text-navy hover:bg-surface transition flex-shrink-0"
+        >
+          {isHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+        </button>
+        <ChevronRight size={20} className="text-[#8896a5]" />
+      </div>
+
+      {/* Fila de chips de acción (igual que móvil) */}
+      <div className="flex items-center gap-1.5 px-3 pb-3 pt-2.5 border-t border-divider">
+        {/* Observaciones (con contador rojo si > 0) */}
+        <Link
+          href={`/app/projects/${project.id}/observations`}
+          className="flex items-center gap-1 bg-white border border-border rounded-md px-2.5 py-1.5 text-[11px] font-semibold text-navy hover:border-primary transition"
+          title={t('webMisc.observations')}
+        >
+          <Eye size={13} />
+          <span className="text-[10px] font-bold text-gray-500">{t('webMisc.obsShort')}</span>
+          {obs > 0 ? (
+            <span className="text-[12px] font-black text-danger animate-pulse">{obs}!</span>
+          ) : (
+            <span className="text-[12px] font-bold text-gray-400">0</span>
+          )}
+        </Link>
+
+        {/* Dossier (con 3 mini-badges: aprobado / enviado / rechazado) */}
+        <Link
+          href={`/app/projects/${project.id}/dossier`}
+          className="flex items-center gap-1 bg-white border border-border rounded-md px-2.5 py-1.5 text-[11px] font-semibold text-navy hover:border-primary transition"
+          title={t('webMisc.dossier')}
+        >
+          <BookOpen size={13} />
+          <span className="text-[10px] font-bold text-gray-500">{t('webMisc.dossierShort')}</span>
+          <div className="flex items-center gap-0.5 ml-0.5">
+            <span className="bg-emerald-500 text-white text-[9px] font-black rounded-[3px] min-w-[16px] h-[16px] px-1 flex items-center justify-center">{approved}</span>
+            <span className="bg-primary text-white text-[9px] font-black rounded-[3px] min-w-[16px] h-[16px] px-1 flex items-center justify-center">{submitted}</span>
+            <span className="bg-danger text-white text-[9px] font-black rounded-[3px] min-w-[16px] h-[16px] px-1 flex items-center justify-center">{rejected}</span>
+          </div>
+        </Link>
+
+        {/* v29 — Cargar archivos y Planos se accedan desde el menú interno del proyecto. */}
+        {/* Teléfonos (icono naranja/secondary) */}
+        <Link
+          href={`/app/projects/${project.id}/contacts`}
+          className="flex items-center justify-center bg-secondary border border-secondary rounded-md px-2.5 py-1.5 text-white hover:opacity-90 transition"
+          title={t('webMisc.contacts')}
+        >
+          <Phone size={14} />
+        </Link>
+
+        {/* v40 — Configurar módulos: ícono al costado de Contactos. EXCLUSIVO del
+            rol CREATOR (ni el Jefe lo ve). Antes vivía dentro de "Cargar archivos". */}
+        {isCreator && <ProjectConfigButton project={project} />}
+      </div>
+    </div>
+  );
+}
+
+/** Botón "Configurar módulos" + su modal (CREATOR-only). Componente propio para
+ *  que los hooks de flags solo se monten cuando el creador ve la tarjeta. */
+function ProjectConfigButton({ project }: { project: Project }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const { data: flags } = useProjectFlags(project.id);
+  const updateFlags = useUpdateProjectFlags(project.id);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center justify-center bg-white border border-border rounded-md px-2.5 py-1.5 text-textSecondary hover:border-primary hover:text-primary transition"
+        title={t('webMisc.configureModulesHint')}
+      >
+        <Settings size={14} />
+      </button>
+      {open && flags && (
+        <ProjectConfigModal
+          initialFlags={flags}
+          initialMapTileUrl={project.map_tile_url ?? null}
+          initialSampleIdentifier={(project as { sample_identifier?: string | null }).sample_identifier ?? null}
+          title={t('webMisc.configureModulesTitle', { name: project.name })}
+          confirmLabel={t('webMisc.saveConfig')}
+          onConfirm={async (newFlags, mapTileUrl, sampleIdentifier) => {
+            try {
+              await updateFlags.mutateAsync({ flags: newFlags, mapTileUrl, sampleIdentifier } as any);
+              setOpen(false);
+            } catch (e) {
+              alert((e as Error).message);
+            }
+          }}
+          onCancel={() => setOpen(false)}
         />
-      </div>
-      <span className="text-[10px] text-gray-400 font-semibold">{metrics.approvedProtocols}/{metrics.totalExpected}</span>
-    </div>
-  );
-}
-
-// ── Indicadores ─────────────────────────────────────────────────────────────
-function MetricsBadges({ projectId }: { projectId: string }) {
-  const { data: metrics, isLoading } = useProjectMetrics(projectId);
-
-  if (isLoading || !metrics) {
-    return (
-      <div className="flex gap-2">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-10 w-28 bg-gray-100 rounded-lg animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-
-  const items: { icon: typeof AlertCircle; label: string; value: string; color: string; bg: string }[] = [
-    {
-      icon: AlertCircle,
-      label: 'Obs. Pendientes',
-      value: String(metrics.openObservations),
-      color: metrics.openObservations > 0 ? 'text-amber-600' : 'text-gray-400',
-      bg: metrics.openObservations > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200',
-    },
-    {
-      icon: ClipboardList,
-      label: 'Por Revisar',
-      value: String(metrics.pendingReview),
-      color: metrics.pendingReview > 0 ? 'text-blue-600' : 'text-gray-400',
-      bg: metrics.pendingReview > 0 ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200',
-    },
-    {
-      icon: metrics.progressPercent >= 100 ? CheckCircle2 : TrendingUp,
-      label: 'Avance',
-      value: `${metrics.progressPercent}%`,
-      color: metrics.progressPercent >= 100 ? 'text-emerald-600' : metrics.progressPercent >= 50 ? 'text-primary' : 'text-gray-500',
-      bg: metrics.progressPercent >= 100 ? 'bg-emerald-50 border-emerald-200' : metrics.progressPercent >= 50 ? 'bg-primary/5 border-primary/20' : 'bg-gray-50 border-gray-200',
-    },
-  ];
-
-  return (
-    <div className="flex items-center gap-3">
-      {items.filter(i => i.label !== 'Avance').map(({ icon: Icon, label, value, color, bg }) => (
-        <div key={label} className={cn('flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border', bg)}>
-          <Icon size={13} className={color} />
-          <span className="text-[10px] text-gray-400 font-medium">{label}</span>
-          <span className={cn('font-bold text-[13px]', color)}>{value}</span>
-        </div>
-      ))}
-
-    </div>
-  );
-}
-
-// ── Tarjeta de proyecto ─────────────────────────────────────────────────────
-function ProjectCard({ project, isJefe }: { project: Project; isJefe: boolean }) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  type Chip = { href: string; icon: any; label: string; iconOnly?: boolean };
-
-  const chips: Chip[] = [
-    { href: `/app/projects/${project.id}/locations`,    icon: ClipboardList, label: 'Protocolos'    },
-    { href: `/app/projects/${project.id}/observations`, icon: Eye,           label: 'Observaciones' },
-    { href: `/app/projects/${project.id}/dossier`,      icon: BookOpen,      label: 'Dossier'       },
-    { href: `/app/projects/${project.id}/contacts`,     icon: Phone,         label: '',    iconOnly: true },
-  ];
-
-  const adminChips: Chip[] = isJefe ? [
-    { href: `/app/projects/${project.id}/file-upload`, icon: Upload, label: 'Cargar' },
-  ] : [];
-
-  return (
-    <div className="bg-white rounded-xl shadow-card border border-border/50 p-4 flex flex-col gap-2.5 hover:shadow-lg transition-shadow">
-      {/* Fila 1: nombre (izq) + métricas (der) */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="w-9 h-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <FolderOpen size={18} className="text-primary" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-navy font-bold text-[15px] leading-tight truncate">{project.name}</h2>
-            <p className="text-[#8896a5] text-[11px] mt-0.5">
-              Creado {formatDate(project.created_at)}
-            </p>
-          </div>
-        </div>
-        <MetricsBadges projectId={project.id} />
-      </div>
-
-      {/* Fila 2: chips (izq) + barra de avance (der) */}
-      <div className="flex items-center gap-3">
-        <div className="flex gap-1.5 flex-wrap flex-1">
-          {[...chips, ...adminChips].map(chip => (
-            <Link
-              key={chip.href}
-              href={chip.href}
-              className={cn(
-                'flex items-center gap-1.5 bg-surface border border-border rounded-md py-2 text-[12px] font-semibold text-navy hover:bg-primary hover:text-white hover:border-primary transition',
-                chip.iconOnly ? 'px-2.5' : 'px-3'
-              )}
-            >
-              <chip.icon size={13} />
-              {chip.label && <span>{chip.label}</span>}
-            </Link>
-          ))}
-        </div>
-        <ProgressBar projectId={project.id} />
-      </div>
-    </div>
+      )}
+    </>
   );
 }

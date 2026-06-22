@@ -1,0 +1,32 @@
+ID_Protocolo,Protocolo,PartidaItem,Actividad realizada,Método de validación,Sección
+ARQ-PISOS,Acabado de Pisos de Concreto,1,¿El tipo de acabado del piso corresponde a lo indicado en los planos?,Visual,INSPECCIÓN VISUAL
+ARQ-PISOS,Acabado de Pisos de Concreto,2,¿Se aplicaron los aditivos especificados para el acabado del concreto?,Visual,INSPECCIÓN VISUAL
+ARQ-PISOS,Acabado de Pisos de Concreto,3,¿La planimetría del piso cumple con la tolerancia ≤ 5 mm en regla de 3 m?,Regla de 3 m,GEOMETRÍA
+ARQ-PISOS,Acabado de Pisos de Concreto,4,¿El piso quedó libre de fisuras visibles tras el curado de 7 días?,Visual,POST-CURADO
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,1,Resistencia probeta 1 (MPa) a los 28 días,"numerico-[18:50]",VALORES INDIVIDUALES
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,2,Resistencia probeta 2 (MPa) a los 28 días,"numerico-[18:50]",VALORES INDIVIDUALES
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,3,Resistencia probeta 3 (MPa) a los 28 días,"numerico-[18:50]",VALORES INDIVIDUALES
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,4,Resistencia probeta 4 (MPa) a los 28 días,"numerico-[18:50]",VALORES INDIVIDUALES
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,5,Resistencia promedio fc (MPa),"numerico-fx[PROMEDIO(#1,#2,#3,#4)]:[21:50]",RESULTADOS
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,6,"Dispersión: (Máx − Mín) (MPa)","numerico-fx[MAX(#1,#2,#3,#4)-MIN(#1,#2,#3,#4)]:[0:8]",RESULTADOS
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,7,Dispersión relativa (%) = rango / promedio × 100 — alerta si > 15%,"numerico-fx[REDONDEAR((MAX(#1,#2,#3,#4)-MIN(#1,#2,#3,#4))/PROMEDIO(#1,#2,#3,#4)*100,2)]:[0:15]",RESULTADOS
+LAB-CONCRETO-RC,Ensayo de Resistencia a la Compresión - Concreto,8,"¿Cumple fc' ≥ 21 MPa? (1 = sí, 0 = no)","numerico-fx[SI(#5>=21,1,0)]:[1:1]",CUMPLIMIENTO
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,1,Peso inicial de la muestra (g),"numerico-[100:5000]",PESAJE INICIAL
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,2,Peso final tras lixiviación (g),"numerico-[50:5000]",PESAJE FINAL
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,3,Peso de cobre extraído (g),"numerico-[0.1:500]",ANÁLISIS QUÍMICO
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,4,"Recuperación másica % = peso final / peso inicial × 100","numerico-fx[REDONDEAR(#2/#1*100,2)]:[70:100]",CÁLCULOS
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,5,"Ley de Cu en residuo % = peso Cu / peso final × 100","numerico-fx[REDONDEAR(#3/#2*100,4)]:[0.5:30]",CÁLCULOS
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,6,"Ratio Cu / muestra inicial % = peso Cu / peso inicial × 100","numerico-fx[REDONDEAR(#3/#1*100,4)]:[0.1:25]",CÁLCULOS
+MIN-LEY-CU,Ley de Cobre - Muestra de Mineral,7,¿Supera la ley mínima de 5%? (1 = sí),"numerico-fx[SI(#5>=5,1,0)]:[1:1]",CUMPLIMIENTO
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,1,Abertura tamiz 1 (mm) — ej: tamiz N°4,"numerico-[4.5:5.0]",TAMICES (Eje X)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,2,Abertura tamiz 2 (mm) — ej: tamiz N°10,"numerico-[1.8:2.2]",TAMICES (Eje X)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,3,Abertura tamiz 3 (mm) — ej: tamiz N°40,"numerico-[0.40:0.50]",TAMICES (Eje X)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,4,Abertura tamiz 4 (mm) — ej: tamiz N°200,"numerico-[0.070:0.080]",TAMICES (Eje X)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,5,% Pasante en tamiz 1,"numerico-[0:100]",% PASANTE (Eje Y)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,6,% Pasante en tamiz 2,"numerico-[0:100]",% PASANTE (Eje Y)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,7,% Pasante en tamiz 3,"numerico-[0:100]",% PASANTE (Eje Y)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,8,% Pasante en tamiz 4,"numerico-[0:100]",% PASANTE (Eje Y)
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,9,Curva granulométrica (puntos unidos por líneas),"numerico-gr1[x:1,2,3,4-y:5,6,7,8]",CURVA
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,10,Curva granulométrica suavizada (Bézier),"numerico-gr2[x:1,2,3,4-y:5,6,7,8]",CURVA
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,11,"D50 estimado por interpolación (mm)","numerico-fx[REDONDEAR((#2+#3)/2,3)]:[0.2:1.5]",ÍNDICES
+LAB-SUELOS-GRAN,Análisis Granulométrico - Curva de Tamizado,12,"Coeficiente de uniformidad Cu = tamiz1 / tamiz4","numerico-fx[REDONDEAR(#1/#4,2)]:[5:200]",ÍNDICES

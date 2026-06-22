@@ -3,7 +3,8 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Modal, Alert, RefreshControl, Platform, StatusBar, Animated,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -15,6 +16,7 @@ import {
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
+import { DEFAULT_FEATURE_FLAGS } from '@utils/featureFlags';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { syncProjectFromS3 } from '@services/S3SyncService';
 import { initProjectFolders } from '@services/S3Service';
@@ -26,6 +28,9 @@ import {
 import { supabase } from '@config/supabase';
 import { useTour } from '@context/TourContext';
 import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
+import SideDrawer, { type SideDrawerItem } from '@components/SideDrawer';
+import LanguagePickerModal from '@components/LanguagePickerModal';
+import { useI18n, LANG_LABEL } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectList'>;
 
@@ -54,6 +59,7 @@ type ProjectRow = { id: string; name: string; status: string };
 
 export default function ProjectListScreen({ navigation }: Props) {
   const { currentUser, logout, isDemo } = useAuth();
+  const insets = useSafeAreaInsets();
   const { startTour, startTourIfFirstTime, jumpToStep, isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep } = useTour();
 
   // Tour refs
@@ -62,7 +68,8 @@ export default function ProjectListScreen({ navigation }: Props) {
   const actionChipsRef = useTourStep('project_action_chips');
   const observacionesChipRef = useTourStep('project_observaciones_chip');
   const dosierChipRef = useTourStep('project_dosier_chip');
-  const cargarChipRef = useTourStep('project_cargar_chip');
+  // v29 — cargarChipRef y planosChipRef eliminados: esos botones se movieron
+  // al menú interno del proyecto; el tour debe re-anclarse ahí cuando aplique.
   const { ref: bottomNavRef, onLayout: bottomNavLayout } = useTourStepWithLayout('bottom_nav');
   const { ref: joinBtnRef, onLayout: joinBtnLayout } = useTourStepWithLayout('nav_join_btn');
   const { ref: newBtnRef, onLayout: newBtnLayout } = useTourStepWithLayout('nav_new_btn');
@@ -82,6 +89,9 @@ export default function ProjectListScreen({ navigation }: Props) {
     openObs: number; approved: number; submitted: number; rejected: number;
   }>>({});
   const [showCreate, setShowCreate] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);   // v44 — menú lateral
+  const [showLangPicker, setShowLangPicker] = useState(false);   // v46 — selector de idioma
+  const { t, lang } = useI18n();
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -227,7 +237,7 @@ export default function ProjectListScreen({ navigation }: Props) {
     // Validar nombre duplicado
     const duplicate = projects.find(p => p.name.toLowerCase().trim() === newName.toLowerCase().trim());
     if (duplicate) {
-      Alert.alert('Nombre duplicado', 'Ya existe un proyecto con ese nombre. Usa un nombre diferente.');
+      Alert.alert(t('alerts.duplicateNameTitle'), t('alerts.duplicateNameMsg'));
       return;
     }
     let newProjectId = '';
@@ -237,6 +247,19 @@ export default function ProjectListScreen({ navigation }: Props) {
         p.status = 'ACTIVE';
         (p as any).password = newPassword.trim();
         p.createdById = currentUser?.id ?? null;
+        // v22 — Seed feature_flags con los defaults para protocolos numéricos
+        // (clásicos+planos+normas+contactos+numéricos+gráficos ON, históricos OFF).
+        // Sin esto el proyecto subido a Supabase tendría feature_flags = null y
+        // el CREATOR tendría que activar los módulos manualmente desde web antes
+        // de poder llenar protocolos numéricos.
+        (p as any).featureFlags = JSON.stringify({
+          ...DEFAULT_FEATURE_FLAGS,
+          // Habilitamos numéricos por default en proyectos creados desde móvil
+          // — el flujo móvil principal hoy es numérico/clásico, y obligar a
+          // pasar por web rompería la UX.
+          numeric_protocols: true,
+          advanced_charts: true,
+        });
       });
       newProjectId = proj.id;
     });
@@ -246,10 +269,10 @@ export default function ProjectListScreen({ navigation }: Props) {
       try {
         const result = await pushProjectToSupabase(newProjectId);
         if (result.errors.length > 0) {
-          Alert.alert('Error al sincronizar proyecto', result.errors.join('\n'));
+          Alert.alert(t('alerts.syncProjectErrorTitle'), result.errors.join('\n'));
         }
       } catch (e: any) {
-        Alert.alert('Error de red', `No se pudo sincronizar el proyecto: ${e.message}`);
+        Alert.alert(t('alerts.networkErrorTitle'), t('alerts.networkSyncProjectMsg', { message: e.message }));
       }
       initProjectFolders(name).catch((e) => console.warn('[S3] initProjectFolders:', e));
       await loadProjectsFromCloud();
@@ -263,12 +286,12 @@ export default function ProjectListScreen({ navigation }: Props) {
   const handleDeleteFromView = (project: ProjectRow) => {
     setSelectedProject(null);
     Alert.alert(
-      'Eliminar proyecto',
-      'Se eliminará el proyecto de tu lista.',
+      t('alerts.deleteProjectTitle'),
+      t('alerts.deleteProjectMsg'),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: t('alerts.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar', style: 'destructive',
+          text: t('alerts.delete'), style: 'destructive',
           onPress: async () => {
             if (!currentUser) return;
             // 1. Eliminar user_project_access local + Supabase
@@ -307,12 +330,12 @@ export default function ProjectListScreen({ navigation }: Props) {
       // Siempre verificar contraseña contra Supabase (fuente de verdad)
       const remote = await findProjectInSupabase(joinName.trim());
       if (!remote) {
-        Alert.alert('Proyecto no encontrado', 'No existe un proyecto con ese nombre.');
+        Alert.alert(t('alerts.projectNotFoundTitle'), t('alerts.projectNotFoundMsg'));
         setJoinLoading(false);
         return;
       }
       if ((remote.password ?? '').toLowerCase().trim() !== joinPassword.toLowerCase().trim()) {
-        Alert.alert('Contraseña incorrecta', 'La contraseña del proyecto no es correcta.');
+        Alert.alert(t('alerts.wrongPasswordTitle'), t('alerts.wrongPasswordMsg'));
         setJoinLoading(false);
         return;
       }
@@ -353,7 +376,7 @@ export default function ProjectListScreen({ navigation }: Props) {
           if (!found) found = await findLocal();
         }
         if (!found) {
-          Alert.alert('Error', 'No se pudo descargar el proyecto. Desliza la lista hacia abajo para sincronizar e intenta de nuevo.');
+          Alert.alert(t('alerts.error'), t('alerts.downloadProjectFailedMsg'));
           setJoinLoading(false);
           return;
         }
@@ -373,9 +396,9 @@ export default function ProjectListScreen({ navigation }: Props) {
           setHiddenProjectIds(newHidden);
           AsyncStorage.setItem(`hidden_projects_${currentUser.id}`, JSON.stringify([...newHidden])).catch(() => {});
           setJoinName(''); setJoinPassword(''); setShowJoin(false);
-          Alert.alert('Proyecto restaurado', `"${found.name}" vuelve a aparecer en tu lista.`);
+          Alert.alert(t('alerts.projectRestoredTitle'), t('alerts.projectRestoredMsg', { name: found.name }));
         } else {
-          Alert.alert('Ya tienes acceso', 'Este proyecto ya está en tu lista.');
+          Alert.alert(t('alerts.alreadyHasAccessTitle'), t('alerts.alreadyHasAccessMsg'));
         }
         setJoinLoading(false);
         return;
@@ -405,19 +428,19 @@ export default function ProjectListScreen({ navigation }: Props) {
       setShowJoin(false);
       loadProjectsFromCloud();
       const msg = fromCloud
-        ? `El proyecto "${found.name}" fue descargado desde la nube y ya aparece en tu lista.`
-        : `El proyecto "${found.name}" ya aparece en tu lista.`;
-      Alert.alert('Acceso concedido', msg);
+        ? t('alerts.accessGrantedFromCloudMsg', { name: found.name })
+        : t('alerts.accessGrantedLocalMsg', { name: found.name });
+      Alert.alert(t('alerts.accessGrantedTitle'), msg);
     } catch (err: any) {
-      Alert.alert('Error', `Ocurrió un error al ingresar al proyecto.\n\n${err?.message ?? String(err)}`);
+      Alert.alert(t('alerts.error'), t('alerts.joinProjectErrorMsg', { message: err?.message ?? String(err) }));
     }
     setJoinLoading(false);
   };
 
   const handleLogout = () => {
-    Alert.alert('Cerrar sesion', 'Desea salir del sistema?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Salir', style: 'destructive', onPress: logout },
+    Alert.alert(t('alerts.logoutTitle'), t('alerts.logoutMsg'), [
+      { text: t('alerts.cancel'), style: 'cancel' },
+      { text: t('alerts.logoutConfirm'), style: 'destructive', onPress: logout },
     ]);
   };
 
@@ -425,19 +448,24 @@ export default function ProjectListScreen({ navigation }: Props) {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: (StatusBar.currentHeight ?? 24) + 16 }]}>
-        <Text style={styles.versionBadge}>V2.0</Text>
-
         <View style={styles.headerTop}>
-          {/* Izquierda: nombre + rol */}
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>
-              {currentUser?.name} {currentUser?.apellido}
-            </Text>
-            <View style={[styles.roleBadge, { backgroundColor: roleColor(currentUser?.role) }]}>
-              <Text style={styles.roleBadgeText}>{roleLabel(currentUser?.role)}</Text>
+          {/* Izquierda: identidad (avatar lo más a la izquierda + nombre/rol). Toca para abrir el menú. */}
+          <TouchableOpacity style={styles.userInfo} activeOpacity={0.8} onPress={() => setShowDrawer(true)}>
+            <View style={[styles.avatarBtn, { backgroundColor: roleColor(currentUser?.role) }]}>
+              <Text style={styles.avatarText}>
+                {(currentUser?.name?.[0] ?? '') + (currentUser?.apellido?.[0] ?? '')}
+              </Text>
             </View>
-          </View>
-          {/* Derecha: acciones */}
+            <View style={{ flexShrink: 1 }}>
+              <Text style={styles.userName} numberOfLines={1}>
+                {currentUser?.name} {currentUser?.apellido}
+              </Text>
+              <View style={[styles.roleBadge, { backgroundColor: roleColor(currentUser?.role) }]}>
+                <Text style={styles.roleBadgeText}>{roleLabel(currentUser?.role)}</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+          {/* Derecha: tutorial + menú hamburguesa (lo demás se movió al menú lateral) */}
           <View style={styles.headerActions}>
             {unreadCount > 0 && (
               <View style={styles.notifBadge}>
@@ -446,30 +474,20 @@ export default function ProjectListScreen({ navigation }: Props) {
             )}
             <TouchableOpacity
               ref={tourHelpRef}
-              style={styles.tutorialBtn}
+              style={styles.iconBtn}
               onPress={startTour}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Tutorial"
             >
-              <Text style={styles.tutorialBtnText}>Tutorial</Text>
+              <Ionicons name="school-outline" size={23} color={Colors.white} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.avatarBtn}
-              onPress={() => navigation.navigate('ChangePassword')}
+              style={styles.iconBtn}
+              onPress={() => setShowDrawer(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Abrir menú"
             >
-              <Text style={styles.avatarText}>
-                {(currentUser?.name?.[0] ?? '') + (currentUser?.apellido?.[0] ?? '')}
-              </Text>
-            </TouchableOpacity>
-            {isCreator && !isDemo && (
-              <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={() => navigation.navigate('UserManagement')}
-              >
-                <Text style={styles.headerBtnText}>Usuarios</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.powerBtn} onPress={handleLogout}>
-              <Ionicons name="power-outline" size={22} color="#e57373" />
+              <Ionicons name="menu" size={28} color={Colors.white} />
             </TouchableOpacity>
           </View>
         </View>
@@ -478,7 +496,7 @@ export default function ProjectListScreen({ navigation }: Props) {
       <FlatList
         data={projects.filter((p) => !hiddenProjectIds.has(p.id))}
         keyExtractor={(p) => p.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: 100 + Math.max(insets.bottom, 8) }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.primary} />
         }
@@ -498,7 +516,8 @@ export default function ProjectListScreen({ navigation }: Props) {
               style={styles.cardHeader}
               onPress={() => {
                 pullProjectFromCloud(item.id).catch(() => {});
-                navigation.navigate('LocationList', { projectId: item.id, projectName: item.name });
+                // v28 — Tap → menú intermedio (no directo a Ubicaciones).
+                navigation.navigate('ProjectMenu', { projectId: item.id, projectName: item.name });
               }}
               onLongPress={() => setSelectedProject(item)}
               activeOpacity={0.85}
@@ -520,13 +539,13 @@ export default function ProjectListScreen({ navigation }: Props) {
             <View ref={index === 0 ? actionChipsRef : undefined} style={styles.actionsRow}>
               <TouchableOpacity
                 ref={index === 0 ? observacionesChipRef : undefined}
-                style={styles.actionChip}
+                style={styles.actionChipCompact}
                 onPress={() => {
                   pullProjectFromCloud(item.id).catch(() => {});
                   navigation.navigate('AnnotationComments', { projectId: item.id, projectName: item.name });
                 }}
               >
-                <Text style={styles.actionChipText}>Obs: </Text>
+                <Text style={styles.actionChipTextSm}>Obs </Text>
                 {(projectCounts[item.id]?.openObs ?? 0) > 0 ? (
                   <PulsingBadge count={projectCounts[item.id].openObs} />
                 ) : (
@@ -558,19 +577,7 @@ export default function ProjectListScreen({ navigation }: Props) {
                 </TouchableOpacity>
               )}
 
-              {isJefe && (
-                <TouchableOpacity
-                  ref={index === 0 ? cargarChipRef : undefined}
-                  style={styles.actionChipUpload}
-                  onPress={() => {
-                    if (index === 0 && tourActive && tourStep?.id === 'fileupload_entry') tourNextStep();
-                    navigation.navigate('FileUpload', { projectId: item.id, projectName: item.name });
-                  }}
-                >
-                  <Ionicons name="cloud-upload-outline" size={15} color={Colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-
+              {/* v29 — Planos y Cargar archivos se accedan desde el menú interno del proyecto. */}
               <TouchableOpacity
                 style={styles.actionChipPhone}
                 onPress={() => navigation.navigate('PhoneContacts', { projectId: item.id, projectName: item.name })}
@@ -583,7 +590,8 @@ export default function ProjectListScreen({ navigation }: Props) {
       />
 
       {/* Bottom navigation bar */}
-      <View ref={bottomNavRef} onLayout={bottomNavLayout} style={styles.bottomNav}>
+      <View ref={bottomNavRef} onLayout={bottomNavLayout}
+        style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 8) + 8 }]}>
         <View style={[styles.navItem, styles.navItemActive]}>
           <Ionicons name="folder-open" size={24} color={Colors.primary} />
           <Text style={[styles.navLabel, styles.navLabelActive]}>Proyectos</Text>
@@ -618,9 +626,9 @@ export default function ProjectListScreen({ navigation }: Props) {
             style={styles.navItem}
             onPress={() => {
               if (isDemo) {
-                Alert.alert('Opción no disponible en demo', 'Esta función no está habilitada en el modo de demostración.');
+                Alert.alert(t('alerts.demoUnavailableTitle'), t('alerts.demoUnavailableMsg'));
               } else if (!isCreator) {
-                Alert.alert('Acceso restringido', 'Para crear un nuevo proyecto comuníquese con el administrador.');
+                Alert.alert(t('alerts.restrictedAccessTitle'), t('alerts.restrictedAccessMsg'));
               } else {
                 setShowCreate(true);
               }
@@ -631,6 +639,17 @@ export default function ProjectListScreen({ navigation }: Props) {
             <Text style={styles.navLabel}>Nuevo</Text>
           </TouchableOpacity>
         )}
+
+        {/* v44 — QR movido del encabezado al pie, como opción más a la derecha. */}
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate('QRScanner')}
+          activeOpacity={0.7}
+          accessibilityLabel="Escanear QR de protocolo"
+        >
+          <Ionicons name="qr-code-outline" size={24} color={Colors.textMuted} />
+          <Text style={styles.navLabel}>QR</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Modal nuevo proyecto */}
@@ -684,6 +703,23 @@ export default function ProjectListScreen({ navigation }: Props) {
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setSelectedProject(null)}>
           <View style={[styles.modal, { gap: 0 }]}>
             <Text style={[styles.modalTitle, { marginBottom: 16 }]}>{selectedProject?.name}</Text>
+            {isCreator && (
+              <TouchableOpacity
+                style={styles.propConfigBtn}
+                onPress={() => {
+                  if (!selectedProject) return;
+                  const proj = selectedProject;
+                  setSelectedProject(null);
+                  (navigation as any).navigate('ProjectConfig', { projectId: proj.id, projectName: proj.name });
+                }}
+              >
+                <Text style={styles.propConfigText}>Configurar módulos</Text>
+              </TouchableOpacity>
+            )}
+            {/* v29 — Geolocalización y Trazabilidad se acceden únicamente desde el
+               menú intermedio del proyecto (gateadas ahí por sus flags). El long-press
+               modal sólo expone acciones administrativas: configurar módulos, eliminar
+               vista, cancelar. La gestión de sectores vive en Cargar archivos → Sectores. */}
             <TouchableOpacity
               style={styles.propDeleteBtn}
               onPress={() => selectedProject && handleDeleteFromView(selectedProject)}
@@ -739,15 +775,43 @@ export default function ProjectListScreen({ navigation }: Props) {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* v44 — Menú lateral (overlay). Reúne lo que se sacó del encabezado. */}
+      <SideDrawer
+        visible={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        userName={`${currentUser?.name ?? ''} ${currentUser?.apellido ?? ''}`.trim()}
+        roleLabel={roleLabel(currentUser?.role)}
+        roleColor={roleColor(currentUser?.role)}
+        initials={(currentUser?.name?.[0] ?? '') + (currentUser?.apellido?.[0] ?? '')}
+        sections={[
+          { title: t('drawer.preferences'), items: [
+            { icon: 'language-outline', label: `${t('drawer.language')} · ${LANG_LABEL[lang]}`, onPress: () => setShowLangPicker(true) },
+          ] },
+          { title: t('drawer.account'), items: [
+            ...((currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT' || currentUser?.role === 'SUPERVISOR')
+              ? [{ icon: 'create-outline', label: t('drawer.signature'), onPress: () => navigation.navigate('Signature') } as SideDrawerItem] : []),
+            { icon: 'key-outline', label: t('drawer.changePassword'), onPress: () => navigation.navigate('ChangePassword') },
+            ...((isCreator && !isDemo)
+              ? [{ icon: 'people-circle-outline', label: t('drawer.userManagement'), onPress: () => navigation.navigate('UserManagement') } as SideDrawerItem] : []),
+          ] },
+          { title: t('drawer.information'), items: [
+            { icon: 'information-circle-outline', label: t('drawer.about'), onPress: () => navigation.navigate('Info', { kind: 'about' }) },
+            { icon: 'mail-outline', label: t('drawer.contact'), onPress: () => navigation.navigate('Info', { kind: 'contact' }) },
+          ] },
+        ]}
+        footerItem={{ icon: 'power-outline', label: t('drawer.logout'), onPress: handleLogout, danger: true }}
+      />
+      <LanguagePickerModal visible={showLangPicker} onClose={() => setShowLangPicker(false)} />
     </View>
   );
 }
 
 function roleLabel(role?: string) {
   if (role === 'CREATOR') return 'Creador';
-  if (role === 'RESIDENT') return 'Jefe de Obra';
-  if (role === 'SUPERVISOR') return 'Supervisor QC';
-  return 'Visualizador';
+  if (role === 'RESIDENT') return 'Jefe';
+  if (role === 'SUPERVISOR') return 'Supervisor';
+  return 'Técnico';   // OPERATOR → Técnico (v44)
 }
 
 function roleColor(role?: string) {
@@ -769,13 +833,19 @@ const styles = StyleSheet.create({
   headerTop: {
     flexDirection: 'row', alignItems: 'center',
   },
-  userInfo: { flex: 1, gap: 3 },
+  userInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   userName: { fontSize: 14, fontWeight: '700', color: Colors.white },
   roleBadge: {
     borderRadius: 3, paddingHorizontal: 7, paddingVertical: 2, alignSelf: 'flex-start',
   },
   roleBadgeText: { color: Colors.white, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  headerActions: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'flex-end' },
+  headerActions: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  iconBtn: { padding: 2 },
+  qrScanBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
   notifBadge: {
     backgroundColor: Colors.danger, borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 3,
@@ -836,6 +906,18 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
   },
+  actionChipCompact: {
+    flex: 0, borderRadius: Radius.sm, paddingHorizontal: 7, paddingVertical: 5,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+  },
+  actionChipPlans: {
+    flex: 0, backgroundColor: Colors.navy, borderColor: Colors.navy,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 9, paddingVertical: 6,
+    borderWidth: 1, borderRadius: Radius.sm,
+  },
+  actionChipTextSm: { fontSize: 10, fontWeight: '700', color: Colors.textSecondary },
   actionChipUpload: {
     flex: 0, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 6,
     borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
@@ -866,7 +948,7 @@ const styles = StyleSheet.create({
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', backgroundColor: Colors.white,
     borderTopWidth: 1, borderTopColor: Colors.divider,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+    // paddingBottom se aplica inline con useSafeAreaInsets (cubre gestos Android nuevos)
     paddingTop: 8,
     ...Shadow.card,
   },
@@ -902,6 +984,11 @@ const styles = StyleSheet.create({
   modalBtnDisabled: { backgroundColor: Colors.light },
   modalConfirmText: { color: Colors.white, fontWeight: '700' },
 
+  propConfigBtn: {
+    padding: 16, borderRadius: Radius.md, backgroundColor: '#eef2fa',
+    alignItems: 'center', marginBottom: 8, borderWidth: 1, borderColor: Colors.primary + '40',
+  },
+  propConfigText: { color: Colors.primary, fontWeight: '700', fontSize: 14 },
   propDeleteBtn: {
     padding: 16, borderRadius: Radius.md, backgroundColor: '#fdecea',
     alignItems: 'center', marginBottom: 8,
@@ -909,5 +996,4 @@ const styles = StyleSheet.create({
   propDeleteText: { color: Colors.danger, fontWeight: '700', fontSize: 14 },
   propCancelBtn: { padding: 14, alignItems: 'center' },
   propCancelText: { color: Colors.textSecondary, fontWeight: '600', fontSize: 14 },
-  versionBadge: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '600', textAlign: 'center', marginBottom: 4, letterSpacing: 1 },
 });

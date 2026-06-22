@@ -25,14 +25,21 @@ import {
   useAddComment,
   useAddCommentPhoto,
   useDeleteComment,
+  useUpdateAnnotationPriority,
   useProtocolHeader,
   usePlansByReference,
   type AnnotationWithComments,
 } from '@hooks/usePlanViewer';
 import { useProject } from '@hooks/useProjects';
+import {
+  PriorityChip, PrioritySelector, PriorityPickerModal, PRIORITY_META,
+} from '@components/priority/PriorityChip';
+import { useI18n } from '@lib/i18n';
+import type { Priority } from '@/types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
 
+// Color del pin: verde si resuelto, rojo si abierto. La prioridad va solo en el chip.
 const annColor = (isOk: boolean) => (isOk ? '#16a34a' : '#dc2626');
 
 // Radio fijo de la viñeta en px de pantalla (independiente del zoom)
@@ -52,6 +59,7 @@ const MIN_DRAG_PX  = 8;
 const PAN_MIN_VIS  = 500; // px mínimos del PDF que deben quedar visibles
 
 export default function PlanViewerPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const { id: projectId, planId } = useParams<{ id: string; planId: string }>();
   const searchParams   = useSearchParams();
@@ -71,6 +79,7 @@ export default function PlanViewerPage() {
   const createAnn  = useCreateAnnotation(planId);
   const deleteAnn  = useDeleteAnnotation(planId);
   const toggleOk   = useToggleAnnotationOk(planId);
+  const updatePriority = useUpdateAnnotationPriority(planId);
   const addComment = useAddComment(planId);
   const addCommentPhoto = useAddCommentPhoto(planId);
   const delComment = useDeleteComment(planId);
@@ -88,12 +97,27 @@ export default function PlanViewerPage() {
     router.push(`/app/projects/${projectId}/plans/${newPlanId}?${params.toString()}`);
   };
 
-  // ── Zoom fijo ─────────────────────────────────────────────────────────────
+  // ── Zoom con cooldown para evitar lag en clicks rápidos ───────────────────
   const [zoomIdx, setZoomIdx] = useState(ZOOM_DEFAULT);
+  const [pendingZoomIdx, setPendingZoomIdx] = useState<number | null>(null);
   const zoom    = ZOOM_LEVELS[zoomIdx];
-  const zoomIn  = () => setZoomIdx(i => Math.min(ZOOM_LEVELS.length - 1, i + 1));
-  const zoomOut = () => setZoomIdx(i => Math.max(0, i - 1));
-  const zoomReset = () => { setZoomIdx(ZOOM_DEFAULT); hasCentered.current = false; };
+  const lastZoomAtRef = useRef<number>(Date.now());
+  const zoomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestZoom = useCallback((nextIdx: number) => {
+    const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, nextIdx));
+    setPendingZoomIdx(clamped);
+    if (zoomDebounceRef.current) clearTimeout(zoomDebounceRef.current);
+    const now = Date.now();
+    const wait = Math.max(0, 400 - (now - lastZoomAtRef.current));
+    zoomDebounceRef.current = setTimeout(() => {
+      lastZoomAtRef.current = Date.now();
+      setZoomIdx(clamped);
+      setPendingZoomIdx(null);
+    }, wait);
+  }, []);
+  const zoomIn  = () => requestZoom((pendingZoomIdx ?? zoomIdx) + 1);
+  const zoomOut = () => requestZoom((pendingZoomIdx ?? zoomIdx) - 1);
+  const zoomReset = () => { requestZoom(ZOOM_DEFAULT); hasCentered.current = false; };
 
   // ── Refs del viewport y tamaño del canvas PDF ────────────────────────────
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -147,11 +171,13 @@ export default function PlanViewerPage() {
     const onWheel = (e: WheelEvent) => {
       if (!viewportRef.current?.contains(e.target as Node)) return;
       e.preventDefault();
-      setZoomIdx(i => e.deltaY < 0 ? Math.min(ZOOM_LEVELS.length - 1, i + 1) : Math.max(0, i - 1));
+      const base = pendingZoomIdx ?? zoomIdx;
+      requestZoom(e.deltaY < 0 ? base + 1 : base - 1);
     };
     window.addEventListener('wheel', onWheel, { passive: false, capture: true });
     return () => window.removeEventListener('wheel', onWheel, { capture: true });
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingZoomIdx, zoomIdx]);
 
   // Re-clampear el pan cuando cambia el zoom (el canvas crece/encoge)
   useEffect(() => {
@@ -178,7 +204,9 @@ export default function PlanViewerPage() {
   const [pending,    setPending]    = useState<PendingShape | null>(null);
   const [showModal,  setShowModal]  = useState(false);
   const [modalLabel, setModalLabel] = useState('');
+  const [modalPriority, setModalPriority] = useState<Priority | null>(null);
   const [saveError,  setSaveError]  = useState('');
+  const [priorityPickerId, setPriorityPickerId] = useState<string | null>(null);
   const mouseStart = useRef<{ x: number; y: number } | null>(null);
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
@@ -287,10 +315,10 @@ export default function PlanViewerPage() {
   }, [drawMode, canAnnotate, toPdfPct]);
 
   // ── Guardar anotación ─────────────────────────────────────────────────────
-  const cancelModal = () => { setPending(null); setShowModal(false); setModalLabel(''); setSaveError(''); };
+  const cancelModal = () => { setPending(null); setShowModal(false); setModalLabel(''); setModalPriority(null); setSaveError(''); };
 
   const saveAnnotation = async () => {
-    if (!pending || !currentUser) { setSaveError('Sin sesión activa. Recarga la página.'); return; }
+    if (!pending || !currentUser) { setSaveError(t('webProto.noSession')); return; }
     setSaveError('');
     const nextSeq = annotations && annotations.length > 0
       ? Math.max(...annotations.map(a => a.parsedData.sequenceNumber)) + 1
@@ -302,12 +330,13 @@ export default function PlanViewerPage() {
         annotationData: { type: pending.type, width: pending.width, height: pending.height, sequenceNumber: nextSeq, isOk: false, page: currentPage },
         userId: currentUser.id,
         protocolId: fromProtocolId ?? null,
+        priority: modalPriority,
       });
       cancelModal();
       setDrawMode(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message ?? JSON.stringify(err);
-      setSaveError(`Error al guardar: ${msg}`);
+      setSaveError(t('webProto.errSaveWithMsg', { msg: String(msg) }));
     }
   };
 
@@ -376,24 +405,37 @@ export default function PlanViewerPage() {
       const d = ann.parsedData;
       const c = annColor(d.isOk);
       const { cx, cy } = pctToPx(ann.rect_x, ann.rect_y);
+      // Pin de ubicación: el tip cae sobre el punto marcado.
+      const pinPath = (baseX: number, baseY: number) => {
+        // path SVG de un map-pin proporcional a ANN_RADIUS.
+        const r = ANN_RADIUS * 1.15;
+        const tip = baseY;
+        const top = baseY - r * 2.1;
+        const left = baseX - r;
+        const right = baseX + r;
+        return `M ${baseX} ${tip} C ${right} ${tip - r * 0.9} ${right} ${top + r * 0.5} ${baseX} ${top} C ${left} ${top + r * 0.5} ${left} ${tip - r * 0.9} ${baseX} ${tip} Z`;
+      };
       if (d.type === 'dot') return (
         <g key={ann.id}>
-          <circle cx={cx} cy={cy} r={ANN_RADIUS} fill={c} opacity="0.9" />
-          <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={ANN_RADIUS * 1.2} fontWeight="bold">{d.sequenceNumber}</text>
+          <path d={pinPath(cx, cy)} fill={c} opacity="0.95" />
+          <circle cx={cx} cy={cy - ANN_RADIUS * 1.25} r={ANN_RADIUS * 0.7} fill={c} />
+          <text x={cx} y={cy - ANN_RADIUS * 1.25} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={ANN_RADIUS * 0.95} fontWeight="bold">{d.sequenceNumber}</text>
         </g>
       );
       const w = d.width ?? 5, h = d.height ?? 5;
       const rx2 = (ann.rect_x + w) / 100 * pagePx.w;
+      const ryTop = (ann.rect_y / 100) * pagePx.h;
       const strokeW = Math.max(1.5, pagePx.w * 0.003);
       return (
         <g key={ann.id}>
           <rect
-            x={(ann.rect_x / 100) * pagePx.w} y={(ann.rect_y / 100) * pagePx.h}
+            x={(ann.rect_x / 100) * pagePx.w} y={ryTop}
             width={(w / 100) * pagePx.w} height={(h / 100) * pagePx.h}
             fill="none" stroke={c} strokeWidth={strokeW} opacity="0.9"
           />
-          <circle cx={rx2} cy={(ann.rect_y / 100) * pagePx.h} r={ANN_RADIUS} fill={c} opacity="0.9" />
-          <text x={rx2} y={(ann.rect_y / 100) * pagePx.h} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={ANN_RADIUS * 1.1} fontWeight="bold">{d.sequenceNumber}</text>
+          <path d={pinPath(rx2, ryTop)} fill={c} opacity="0.95" />
+          <circle cx={rx2} cy={ryTop - ANN_RADIUS * 1.25} r={ANN_RADIUS * 0.7} fill={c} />
+          <text x={rx2} y={ryTop - ANN_RADIUS * 1.25} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={ANN_RADIUS * 0.95} fontWeight="bold">{d.sequenceNumber}</text>
         </g>
       );
     });
@@ -421,14 +463,14 @@ export default function PlanViewerPage() {
   const pageGroups = Object.keys(annsByPage).map(Number).sort((a, b) => a - b);
 
   // ── Títulos header ────────────────────────────────────────────────────────
-  const headerTitle = fromProtocolId ? (protoHeader?.protocolNumber ?? 'Protocolo') : plan?.name ?? '…';
+  const headerTitle = fromProtocolId ? (protoHeader?.protocolNumber ?? t('webProto.protocol')) : plan?.name ?? '…';
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (planLoading || pdfResolving) {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-3">
         <Loader2 size={28} className="animate-spin text-primary" />
-        <p className="text-[#8896a5] text-sm">{pdfResolving ? 'Buscando plano…' : 'Cargando…'}</p>
+        <p className="text-[#8896a5] text-sm">{pdfResolving ? t('webProto.searchingPlan') : t('webProto.loadingEllipsis')}</p>
       </div>
     );
   }
@@ -436,7 +478,7 @@ export default function PlanViewerPage() {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-3 text-center p-6">
         <AlertCircle size={40} className="text-danger" />
-        <p className="text-navy font-bold">Plano no encontrado</p>
+        <p className="text-navy font-bold">{t('webProto.planNotFound')}</p>
       </div>
     );
   }
@@ -454,7 +496,7 @@ export default function PlanViewerPage() {
           }
           backHref={fromProtocolId ? `/app/projects/${projectId}/protocols/${fromProtocolId}/fill` : undefined}
           crumbs={[
-            { label: 'Proyectos', href: '/app/projects' },
+            { label: t('webProto.projects'), href: '/app/projects' },
             { label: project?.name ?? '…', href: `/app/projects/${projectId}/locations` },
             ...(fromProtocolId && protoHeader?.locationName && protoHeader?.locationId ? [
               { label: protoHeader.locationName, href: `/app/projects/${projectId}/locations/${protoHeader.locationId}/protocols` },
@@ -462,7 +504,7 @@ export default function PlanViewerPage() {
             ...(fromProtocolId ? [
               { label: protoHeader?.protocolNumber ?? '…', href: `/app/projects/${projectId}/protocols/${fromProtocolId}/fill` },
             ] : [
-              { label: 'Planos', href: `/app/projects/${projectId}/plans` },
+              { label: t('webProto.plans'), href: `/app/projects/${projectId}/plans` },
             ]),
             { label: plan.name },
           ]}
@@ -500,13 +542,24 @@ export default function PlanViewerPage() {
                 </div>
               )}
 
+              <button
+                onClick={() => router.push(`/app/projects/${projectId}/plans/${planId}/measure`)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border border-white/50 text-white bg-transparent hover:bg-white/10 hover:border-white transition"
+                title={t('webProto.measureOnPlan')}
+              >
+                <Maximize size={12} />
+                {t('webProto.measurement')}
+              </button>
+
               {canAnnotate && (
                 <button
                   onClick={() => { setDrawMode(v => !v); cancelModal(); }}
                   className={cn('flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition',
-                    drawMode ? 'bg-white text-navy border-white' : 'bg-transparent text-white border-white/50 hover:border-white hover:bg-white/10')}
+                    drawMode
+                      ? 'bg-white text-navy border-white'
+                      : 'bg-danger text-white border-danger hover:bg-danger/90')}
                 >
-                  {drawMode ? 'Dibujando…' : '+ Anotar plano'}
+                  {drawMode ? t('webProto.drawing') : t('webProto.addObservation')}
                 </button>
               )}
             </div>
@@ -540,7 +593,7 @@ export default function PlanViewerPage() {
                     error={
                       <div className="w-[800px] h-[200px] flex items-center justify-center bg-gray-800 gap-3">
                         <AlertCircle size={24} className="text-danger" />
-                        <span className="text-white text-sm">No se pudo cargar el PDF</span>
+                        <span className="text-white text-sm">{t('webProto.couldNotLoadPdf')}</span>
                       </div>
                     }
                   >
@@ -570,7 +623,7 @@ export default function PlanViewerPage() {
 
             {pdfCaching && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-navy/80 text-white text-xs font-semibold px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
-                <Loader2 size={12} className="animate-spin" /> Guardando plano localmente…
+                <Loader2 size={12} className="animate-spin" /> {t('webProto.savingPlanLocally')}
               </div>
             )}
 
@@ -586,22 +639,22 @@ export default function PlanViewerPage() {
 
             {drawMode && (
               <div className="absolute bottom-14 left-1/2 -translate-x-1/2 bg-navy/90 text-white text-xs px-4 py-2 rounded-full pointer-events-none">
-                Clic = punto · Arrastra = rectángulo · "+ Anotar plano" para salir
+                {t('webProto.drawHint')}
               </div>
             )}
 
             <div className="absolute bottom-4 right-4 flex flex-col items-center gap-1 z-10">
               <button onClick={zoomIn} disabled={zoomIdx >= ZOOM_LEVELS.length - 1}
-                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy disabled:opacity-40" title="Acercar">
+                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy disabled:opacity-40" title={t('webProto.zoomIn')}>
                 <ZoomIn size={15} />
               </button>
               <span className="text-white text-[10px] font-bold bg-black/50 rounded px-1.5 py-0.5 min-w-[36px] text-center">{Math.round(zoom * 100)}%</span>
               <button onClick={zoomOut} disabled={zoomIdx <= 0}
-                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy disabled:opacity-40" title="Alejar">
+                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy disabled:opacity-40" title={t('webProto.zoomOut')}>
                 <ZoomOut size={15} />
               </button>
               <button onClick={zoomReset}
-                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy mt-1" title="Restablecer">
+                className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg shadow flex items-center justify-center text-navy mt-1" title={t('webProto.resetZoom')}>
                 <Maximize size={13} />
               </button>
             </div>
@@ -610,7 +663,7 @@ export default function PlanViewerPage() {
           {/* ── Sidebar viñetas ──────────────────────────────────────────── */}
           <div className="w-80 flex-shrink-0 bg-white border-l border-border flex flex-col overflow-hidden">
             <div className="px-4 py-3 border-b border-border bg-surface flex items-center justify-between">
-              <span className="text-xs font-bold text-navy uppercase tracking-wider">Viñetas</span>
+              <span className="text-xs font-bold text-navy uppercase tracking-wider">{t('webProto.bullets')}</span>
               <div className="flex items-center gap-2">
                 {annsLoading && <Loader2 size={13} className="animate-spin text-muted" />}
                 {annotations && <span className="text-xs text-muted">{annotations.length} · {annotations.filter(a => a.parsedData.isOk).length} OK</span>}
@@ -621,7 +674,7 @@ export default function PlanViewerPage() {
               {!annsLoading && (!annotations || annotations.length === 0) && (
                 <div className="flex flex-col items-center gap-2 py-12 text-center px-4">
                   <MessageSquare size={32} className="text-muted opacity-30" />
-                  <p className="text-muted text-xs">{canAnnotate ? 'Activa "+ Anotar plano" y haz clic.' : 'Sin anotaciones aún.'}</p>
+                  <p className="text-muted text-xs">{canAnnotate ? t('webProto.annotateHint') : t('webProto.noAnnotationsYet')}</p>
                 </div>
               )}
 
@@ -629,8 +682,8 @@ export default function PlanViewerPage() {
                 <div key={pg}>
                   {pageGroups.length > 1 && (
                     <div className="px-3 py-1.5 bg-surface border-b border-border flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Página {pg}</span>
-                      <span className="text-[10px] text-muted">· {annsByPage[pg].length} viñeta{annsByPage[pg].length !== 1 ? 's' : ''}</span>
+                      <span className="text-[10px] font-bold text-muted uppercase tracking-wider">{t('webProto.page', { n: pg })}</span>
+                      <span className="text-[10px] text-muted">· {annsByPage[pg].length} {annsByPage[pg].length !== 1 ? t('webProto.bulletCountMany') : t('webProto.bulletCountOne')}</span>
                     </div>
                   )}
                   {annsByPage[pg].map(ann => {
@@ -640,13 +693,24 @@ export default function PlanViewerPage() {
                     return (
                       <div key={ann.id} className="border-b border-border last:border-b-0">
                         <div className="flex items-start gap-2 px-3 py-2.5 hover:bg-surface transition cursor-pointer"
-                          onClick={() => { toggleExpand(ann); if (d.page != null) setCurrentPage(d.page); }}>
+                          onClick={() => { toggleExpand(ann); if (d.page != null) setCurrentPage(d.page); }}
+                          onContextMenu={(e) => {
+                            if (!(isJefe || canAnnotate) || d.isOk) return;
+                            e.preventDefault();
+                            setPriorityPickerId(ann.id);
+                          }}
+                          title={isJefe || canAnnotate ? t('webProto.rightClickPriority') : undefined}>
                           <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-white text-[11px] font-bold mt-0.5" style={{ backgroundColor: color }}>
                             {d.sequenceNumber}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-navy truncate">{ann.comment || (d.type === 'dot' ? 'Punto' : 'Área')}</p>
-                            <p className="text-[10px] text-muted mt-0.5">{d.isOk ? '✓ Resuelto' : `${ann.comments.length} comentario${ann.comments.length !== 1 ? 's' : ''}`}</p>
+                            <p className="text-xs font-semibold text-navy truncate">{ann.comment || (d.type === 'dot' ? t('webProto.annPoint') : t('webProto.annArea'))}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <p className="text-[10px] text-muted">{d.isOk ? t('webProto.resolved') : `${ann.comments.length} ${ann.comments.length !== 1 ? t('webProto.commentCountMany') : t('webProto.commentCountOne')}`}</p>
+                              {ann.priority && !d.isOk && (
+                                <PriorityChip value={ann.priority} size="sm" />
+                              )}
+                            </div>
                           </div>
                           <div className="text-muted flex-shrink-0">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
                         </div>
@@ -675,7 +739,7 @@ export default function PlanViewerPage() {
                                   {canAnnotate && (
                                     <button onClick={() => handleCommentPhotoClick(c.id)}
                                       disabled={uploadingCommentPhoto}
-                                      className="text-muted hover:text-primary transition" title="Adjuntar foto">
+                                      className="text-muted hover:text-primary transition" title={t('webProto.attachPhoto')}>
                                       {uploadingCommentPhoto && commentPhotoTargetRef.current === c.id
                                         ? <Loader2 size={11} className="animate-spin" />
                                         : <Camera size={11} />}
@@ -691,7 +755,7 @@ export default function PlanViewerPage() {
                               <div className="flex items-center gap-2 mt-1">
                                 <input type="text" value={replyText} onChange={e => setReplyText(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter') sendReply(ann); }}
-                                  placeholder="Agregar comentario…"
+                                  placeholder={t('webProto.addCommentPlaceholder')}
                                   className="flex-1 border border-border rounded-lg px-2.5 py-1.5 text-xs text-navy outline-none focus:border-primary transition" />
                                 <button onClick={() => sendReply(ann)} disabled={!replyText.trim() || replying}
                                   className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40 transition">
@@ -699,18 +763,24 @@ export default function PlanViewerPage() {
                                 </button>
                               </div>
                             )}
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {(isJefe || canAnnotate) && !d.isOk && (
+                                <button onClick={() => setPriorityPickerId(ann.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted hover:text-navy hover:border-navy transition">
+                                  <AlertCircle size={12} />{t('webProto.priority')}
+                                </button>
+                              )}
                               {isJefe && (
-                                <button onClick={() => toggleOk.mutate({ annotationId: ann.id, isOk: !d.isOk, locationOnly: null, specialty: null })}
+                                <button onClick={() => toggleOk.mutate({ annotationId: ann.id, isOk: !d.isOk })}
                                   className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition',
                                     d.isOk ? 'bg-muted/20 text-muted hover:bg-danger/10 hover:text-danger' : 'bg-success/10 text-success hover:bg-success/20')}>
-                                  <Check size={12} />{d.isOk ? 'Reabrir' : 'Resolver'}
+                                  <Check size={12} />{d.isOk ? t('webProto.reopen') : t('webProto.resolve')}
                                 </button>
                               )}
                               {canAnnotate && (
-                                <button onClick={() => { if (confirm(`¿Eliminar viñeta ${d.sequenceNumber}?`)) { deleteAnn.mutate(ann.id); setExpandedId(null); } }}
+                                <button onClick={() => { if (confirm(t('webProto.confirmDeleteBullet', { n: d.sequenceNumber }))) { deleteAnn.mutate(ann.id); setExpandedId(null); } }}
                                   className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-danger hover:bg-danger/10 transition">
-                                  <Trash2 size={12} />Eliminar
+                                  <Trash2 size={12} />{t('webProto.delete')}
                                 </button>
                               )}
                             </div>
@@ -731,20 +801,29 @@ export default function PlanViewerPage() {
         <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4"
           onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4">
-            <h3 className="font-bold text-navy text-base">Nueva viñeta — {pending.type === 'dot' ? 'Punto' : 'Área'}</h3>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-muted uppercase tracking-wider">Comentario (opcional)</label>
-              <textarea autoFocus value={modalLabel} onChange={e => setModalLabel(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveAnnotation(); } }}
-                placeholder="Describe el hallazgo…" rows={3}
-                className="border border-border rounded-xl px-3 py-2.5 text-sm text-navy outline-none focus:border-primary resize-none transition" />
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-navy text-base">{t('webProto.newObservation')}</h3>
+              <span className="text-[10px] font-bold text-white bg-navy rounded-md px-2 py-0.5 tracking-wider">
+                {t('webProto.observationNumber', { n: annotations && annotations.length > 0
+                  ? Math.max(...annotations.map(a => a.parsedData.sequenceNumber)) + 1
+                  : 1 })}
+              </span>
+            </div>
+            <textarea autoFocus value={modalLabel} onChange={e => setModalLabel(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveAnnotation(); } }}
+              placeholder={t('webProto.describeObservationOptional')} rows={3}
+              className="border border-border rounded-xl px-3 py-2.5 text-sm text-navy outline-none focus:border-primary resize-none transition" />
+            <div className="h-px bg-divider" />
+            <div>
+              <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">{t('webProto.priority')}</p>
+              <PrioritySelector value={modalPriority} onChange={setModalPriority} compact />
             </div>
             {saveError && <p className="text-danger text-xs font-medium bg-danger/10 rounded-lg px-3 py-2">{saveError}</p>}
-            <div className="flex gap-3">
-              <button onClick={cancelModal} className="flex-1 py-2.5 rounded-xl border border-border text-sm font-semibold text-muted hover:bg-surface transition">Cancelar</button>
+            <div className="flex gap-3 pt-1">
+              <button onClick={cancelModal} className="flex-1 py-2.5 rounded-xl border border-border text-sm font-semibold text-muted hover:bg-surface transition">{t('webProto.cancel')}</button>
               <button onClick={saveAnnotation} disabled={createAnn.isPending}
                 className="flex-1 py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary/90 disabled:opacity-60 transition flex items-center justify-center gap-2">
-                {createAnn.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Check size={14} /> Guardar viñeta</>}
+                {createAnn.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Check size={14} /> {t('webProto.save')}</>}
               </button>
             </div>
           </div>
@@ -773,6 +852,18 @@ export default function PlanViewerPage() {
           </button>
         </div>
       )}
+
+      {/* Picker de prioridad (long-press o botón "Prioridad") */}
+      <PriorityPickerModal
+        open={!!priorityPickerId}
+        value={priorityPickerId
+          ? (annotations?.find(a => a.id === priorityPickerId)?.priority ?? null)
+          : null}
+        onSelect={(p) => {
+          if (priorityPickerId) updatePriority.mutate({ annotationId: priorityPickerId, priority: p });
+        }}
+        onClose={() => setPriorityPickerId(null)}
+      />
     </>
   );
 }

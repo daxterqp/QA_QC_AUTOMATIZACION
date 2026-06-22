@@ -1,0 +1,14 @@
+Nombre,Tipo
+Excavación,productiva
+Carguío,productiva
+Compactación,productiva
+Nivelación,productiva
+Extendido de carpeta asfáltica,productiva
+Sellado asfáltico,productiva
+Riego de agua,productiva
+Producción de agregados,productiva
+Transporte de material,transporte
+Traslado entre tramos,transporte
+Mantenimiento rutinario,mantenimiento
+Mantenimiento correctivo,mantenimiento
+Stand-by / espera,otro

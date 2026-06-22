@@ -45,3 +45,9 @@ src/config/supabase.ts
 android/app/google-services.json
 flow-qaqc-web/public/VideoLogin.mp4
 *.mp4
+
+# Build artifacts y dumps (no subir: pesados / contienen datos)
+dist-desktop/
+**/.next/
+_wmdb_dump.b64
+_wmdb_dump.db

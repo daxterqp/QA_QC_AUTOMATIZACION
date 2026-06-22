@@ -14,6 +14,16 @@ import type { DossierProtocolFull, DossierProtocol } from '@hooks/useDossier';
 import type { PreloadedProjectData } from '@hooks/useProjectPreload';
 import type { Protocol, Location, ProtocolItem } from '@/types';
 import { fetchDossierProtocolFull } from '@hooks/useDossier';
+import { parseNumericItem, parseNumericRow, extractHeaderRows, extractMatrices, splitRowComments, scopeKeyFor, colLetter, inRange, deriveAxisTitles, isNumericProtocol } from '@lib/numericProtocol';
+import { resolveScopeCells, type ScopeCell, type XrefValues, type AuxTables } from '@lib/formulaEval';
+import { renderChartSvg } from '@lib/chartRenderer';
+import { buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfBlock } from '@lib/numericPdfHtml';
+import {
+  getTemplatePrintConfig, getPrintHeaderColor, chartWidthFor,
+  PRINT_FONT_SCALE, PRINT_HEADER_ROWS, PRINT_HEADER_FIELDS, DEFAULT_HEADER_COLOR,
+  type ResolvedPrintConfig,
+} from '@lib/printConfig';
+import { buildCroquisFigureHtml, type CroquisSectorIn, type CroquisOrtho } from '@lib/croquisHtml';
 
 const supabase = createClient();
 
@@ -262,18 +272,22 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .td-compliant { color: #1e8e3e; font-weight: 700; font-size: 12px; }
 .td-noncompliant { color: #d93025; font-weight: 700; font-size: 12px; }
 .td-noanswer { color: #aaa; }
-.proto-header { display: flex; flex-direction: row; align-items: center; margin-bottom: 16px; gap: 12px; border-bottom: 2px solid #0e213d; padding-bottom: 12px; }
+.proto-header { display: flex; flex-direction: row; align-items: center; margin-bottom: 9px; gap: 12px; border-bottom: 2px solid #0e213d; padding-bottom: 7px; }
 .proto-logo { max-height: 56px; max-width: 100px; object-fit: contain; }
 .proto-header-center { flex: 1; display: flex; align-items: center; justify-content: center; }
 .proto-num { font-size: 10px; font-weight: 700; color: #1a4f7a; text-align: right; min-width: 80px; }
 .proto-name { font-size: 18px; font-weight: 900; color: #0e213d; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
 .section-group-header { background: #e8eef5; padding: 5px 10px; font-size: 10px; font-weight: 700; color: #1a4f7a; text-transform: uppercase; letter-spacing: 0.4px; border-radius: 4px; margin: 8px 0 4px 0; }
-.proto-info-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.proto-info-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: 5px; }
 .proto-info-row { display: flex; flex-direction: row; gap: 6px; }
 .proto-info-cell { flex: 1; background: #f4f6f9; border-radius: 5px; padding: 5px 9px; display: flex; flex-direction: column; }
 .proto-info-label { font-size: 8px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.3px; }
 .proto-info-value { font-size: 10px; font-weight: 600; color: #1a1a2e; margin-top: 1px; }
-.proto-divider { border: none; border-top: 2px solid #1a4f7a; margin: 10px 0; }
+.proto-info-compact .proto-info-row { gap: 3px; }
+.proto-info-compact .proto-info-cell { padding: 2px 6px; border-radius: 3px; }
+.proto-info-compact .proto-info-label { font-size: 6.5px; }
+.proto-info-compact .proto-info-value { font-size: 8.5px; margin-top: 0; }
+.proto-divider { border: none; border-top: 2px solid #1a4f7a; margin: 5px 0; }
 .proto-footer { position: absolute; bottom: 32px; left: 36px; right: 36px; border-top: 1px solid #ddd; padding-top: 12px; display: flex; flex-direction: row; align-items: flex-end; gap: 16px; }
 .signature-block { text-align: center; }
 .signature-img { max-height: 60px; max-width: 150px; object-fit: contain; display: block; margin-bottom: 4px; }
@@ -387,7 +401,7 @@ function buildSummaryTable(protocols: DossierProtocol[], pageMap: Record<string,
     const pg = pageMap[p.id] ?? '';
     return `
 <tr>
-  <td><a href="#proto-${p.id}" style="color:#1a4f7a;font-weight:700;text-decoration:none;" title="Ir al protocolo"><strong>${escHtml(p.protocol_number)}</strong></a></td>
+  <td><a href="#proto-${p.id}" style="color:#1a4f7a;font-weight:700;text-decoration:none;" title="Ir al protocolo"><strong>${escHtml((p as { protocol_code?: string | null }).protocol_code ? `${(p as { protocol_code?: string | null }).protocol_code} · ${p.protocol_number}` : p.protocol_number)}</strong></a></td>
   <td>${escHtml(p.location?.name ?? null)}</td>
   <td><span class="status-badge" style="background:${statusColor(p.status)}">${statusLabel(p.status)}</span></td>
   <td>${escHtml(p.filledByName)}</td>
@@ -417,6 +431,160 @@ function buildSummaryTable(protocols: DossierProtocol[], pageMap: Record<string,
 
 const ROWS_PER_PAGE = 20;
 
+// ── Parte B: protocolos numéricos → PDF con el formato del audit page ────────
+
+/** Tabla "Equipos utilizados" (título + tabla), sin wrapper de fila. Se usa en
+ *  el path clásico (dentro de un <tr>) y en el numérico (bloque div). */
+function equipmentSectionInner(equipment: NonNullable<DossierProtocolFull['equipment']>): string {
+  const equipRows = equipment.map(eq => `<tr>
+        <td style="font-weight:700;color:#1a4f7a;">${escHtml(eq.code)}</td>
+        <td>${escHtml(eq.name)}</td>
+        <td style="color:#666;">${escHtml(eq.type)}</td>
+        <td style="color:#666;font-family:ui-monospace,Menlo,monospace;font-size:9px;">${eq.last_calibration_at ? fmtDate(eq.last_calibration_at) : '—'}</td>
+        <td style="color:#666;font-family:ui-monospace,Menlo,monospace;font-size:9px;">${fmtDate(eq.next_calibration_at)}</td>
+      </tr>`).join('');
+  return `<div style="font-size:10px;font-weight:800;color:#444;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px;">Equipos utilizados</div>
+        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+          <thead><tr style="background:#f4f6f9;">
+            <th style="text-align:left;padding:3px 6px;">Código</th>
+            <th style="text-align:left;padding:3px 6px;">Nombre</th>
+            <th style="text-align:left;padding:3px 6px;">Tipo</th>
+            <th style="text-align:left;padding:3px 6px;">Última calib.</th>
+            <th style="text-align:left;padding:3px 6px;">Próxima calib.</th>
+          </tr></thead>
+          <tbody>${equipRows}</tbody>
+        </table>`;
+}
+
+/** Bloques del cuerpo numérico + extras (comentarios generales, equipos).
+ *  Compartido entre el CONTEO de páginas (1er pase) y el render (2º pase)
+ *  para que la numeración global "Página X de Y" nunca se desfase. */
+/** Config por defecto (todos los campos resueltos) cuando el caller no pasa una. */
+const DEFAULT_PRINT_CFG: ResolvedPrintConfig = getTemplatePrintConfig({}, null);
+
+/** v43.6 — Sectores del proyecto CON geometría (para el croquis). */
+async function loadGeomSectors(projectId: string): Promise<CroquisSectorIn[]> {
+  try {
+    const { data } = await supabase.from('project_sectors').select('name, display_color, points_json').eq('project_id', projectId);
+    const out: CroquisSectorIn[] = [];
+    for (const s of (data ?? []) as { name: string; display_color: string | null; points_json: unknown }[]) {
+      const pts = Array.isArray(s.points_json) ? (s.points_json as { lat: number; lng: number }[]) : null;
+      if (pts && pts.length >= 3 && pts.every(p => typeof p?.lat === 'number' && typeof p?.lng === 'number')) {
+        out.push({ name: s.name, color: s.display_color || '#1a4f7a', points: pts });
+      }
+    }
+    return out;
+  } catch { return []; }
+}
+
+/** v43.6 — Ortofoto del proyecto a base64 + bounds (Leaflet [[swLat,swLng],[neLat,neLng]]). */
+async function loadCroquisOrtho(row: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null): Promise<CroquisOrtho | null> {
+  try {
+    const key = row?.orthophoto_s3_key;
+    const b = row?.orthophoto_bounds_json;
+    if (!key || !b) return null;
+    const bb = Array.isArray(b) ? b : (typeof b === 'string' ? JSON.parse(b) : null);
+    if (!Array.isArray(bb) || bb.length < 2 || !Array.isArray(bb[0]) || !Array.isArray(bb[1])) return null;
+    const swLat = Number(bb[0][0]), swLng = Number(bb[0][1]), neLat = Number(bb[1][0]), neLng = Number(bb[1][1]);
+    if (![swLat, swLng, neLat, neLng].every(Number.isFinite)) return null;
+    const dataUri = await fetchToBase64(s3Url(key), key);
+    if (!dataUri) return null;
+    return { dataUri, swLat, swLng, neLat, neLng };
+  } catch { return null; }
+}
+
+/** v43.6 — Bloque de croquis (figura SVG vectorial sobre ortofoto) para un protocolo.
+ *  Devuelve {block, placement} o null si el tipo no lo activó / sin coordenadas. El PESO
+ *  depende solo de two_column → idéntico en conteo y render. 'photos' se trata como 'end'. */
+function croquisBlockFor(
+  full: DossierProtocolFull,
+  cfg: ResolvedPrintConfig,
+  geomSectors: CroquisSectorIn[],
+  ortho: CroquisOrtho | null,
+): { block: NumericPdfBlock; placement: 'start' | 'end' } | null {
+  const cro = cfg.croquis;
+  const pa = full.protocol as { latitude?: number | null; longitude?: number | null };
+  if (!cro.show || pa.latitude == null || pa.longitude == null) return null;
+  const imgWidth = cfg.two_column ? 150 : 380;
+  const html = buildCroquisFigureHtml({
+    sectors: geomSectors,
+    point: { lat: pa.latitude, lng: pa.longitude },
+    ortho: (cro.show_orthophoto && ortho) ? ortho : null,
+    showOrtho: cro.show_orthophoto && !!ortho,
+    baseOpacity: cro.base_opacity,
+    pointSize: cro.point_size,
+    imgWidth,
+  });
+  const weight = Math.max(6, Math.round((imgWidth * 0.75 + 22) / 24));
+  return { block: { html, weight }, placement: cro.placement === 'start' ? 'start' : 'end' };
+}
+
+function numericProtoBlocks(
+  full: DossierProtocolFull,
+  xrefValues?: XrefValues,
+  includeEquipment?: boolean,
+  auxTables?: AuxTables,
+  cfg: ResolvedPrintConfig = DEFAULT_PRINT_CFG,
+  headerColor: string = DEFAULT_HEADER_COLOR,
+  croquis?: { block: NumericPdfBlock; placement: 'start' | 'end' } | null,
+): NumericPdfBlock[] {
+  const blocks = buildNumericProtocolBlocks(full.items.map(it => ({
+    id: it.id,
+    item_description: it.item_description,
+    validation_method: it.validation_method,
+    partida_item: it.partida_item,
+    comments: it.comments,
+    section: it.section,
+  })), {
+    xrefValues, auxTables,
+    protocolCode: (full.protocol as { protocol_code?: string | null }).protocol_code ?? null,
+    fontScale: PRINT_FONT_SCALE[cfg.font_level],
+    twoColumn: cfg.two_column,
+    chartWidth: chartWidthFor(cfg),
+    splitTables: cfg.split_tables,
+    headerColor,
+  });
+  const protoAny = full.protocol as any;
+  if (protoAny.general_comment) {
+    blocks.push({
+      html: `<div style="padding:8px 0 0 0;border-top:2px solid #1a4f7a;margin-top:8px;">
+        <div style="font-size:10px;font-weight:800;color:#444;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">Comentarios generales</div>
+        <div style="font-size:11px;color:#222;white-space:pre-wrap;">${escHtml(protoAny.general_comment)}</div>
+      </div>`,
+      weight: 4,
+    });
+  }
+  if (includeEquipment !== false && full.equipment && full.equipment.length > 0) {
+    blocks.push({
+      html: `<div style="padding:8px 0 0 0;border-top:2px solid #1a4f7a;margin-top:8px;">${equipmentSectionInner(full.equipment)}</div>`,
+      weight: full.equipment.length + 4,
+    });
+  }
+  // v43.6 — Croquis como una sección más (mismo peso en conteo y render).
+  if (croquis) { croquis.placement === 'start' ? blocks.unshift(croquis.block) : blocks.push(croquis.block); }
+  return blocks;
+}
+
+/** Nº de páginas que ocupará un protocolo en el dossier (clásico o numérico).
+ *  Debe coincidir EXACTO con el render (mismo cfg/headerColor/perCol). */
+function protoPageCount(
+  full: DossierProtocolFull,
+  includeEquipment?: boolean,
+  cfg: ResolvedPrintConfig = DEFAULT_PRINT_CFG,
+  headerColor: string = DEFAULT_HEADER_COLOR,
+  croquis?: { block: NumericPdfBlock; placement: 'start' | 'end' } | null,
+): number {
+  if (isNumericProtocol(full.items)) {
+    try {
+      const fScale = PRINT_FONT_SCALE[cfg.font_level];
+      const perCol = Math.max(12, Math.round(cfg.col_budget / fScale));
+      const cols = paginateNumericBlocks(numericProtoBlocks(full, undefined, includeEquipment, undefined, cfg, headerColor, croquis), perCol, cfg.split_tables).length;
+      return cfg.two_column ? Math.max(1, Math.ceil(cols / 2)) : Math.max(1, cols);
+    } catch { /* estructura inesperada → cae al conteo clásico */ }
+  }
+  return Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
+}
+
 function buildProtocolPages(
   full: DossierProtocolFull,
   logoB64: string | null,
@@ -425,9 +593,37 @@ function buildProtocolPages(
   globalPageStart: number,
   totalDocPages: number,
   projectName: string,
+  signatureMap?: Record<string, string | null>,
+  /** v26 (FASE 7) — SVG inline del QR para insertarse en la esquina del header.
+   *  Si se omite, el header no muestra QR (back-compat). */
+  qrSvg?: string,
+  /** v26 (FASE 6) — Valores xref pre-resueltos para evaluar fórmulas con `@`
+   *  refs en gráficos numéricos. Si se omite, las xref devuelven error inline. */
+  xrefValues?: XrefValues,
+  /** v24 (FASE 4) — Gate del flag `equipment_catalog`. Si false, la sección
+   *  "Equipos utilizados" no se renderiza aunque `full.equipment` esté llena.
+   *  Default true para back-compat. */
+  includeEquipment?: boolean,
+  /** v41 — Tablas auxiliares del proyecto para recomputar BUSCAR() en el PDF. */
+  auxTables?: AuxTables,
+  /** v43.6 — Config de impresión resuelta del tipo (dos columnas, letra, etc.). */
+  cfg: ResolvedPrintConfig = DEFAULT_PRINT_CFG,
+  /** v43.6 — Color GLOBAL de encabezados de tabla. */
+  headerColor: string = DEFAULT_HEADER_COLOR,
+  /** v43.6 — id_protocolo del tipo (para el campo "ID Protocolo" del encabezado). */
+  idProtocolo: string | null = null,
+  /** v43.6 — Croquis (figura vectorial) a insertar como sección (start/end). */
+  croquis?: { block: NumericPdfBlock; placement: 'start' | 'end' } | null,
 ): string {
-  const { protocol: p, items } = full;
+  const { protocol: p, items, approvals } = full;
   const loc = p.location;
+  // v42d — En ensayos NUMÉRICOS, Datos Generales no lleva "Ubicación/Especialidad"
+  // (se trabaja por coordenadas/sector, igual que el Audit). En clásicos se mantiene.
+  const isNumeric = isNumericProtocol(items as any);
+  const pa = p as { latitude?: number | null; longitude?: number | null };
+  const coordsStr = (pa.latitude != null && pa.longitude != null)
+    ? `${Number(pa.latitude).toFixed(6)}, ${Number(pa.longitude).toFixed(6)}`
+    : 'Sin coordenadas';
   const filledName = p.filledByName ?? '—';
   const signedName = p.signedByName ?? signerName;
   const sc = statusColor(p.status);
@@ -436,36 +632,153 @@ function buildProtocolPages(
   const signatureHtml = signB64 ? `<img src="${signB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
   const today = fmtDate(new Date().toISOString());
 
+  // v43.6 — QR: se muestra si cfg.show_qr; tamaño por nivel de encabezado (igual que móvil).
+  const qrPx = cfg.header_size === 'xcompact' ? 44 : cfg.header_size === 'compact' ? 54 : 100;
+  const qrSized = (qrSvg && cfg.show_qr)
+    ? qrSvg.replace(/width="\d+(?:\.\d+)?"/, `width="${qrPx}"`).replace(/height="\d+(?:\.\d+)?"/, `height="${qrPx}"`)
+    : '';
+  const qrHtml = qrSized
+    ? `<div style="display:flex;align-items:center;justify-content:center;width:${qrPx + 6}px;flex-shrink:0;">${qrSized}</div>`
+    : '';
+  // v43.6 — Encabezado de datos generales CONFIGURABLE: el usuario elige qué campos
+  // (header_fields) y el nivel define el N° de FILAS (3/2/1). Espejo del móvil.
+  const headerGrid = (() => {
+    const cell = (label: string, value: string) => `<div class="proto-info-cell"><span class="proto-info-label">${escHtml(label)}</span><span class="proto-info-value">${escHtml(value)}</span></div>`;
+    const fieldHtml: Record<string, string> = {
+      proyecto: cell('Proyecto', projectName),
+      fecha: cell('Fecha', today),
+      supervisor: cell('Supervisor', filledName),
+      f_realizacion: cell('Fecha realización', fmtDateTime(p.updated_at)),
+      f_aprobacion: cell('Fecha aprobación', fmtDateTime(p.signed_at)),
+      id_protocolo: cell('ID Protocolo', idProtocolo ?? p.protocol_number ?? '—'),
+      ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', loc?.name ?? '—'),
+      especialidad: (!isNumeric && loc?.specialty) ? cell('Especialidad', loc.specialty) : '',
+    };
+    const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
+    const nRows = PRINT_HEADER_ROWS[cfg.header_size];
+    const perRow = Math.max(1, Math.ceil(cells.length / nRows));
+    let rows = '';
+    for (let i = 0; i < cells.length; i += perRow) rows += `<div class="proto-info-row">${cells.slice(i, i + perRow).join('')}</div>`;
+    const rej = (p as any).rejection_reason
+      ? `<div class="proto-info-row"><div class="proto-info-cell" style="background:#fce8e6;flex:1;"><span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span><span class="proto-info-value" style="color:#d93025;">${escHtml((p as any).rejection_reason)}</span></div></div>`
+      : '';
+    const cls = cfg.header_size === 'normal' ? '' : ' proto-info-compact';
+    return `<div class="proto-info-grid${cls}">${rows}${rej}</div>`;
+  })();
   const headerHtml = `
-  <div class="proto-header">
+  <div class="proto-header" style="display:flex;align-items:center;gap:8px;">
     ${logoHtml}
-    <div class="proto-header-center"><div class="proto-name">${escHtml(p.protocol_number)}</div></div>
+    <div class="proto-header-center" style="flex:1;"><div class="proto-name">${escHtml((p as { protocol_code?: string | null }).protocol_code ? `${(p as { protocol_code?: string | null }).protocol_code} — ${p.protocol_number}` : p.protocol_number)}</div></div>
+    ${qrHtml}
     <div class="proto-num"><span class="status-badge" style="background:${sc}">${sl}</span></div>
   </div>
-  <div class="proto-info-grid">
-    <div class="proto-info-row">
-      <div class="proto-info-cell"><span class="proto-info-label">Proyecto</span><span class="proto-info-value">${escHtml(projectName)}</span></div>
-      <div class="proto-info-cell"><span class="proto-info-label">Fecha</span><span class="proto-info-value">${today}</span></div>
-    </div>
-    <div class="proto-info-row">
-      <div class="proto-info-cell"><span class="proto-info-label">Supervisor</span><span class="proto-info-value">${escHtml(filledName)}</span></div>
-      <div class="proto-info-cell"><span class="proto-info-label">Fecha realización</span><span class="proto-info-value">${fmtDateTime(p.updated_at)}</span></div>
-      <div class="proto-info-cell"><span class="proto-info-label">Fecha aprobación</span><span class="proto-info-value">${fmtDateTime(p.signed_at)}</span></div>
-    </div>
-    <div class="proto-info-row">
-      <div class="proto-info-cell"><span class="proto-info-label">N° Protocolo</span><span class="proto-info-value">${escHtml(p.protocol_number)}</span></div>
-      <div class="proto-info-cell"><span class="proto-info-label">Ubicación</span><span class="proto-info-value">${escHtml(loc?.name ?? null)}</span></div>
-      <div class="proto-info-cell"><span class="proto-info-label">Especialidad</span><span class="proto-info-value">${escHtml(loc?.specialty ?? null)}</span></div>
-    </div>
-    ${(p as any).rejection_reason ? `<div class="proto-info-row"><div class="proto-info-cell" style="background:#fce8e6;flex:1;"><span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span><span class="proto-info-value" style="color:#d93025;">${escHtml((p as any).rejection_reason)}</span></div></div>` : ''}
-  </div>
+  ${headerGrid}
   <hr class="proto-divider"/>`;
+
+  // Footer común a ambos formatos (clásico y numérico).
+  const footerFor = (pageIdx: number) => `<div class="proto-footer">
+    ${approvals && approvals.length > 1
+      ? `<div class="signature-block" style="display:flex;gap:18px;flex:1;">
+           ${approvals.filter(a => a.status === 'APPROVED').map(a => {
+             const sigB64 = (a.signer_id && signatureMap?.[a.signer_id]) || null;
+             const sigHtml = sigB64 ? `<img src="${sigB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
+             const nm = [a.signer_name, a.signer_apellido].filter(Boolean).join(' ') || '—';
+             return `<div style="text-align:center;flex:1;">
+                ${sigHtml}
+                <div class="signature-name">${escHtml(nm)}</div>
+                <div class="signature-role">Nivel ${a.level} / ${approvals.length}</div>
+                <div style="font-size:8px;color:#888;">${a.signed_at ? fmtDateTime(a.signed_at) : ''}</div>
+             </div>`;
+           }).join('')}
+         </div>`
+      : `<div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signedName)}</div><div class="signature-role">Jefe de Calidad</div></div>`}
+    <div class="footer-right">Dosier de Calidad<br/>Página ${globalPageStart + pageIdx} de ${totalDocPages}</div>
+  </div>`;
+
+  // ── Parte B: protocolo NUMÉRICO → mismo formato que el audit page ─────────
+  // (secciones con banda, encabezados col-, fila de letras, ✓/✗ por fila y
+  // gráficos numerados). Los clásicos siguen el path de abajo sin cambios.
+  if (isNumericProtocol(items)) {
+    try {
+      const fScale = PRINT_FONT_SCALE[cfg.font_level];
+      const perCol = Math.max(12, Math.round(cfg.col_budget / fScale));
+      const blocks = numericProtoBlocks(full, xrefValues, includeEquipment, auxTables, cfg, headerColor, croquis);
+      let contents: string[];
+      if (cfg.two_column) {
+        // Empaque explícito: cada "columna" se llena a la altura de página; luego 2
+        // columnas por hoja, lado a lado (espejo del móvil DossierExportService).
+        const colsHtml = paginateNumericBlocks(blocks, perCol, cfg.split_tables);
+        contents = [];
+        for (let i = 0; i < colsHtml.length; i += 2) {
+          contents.push(`<div style="display:flex;gap:14px;align-items:stretch;">
+  <div style="flex:1;min-width:0;">${colsHtml[i]}</div>
+  <div style="flex:0 0 1px;background:#d9dde3;align-self:stretch;margin-bottom:14px;"></div>
+  <div style="flex:1;min-width:0;">${colsHtml[i + 1] ?? ''}</div>
+</div>`);
+        }
+        if (contents.length === 0) contents = [''];
+      } else {
+        contents = paginateNumericBlocks(blocks, perCol, cfg.split_tables);
+      }
+      return contents.map((content, pageIdx) => `<div class="page"${pageIdx === 0 ? ` id="proto-${p.id}"` : ''}>
+  ${headerHtml}
+  ${pageIdx > 0 ? '<div style="font-size:9px;color:#888;margin-bottom:6px;">— Continuación del protocolo —</div>' : ''}
+  ${content}
+  ${footerFor(pageIdx)}
+</div>`).join('');
+    } catch (e) {
+      console.warn('[PDF] render numérico falló — fallback al formato clásico:', e);
+    }
+  }
 
   const chunks: ProtocolItem[][] = [];
   for (let i = 0; i < items.length; i += ROWS_PER_PAGE) chunks.push(items.slice(i, i + ROWS_PER_PAGE));
   if (chunks.length === 0) chunks.push([]);
 
   const hasMultipleSections = new Set(items.map(i => i.section?.trim() || 'General')).size > 1;
+
+  // Scope + matrices del protocolo: necesario para renderizar gráficos en el PDF.
+  // Se computa una sola vez por protocolo y se reutiliza dentro del loop.
+  // Para protocolos APPROVED el snapshot está en item.comments — resolveScopeCells
+  // los procesa con la misma lógica que la web (manual + list + lookup + formula).
+  // v33 — Encabezados de columna del protocolo: fallback de títulos de eje
+  // para gráficos que no declaran xt:/yt: (deriveAxisTitles).
+  const protoHeaderRows = (() => {
+    try {
+      const parsedRows = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
+      return extractHeaderRows(parsedRows).headerRows;
+    } catch { return []; }
+  })();
+
+  const protoScope = (() => {
+    try {
+      const parsedRows = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
+      const { dataRows } = extractHeaderRows(parsedRows);
+      const { mainRows, matrices } = extractMatrices(dataRows);
+      const scopeCells: ScopeCell[] = [];
+      for (const { item, spec } of mainRows) {
+        if (spec?.kind !== 'row') continue;
+        const partida = item.partida_item ?? '';
+        const cellVals = splitRowComments(item.comments, spec.cells.length);
+        for (let i = 0; i < spec.cells.length; i++) {
+          const cell = spec.cells[i];
+          const key = scopeKeyFor(partida, i);
+          if (cell.kind === 'manual' || cell.kind === 'percent' || cell.kind === 'bool' || cell.kind === 'free') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
+          else if (cell.kind === 'list' || cell.kind === 'date' || cell.kind === 'time' || cell.kind === 'equipment' || cell.kind === 'text') scopeCells.push({ key, kind: 'list', raw: cellVals[i] ?? '' });
+          else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
+          else if (cell.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: cell.refKey, matrixId: cell.matrixId, searchCol: cell.searchCol, returnCol: cell.returnCol });
+          else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
+        }
+      }
+      const { scope } = resolveScopeCells(scopeCells, matrices, xrefValues, auxTables);
+      return scope;
+    } catch {
+      return {};
+    }
+  })();
+
+  // v33 — Numeración secuencial de gráficos del protocolo ("Gráfico 1 — …").
+  let chartSeq = 0;
 
   return chunks.map((chunk, pageIdx) => {
     let rowNumber = pageIdx * ROWS_PER_PAGE + 1;
@@ -477,18 +790,168 @@ function buildProtocolPages(
         lastSection = sec;
         itemsHtml += `<tr><td colspan="5" style="padding:0;"><div class="section-group-header">${escHtml(sec)}</div></td></tr>`;
       }
+      // Render diferente si es item numérico: valor + ✓/✗ según rango
+      const numSpec = parseNumericItem(item.validation_method);
+      // Llamamos también a parseNumericRow para detectar (a) graphs en nuevos
+      // modos (bars/log-x/scatter) y (b) filas multi-celda (`//` separador) que
+      // parseNumericItem ignora — antes el PDF solo mostraba la primera celda.
+      const rowSpec = parseNumericRow(item.validation_method);
+      const graphSpec = numSpec?.kind === 'graph' ? numSpec
+                      : rowSpec?.kind === 'graph' ? rowSpec : null;
+
+      if (graphSpec) {
+        // Render: fila full-width con el SVG inline.
+        const axisTitles = deriveAxisTitles(graphSpec, protoHeaderRows);
+        const svg = renderChartSvg(
+          {
+            mode: graphSpec.mode,
+            xRefs: graphSpec.xRefs,
+            yRefs: graphSpec.yRefs,
+            title: graphSpec.title,
+            xAxisTitle: axisTitles.xAxisTitle,
+            yAxisTitle: axisTitles.yAxisTitle,
+            y2Refs: (graphSpec as any).y2Refs,
+            y3Refs: (graphSpec as any).y3Refs,
+            seriesLabels: (graphSpec as any).seriesLabels,
+            bandLoRefs: (graphSpec as any).bandLoRefs,
+            bandHiRefs: (graphSpec as any).bandHiRefs,
+            fit: (graphSpec as any).fit,
+          },
+          protoScope,
+          { width: 640, height: Math.round(640 * (((graphSpec as any).aspectPct ?? 43.75) / 100)) },
+        );
+        chartSeq++;
+        // Pie de gráfico numerado (el título ya va dentro del SVG).
+        const captionLine = `<div style="font-size:9px;color:#666;text-align:center;margin-top:3px;">Gráfico ${chartSeq}${graphSpec.title ? ` — ${escHtml(graphSpec.title)}` : ''}</div>`;
+        itemsHtml += `<tr>
+  <td style="width:36px;color:#1a4f7a;font-weight:700;text-align:center;vertical-align:top;">${rowNumber++}</td>
+  <td colspan="4" style="padding:6px 4px;">
+    <div style="font-size:11px;color:#222;margin-bottom:4px;">${escHtml(item.item_description)}</div>
+    <div style="display:flex;justify-content:center;">${svg}</div>
+    ${captionLine}
+  </td>
+</tr>`;
+        continue;
+      }
+
+      // Fila numérica multi-celda (// separador): rendrizamos cada celda con su
+      // letra (A, B, C…), su valor y su ✓/✗ por rango. Antes de este fix, la
+      // versión legacy solo mostraba la primera celda y descartaba las demás.
+      // v34 — Mejora 6: celdas `:oculto` (nunca visibles) y `:nopdf` (visibles
+      // en app, excluidas del reporte) NO van al PDF. Si la fila entera queda
+      // sin celdas reportables, se omite completa.
+      if (rowSpec?.kind === 'row') {
+        const reportable = rowSpec.cells.filter(c => !c.hidden && !c.noReport && c.kind !== 'blank');
+        const suppressed = rowSpec.cells.some(c => c.hidden || c.noReport);
+        if (suppressed && reportable.length === 0) continue;
+      }
+      if (numSpec && numSpec.kind !== 'graph' && ((numSpec as any).hidden || (numSpec as any).noReport)) {
+        // Fila legacy de una sola celda marcada oculta/no-reporte.
+        if (rowSpec?.kind === 'row' && rowSpec.cells.length === 1) continue;
+      }
+      const isMultiCellRow = rowSpec?.kind === 'row' && (
+        rowSpec.cells.length > 1 ||
+        ['percent', 'bool', 'date', 'time', 'equipment', 'val'].includes(rowSpec.cells[0]?.kind)
+      );
+
       let conformeHtml: string;
-      if (!item.has_answer) conformeHtml = `<span class="td-noanswer">—</span>`;
-      else if (item.is_na) conformeHtml = `<span style="color:#888;font-weight:700;">N/A</span>`;
-      else if (item.is_compliant === true) conformeHtml = `<span class="td-compliant">✓</span>`;
-      else conformeHtml = `<span class="td-noncompliant">✗</span>`;
-      itemsHtml += `<tr>
+      let metodoHtml: string = escHtml(item.validation_method);
+      if (isMultiCellRow && rowSpec?.kind === 'row') {
+        const cellVals = splitRowComments(item.comments, rowSpec.cells.length);
+        const partida = item.partida_item ?? '';
+        const cellsHtml = rowSpec.cells.map((cell, i) => {
+          const L = colLetter(i);
+          const raw = cellVals[i] ?? '';
+          // v34 — celdas ocultas / no-reporte: fuera del PDF.
+          if (cell.hidden || cell.noReport) return '';
+          // Valor literal fijo (tamiz, progresiva)
+          if (cell.kind === 'val') {
+            return `<span style="display:inline-block;margin-right:8px;"><b style="color:#1a4f7a;">${L}:</b><b>${escHtml(cell.literal || '—')}</b></span>`;
+          }
+          // Casilla Sí/No (guardada como "1"/"0")
+          if (cell.kind === 'bool') {
+            const t = raw === '1' ? '<span style="color:#137333;font-weight:700;">Sí</span>'
+                    : raw === '0' ? '<span style="color:#d93025;font-weight:700;">No</span>' : '—';
+            return `<span style="display:inline-block;margin-right:8px;"><b style="color:#1a4f7a;">${L}:</b>${t}</span>`;
+          }
+          // Manual / porcentaje / formula leen el VALOR computado
+          if (cell.kind === 'manual' || cell.kind === 'percent' || cell.kind === 'formula') {
+            const scopeKey = scopeKeyFor(partida, i);
+            const computed = cell.kind === 'formula' ? protoScope[scopeKey] : null;
+            const v = computed != null
+              ? computed
+              : (raw === '' ? null : Number(String(raw).replace(',', '.')));
+            const valTxt = v == null || !isFinite(v) ? '—' : (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+            const ok = (cell.range && v != null && isFinite(v)) ? inRange(v, cell.range) : null;
+            const icon = ok === true ? '<span style="color:#137333;">✓</span>'
+                        : ok === false ? '<span style="color:#d93025;">✗</span>'
+                        : '';
+            const pct = cell.kind === 'percent' && valTxt !== '—' ? '%' : '';
+            return `<span style="display:inline-block;margin-right:8px;"><b style="color:#1a4f7a;">${L}:</b>${valTxt}${pct} ${icon}</span>`;
+          }
+          // Celda en blanco intencional: ocupa espacio pero sin contenido (preserva alineación).
+          if (cell.kind === 'blank') {
+            return `<span style="display:inline-block;margin-right:8px;color:#bbb;"><b>${L}:</b>·</span>`;
+          }
+          // list/lookup/comment: texto del snapshot
+          return `<span style="display:inline-block;margin-right:8px;"><b style="color:#1a4f7a;">${L}:</b>${escHtml(raw || '—')}</span>`;
+        }).join('');
+        conformeHtml = `<div style="text-align:left;line-height:1.3;">${cellsHtml}</div>`;
+        metodoHtml = `<span style="color:#7b1fa2;font-size:9px;">multi (${rowSpec.cells.length})</span>`;
+      } else if (numSpec && numSpec.kind !== 'graph') {
+        const v = item.comments == null || item.comments === '' ? null : Number(String(item.comments).replace(',', '.'));
+        const okIcon = (numSpec.range && v != null && isFinite(v))
+          ? (v >= numSpec.range.min && v <= numSpec.range.max
+              ? `<span class="td-compliant">✓</span>`
+              : `<span class="td-noncompliant">✗</span>`)
+          : '';
+        const valTxt = v == null || !isFinite(v) ? '—' : (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+        conformeHtml = `<span style="font-weight:700;color:#1a4f7a;">${valTxt}</span> ${okIcon}`;
+        metodoHtml = numSpec.range
+          ? `<span style="color:#555;">[${numSpec.range.min}:${numSpec.range.max}]</span>`
+          : (numSpec.kind === 'formula' ? '<span style="color:#7b1fa2;">fx</span>' : '');
+      } else {
+        if (!item.has_answer) conformeHtml = `<span class="td-noanswer">—</span>`;
+        else if (item.is_na) conformeHtml = `<span style="color:#888;font-weight:700;">N/A</span>`;
+        else if (item.is_compliant === true) conformeHtml = `<span class="td-compliant">✓</span>`;
+        else conformeHtml = `<span class="td-noncompliant">✗</span>`;
+      }
+      // Multi-cell ocupa más ancho — colapsamos la columna método y la columna obs.
+      if (isMultiCellRow) {
+        itemsHtml += `<tr>
   <td style="width:36px;color:#1a4f7a;font-weight:700;text-align:center;">${rowNumber++}</td>
   <td>${escHtml(item.item_description)}</td>
-  <td style="width:88px;color:#555;">${escHtml(item.validation_method)}</td>
-  <td style="width:52px;text-align:center;">${conformeHtml}</td>
-  <td style="width:140px;color:#555;font-size:9px;">${escHtml(item.comments ?? null)}</td>
+  <td colspan="3" style="color:#222;font-size:10px;">${conformeHtml}</td>
 </tr>`;
+      } else {
+        itemsHtml += `<tr>
+  <td style="width:36px;color:#1a4f7a;font-weight:700;text-align:center;">${rowNumber++}</td>
+  <td>${escHtml(item.item_description)}</td>
+  <td style="width:88px;color:#555;">${metodoHtml}</td>
+  <td style="width:52px;text-align:center;">${conformeHtml}</td>
+  <td style="width:140px;color:#555;font-size:9px;">${numSpec ? '' : escHtml(item.comments ?? null)}</td>
+</tr>`;
+      }
+    }
+    // Bloque "Comentarios generales" si el protocolo es numérico y tiene general_comment
+    const protoAny = full.protocol as any;
+    if (pageIdx === chunks.length - 1 && protoAny.general_comment) {
+      itemsHtml += `<tr><td colspan="5" style="padding:8px 6px;border-top:2px solid #1a4f7a;">
+        <div style="font-size:10px;font-weight:800;color:#444;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">Comentarios generales</div>
+        <div style="font-size:11px;color:#222;white-space:pre-wrap;">${escHtml(protoAny.general_comment)}</div>
+      </td></tr>`;
+    }
+    // v24 — Sección "Equipos utilizados" en la última página del protocolo.
+    // Gated por el flag `equipment_catalog`: si está off, no renderizamos —
+    // misma decisión que la UI (audit/page.tsx), evitando exponer datos que
+    // el CREATOR ocultó al desactivar el módulo.
+    // Default `includeEquipment !== false`: si el caller no lo pasó (back-compat
+    // con código viejo), renderiza igual que antes.
+    const renderEquipment = includeEquipment !== false;
+    if (renderEquipment && pageIdx === chunks.length - 1 && full.equipment && full.equipment.length > 0) {
+      itemsHtml += `<tr><td colspan="5" style="padding:8px 6px;border-top:2px solid #1a4f7a;">
+        ${equipmentSectionInner(full.equipment)}
+      </td></tr>`;
     }
     const continuacion = pageIdx > 0 ? ' <span style="font-size:9px;color:#888;font-weight:400;">(continuación)</span>' : '';
     const anchorId = pageIdx === 0 ? ` id="proto-${p.id}"` : '';
@@ -505,10 +968,7 @@ function buildProtocolPages(
     </tr></thead>
     <tbody>${itemsHtml}</tbody>
   </table>
-  <div class="proto-footer">
-    <div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signedName)}</div><div class="signature-role">Jefe de Calidad</div></div>
-    <div class="footer-right">Dosier de Calidad<br/>Página ${globalPageStart + pageIdx} de ${totalDocPages}</div>
-  </div>
+  ${footerFor(pageIdx)}
 </div>`;
   }).join('');
 }
@@ -615,10 +1075,57 @@ export interface DossierExportOptions {
   locations: Location[];
   preloaded?: PreloadedProjectData | null;
   onProgress?: (msg: string) => void;
+  /** v26 (FASE 7) — Incluir QR del protocolo en el header del PDF. Solo activar
+   *  cuando `flags.qr_codes=true` para el proyecto. */
+  includeQrCodes?: boolean;
+  /** v24 (FASE 4) — Incluir sección "Equipos utilizados" en el PDF. Solo activar
+   *  cuando `flags.equipment_catalog=true`. Si está off, el render del PDF omite
+   *  la sección aunque los protocolos tengan equipos vinculados (paridad con UI). */
+  includeEquipment?: boolean;
+}
+
+/** v41 — Carga las tablas auxiliares del proyecto como mapa para BUSCAR() en el PDF. */
+async function fetchAuxTablesMap(projectId: string): Promise<AuxTables> {
+  const map: AuxTables = {};
+  try {
+    const { data } = await supabase
+      .from('lab_aux_tables').select('group_key, columns_json, rows_json').eq('project_id', projectId);
+    for (const t of (data ?? []) as { group_key: string; columns_json: unknown; rows_json: unknown }[]) {
+      map[String(t.group_key).toLowerCase()] = {
+        columns: Array.isArray(t.columns_json) ? (t.columns_json as string[]) : [],
+        rows: Array.isArray(t.rows_json) ? (t.rows_json as string[][]) : [],
+      };
+    }
+  } catch (e) { console.warn('[PDF] aux tables fetch failed:', e); }
+  return map;
 }
 
 export async function exportFullDossier(opts: DossierExportOptions): Promise<void> {
-  const { projectId, projectName, projectCreatedAt, signerName, signerUserId, logoS3Key, protocols, locations, preloaded, onProgress } = opts;
+  const { projectId, projectName, projectCreatedAt, signerName, signerUserId, logoS3Key, protocols, locations, preloaded, onProgress, includeQrCodes, includeEquipment } = opts;
+  const auxTablesForPdf = await fetchAuxTablesMap(projectId);   // v41 — para BUSCAR() en el PDF
+  const qrEnabled = includeQrCodes === true;
+  // Por defecto incluimos equipos (true) si el caller no especificó; los callers
+  // nuevos deberían pasar explícitamente `includeEquipment: flags.equipment_catalog`.
+  const equipmentEnabled = includeEquipment !== false;
+
+  // v43.6 — Config de impresión por tipo (la define el CREADOR en móvil; vive en
+  // projects.feature_flags, JSONB compartido). El PDF web honra esa misma config.
+  let projectFlags: unknown = {};
+  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null = null;
+  try {
+    const { data: pr } = await supabase.from('projects')
+      .select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json').eq('id', projectId).maybeSingle();
+    projectFlags = (pr as { feature_flags?: unknown } | null)?.feature_flags ?? {};
+    orthoRow = pr as typeof orthoRow;
+  } catch { /* sin flags → defaults */ }
+  const headerColor = getPrintHeaderColor(projectFlags);
+
+  // v43.6 — Croquis: sectores con geometría + ortofoto (base64 + bounds) del proyecto.
+  // Se cargan UNA vez; el croquis se dibuja vectorial (sin Google Maps) sobre la ortofoto.
+  const geomSectors: CroquisSectorIn[] = await loadGeomSectors(projectId);
+  const croquisOrtho: CroquisOrtho | null = await loadCroquisOrtho(orthoRow);
+  const croquisOf = (full: DossierProtocolFull, cfg: ResolvedPrintConfig) =>
+    croquisBlockFor(full, cfg, geomSectors, croquisOrtho);
 
   onProgress?.('Cargando imágenes...');
 
@@ -648,6 +1155,28 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
     if (p.signedByName && p.signed_by_id)  userMap[p.signed_by_id]  = p.signedByName;
     if (p.location && p.location_id) locMap[p.location_id] = p.location;
   });
+
+  // v26 (FASE 7) — template UUID → id_protocolo. Necesario para el QR y, v43.6, para
+  // KEYEAR la config de impresión (print_configs[idProtocolo]) y el campo "ID Protocolo".
+  // Una sola query (siempre, no solo con QR).
+  const templateIdProtoMap: Record<string, string> = {};
+  {
+    const tmplIds = Array.from(new Set(protocols.map(p => p.template_id).filter(Boolean) as string[]));
+    if (tmplIds.length > 0) {
+      const { data: tmpls } = await supabase
+        .from('protocol_templates')
+        .select('id, id_protocolo')
+        .in('id', tmplIds);
+      for (const t of (tmpls ?? []) as { id: string; id_protocolo: string }[]) {
+        if (t.id_protocolo) templateIdProtoMap[t.id] = t.id_protocolo;
+      }
+    }
+  }
+  // Helper: id_protocolo + config resuelta de un protocolo.
+  const idProtoOf = (full: DossierProtocolFull): string | null =>
+    full.protocol.template_id ? (templateIdProtoMap[full.protocol.template_id] ?? null) : null;
+  const cfgOf = (full: DossierProtocolFull): ResolvedPrintConfig =>
+    getTemplatePrintConfig(projectFlags, idProtoOf(full));
 
   // Load full data for each protocol
   const fullData: DossierProtocolFull[] = [];
@@ -715,7 +1244,8 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
 
     pageMap[full.protocol.id] = _calcPage; // page where this protocol starts
 
-    const protoPages = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
+    const cfgC = cfgOf(full);
+    const protoPages = protoPageCount(full, equipmentEnabled, cfgC, headerColor, croquisOf(full, cfgC));
     totalDocPages += protoPages;
     _calcPage += protoPages;
 
@@ -726,8 +1256,9 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
       const s3Key = key.startsWith('http') ? null : key;
       return { url, s3Key };
     }).filter(Boolean) as { url: string; s3Key: string | null }[];
-    evidenceEntriesByProto.push(entries);
-    if (entries.length > 0) {
+    // v43.6 — Panel fotográfico solo si el tipo lo tiene activado (show_photos).
+    evidenceEntriesByProto.push(cfgC.show_photos ? entries : []);
+    if (cfgC.show_photos && entries.length > 0) {
       const photoPages = Math.ceil(entries.length / 8);
       totalDocPages += photoPages;
       _calcPage += photoPages;
@@ -761,8 +1292,54 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
     const protoSignerName = full.protocol.signedByName ?? signerName;
 
     // Protocol pages
-    const protoPages = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
-    const pHtml = buildProtocolPages(full, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages, projectName);
+    const cfgR = cfgOf(full);
+    const croquisR = croquisOf(full, cfgR);
+    const protoPages = protoPageCount(full, equipmentEnabled, cfgR, headerColor, croquisR);
+    // Cargar firmas adicionales para approvers multi-nivel en PARALELO — antes
+    // se hacía sequential (1 await por aprobación) dentro del loop de protocolos,
+    // causando 50 protos × 3 niveles = 150 round-trips serializados.
+    if (full.approvals && full.approvals.length > 0) {
+      const missingSigners = full.approvals
+        .map(a => a.signer_id)
+        .filter((id): id is string => !!id && !(id in signatureMap));
+      if (missingSigners.length > 0) {
+        await Promise.all(missingSigners.map(async (sid) => {
+          const k = `signatures/${sid}/signature.jpg`;
+          signatureMap[sid] = await fetchToBase64(s3Url(k), k);
+        }));
+      }
+    }
+    const idProtoR = idProtoOf(full);
+    let qrSvg: string | undefined;
+    // v43.6 — QR si el flag global QR está on Y el tipo lo permite (show_qr).
+    if (qrEnabled && cfgR.show_qr) {
+      try {
+        const { generateProtocolQr } = await import('@lib/qrCodeGenerator');
+        const qr = await generateProtocolQr({
+          idProtocolo: idProtoR,
+          externalId: full.protocol.external_id ?? null,
+          protocolUuid: full.protocol.id,
+          size: 72,
+        });
+        qrSvg = qr.svg;
+      } catch (e) { console.warn('[PDF] QR generation failed:', e); }
+    }
+    // v26 — Pre-cargar xrefValues si el protocolo tiene refs `@`. Una sola query
+    // por protocolo. Falla silenciosa → las refs muestran ⚠ en el chart pero el
+    // PDF sigue generándose.
+    // v42e (H5) — Un protocolo APROBADO es histórico inmutable: sus celdas/gráficos
+    // deben leerse del snapshot CONGELADO (comments), nunca re-resolver el xref en
+    // vivo (si la fuente @código cambió/se reusó, el PDF firmado mostraría datos
+    // distintos a los aprobados → rompe la trazabilidad). Solo DRAFT/SUBMITTED
+    // resuelven en vivo. Para fichas sin `@`, recomputar == congelado (sin cambio).
+    let xrefValuesForPdf: XrefValues | undefined;
+    if (full.protocol.status !== 'APPROVED') {
+      try {
+        const { fetchXrefValues } = await import('@hooks/useXrefs');
+        xrefValuesForPdf = await fetchXrefValues(projectId, full.items);
+      } catch (e) { console.warn('[PDF] xref fetch failed:', e); }
+    }
+    const pHtml = buildProtocolPages(full, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages, projectName, signatureMap, qrSvg, xrefValuesForPdf, equipmentEnabled, auxTablesForPdf, cfgR, headerColor, idProtoR, croquisR);
     contentParts.push(pHtml);
     globalPage += protoPages;
 
@@ -804,6 +1381,10 @@ export async function exportSingleProtocolPdf(
   logoS3Key: string | null,
   locMap: Record<string, Location>,
   userMap: Record<string, string>,
+  /** v26 (FASE 7) — Incluir QR en el header del PDF. */
+  includeQrCode?: boolean,
+  /** v24 (FASE 4) — Incluir sección "Equipos utilizados". Pasar `flags.equipment_catalog`. */
+  includeEquipment?: boolean,
 ): Promise<void> {
   const defaultSignKey = `signatures/${signerUserId}/signature.jpg`;
   const [logoB64, defaultSignB64] = await Promise.all([
@@ -823,18 +1404,78 @@ export async function exportSingleProtocolPdf(
   }
   if (full.protocol.signedByName) actualSignerName = full.protocol.signedByName;
 
-  const evidenceEntries = full.evidences.map(ev => {
+  // v43.6 — Config de impresión del tipo + color global (los define el creador en
+  // móvil; viven en projects.feature_flags). idProtocolo se reusa para QR y header.
+  let projectFlags: unknown = {};
+  let idProto: string | null = null;
+  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null = null;
+  try {
+    const [prRes, tRes] = await Promise.all([
+      supabase.from('projects').select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json').eq('id', full.protocol.project_id).maybeSingle(),
+      full.protocol.template_id
+        ? supabase.from('protocol_templates').select('id_protocolo').eq('id', full.protocol.template_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    projectFlags = (prRes.data as { feature_flags?: unknown } | null)?.feature_flags ?? {};
+    orthoRow = prRes.data as typeof orthoRow;
+    idProto = (tRes.data as { id_protocolo?: string } | null)?.id_protocolo ?? null;
+  } catch { /* defaults */ }
+  const cfg = getTemplatePrintConfig(projectFlags, idProto);
+  const headerColor = getPrintHeaderColor(projectFlags);
+  // v43.6 — Croquis (sectores + ortofoto del proyecto).
+  const [geomSectorsS, croquisOrthoS] = await Promise.all([
+    loadGeomSectors(full.protocol.project_id),
+    loadCroquisOrtho(orthoRow),
+  ]);
+  const croquisS = croquisBlockFor(full, cfg, geomSectorsS, croquisOrthoS);
+
+  const allEvidenceEntries = full.evidences.map(ev => {
       const key = ev.s3_key ?? ev.s3_url_placeholder ?? (ev as any).file_name;
       if (!key) return null;
       const url = key.startsWith('http') ? key : s3Url(key);
       const s3Key = key.startsWith('http') ? null : key;
       return { url, s3Key };
     }).filter(Boolean) as { url: string; s3Key: string | null }[];
+  // Panel fotográfico solo si el tipo lo tiene activado.
+  const evidenceEntries = cfg.show_photos ? allEvidenceEntries : [];
 
-  const chunks = Math.ceil(full.items.length / ROWS_PER_PAGE) || 1;
+  const chunks = protoPageCount(full, includeEquipment !== false, cfg, headerColor, croquisS);
   const totalDocPages = chunks + (evidenceEntries.length > 0 ? Math.ceil(evidenceEntries.length / 8) : 0);
 
-  const protoHtml = buildProtocolPages(full, logoB64, signB64, actualSignerName, 1, totalDocPages, projectName);
+  // Cargar firmas adicionales si hay aprobaciones multi-nivel
+  const sigMapSingle: Record<string, string | null> = {};
+  if (full.protocol.signed_by_id) sigMapSingle[full.protocol.signed_by_id] = signB64;
+  if (full.approvals && full.approvals.length > 0) {
+    for (const a of full.approvals) {
+      if (a.signer_id && !(a.signer_id in sigMapSingle)) {
+        const k = `signatures/${a.signer_id}/signature.jpg`;
+        sigMapSingle[a.signer_id] = await fetchToBase64(s3Url(k), k);
+      }
+    }
+  }
+  let qrSvgSingle: string | undefined;
+  if (includeQrCode && cfg.show_qr) {
+    try {
+      const { generateProtocolQr } = await import('@lib/qrCodeGenerator');
+      const qr = await generateProtocolQr({
+        idProtocolo: idProto,
+        externalId: full.protocol.external_id ?? null,
+        protocolUuid: full.protocol.id,
+        size: 72,
+      });
+      qrSvgSingle = qr.svg;
+    } catch (e) { console.warn('[PDF] QR generation failed:', e); }
+  }
+  // v42e (H5) — APROBADO = inmutable: no re-resolver xref en vivo (ver nota arriba).
+  let xrefValuesSingle: XrefValues | undefined;
+  if (full.protocol.status !== 'APPROVED') {
+    try {
+      const { fetchXrefValues } = await import('@hooks/useXrefs');
+      xrefValuesSingle = await fetchXrefValues(full.protocol.project_id, full.items);
+    } catch (e) { console.warn('[PDF] xref fetch failed:', e); }
+  }
+  const auxTablesSingle = await fetchAuxTablesMap(full.protocol.project_id);   // v41 — BUSCAR() en PDF
+  const protoHtml = buildProtocolPages(full, logoB64, signB64, actualSignerName, 1, totalDocPages, projectName, sigMapSingle, qrSvgSingle, xrefValuesSingle, includeEquipment !== false, auxTablesSingle, cfg, headerColor, idProto, croquisS);
   const locName = full.protocol.location
     ? `${full.protocol.location.location_only ?? ''}-${full.protocol.location.specialty ?? ''}`.replace(/^-|-$/g, '')
     : null;
@@ -851,4 +1492,129 @@ export async function exportSingleProtocolPdf(
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const safeName = (full.protocol.protocol_number ?? protocolId).replace(/[^a-zA-Z0-9\-_]/g, '_');
   await generateAndDownloadPdf(html, `PROTOCOLO-${safeName}-${dateStr}.pdf`);
+}
+
+// ── Reporte rápido de calibración (#5b) ────────────────────────────────────────
+//
+// Lista los equipos de laboratorio y las tablas auxiliares con su última y
+// próxima calibración + días restantes (mismo cálculo que el badge de la UI).
+// Mira solo datos de calibración; no procesa cálculos de ensayos.
+
+export interface CalibEquipInput {
+  code: string | null;
+  name: string | null;
+  type: string | null;
+  brand?: string | null;
+  model?: string | null;
+  serial?: string | null;
+  last_calibration_at?: number | null;
+  next_calibration_at?: number | null;
+}
+export interface CalibTableInput {
+  group_key: string;
+  name: string | null;
+  columns_count: number;
+  rows_count: number;
+  last_calibration_at?: number | null;
+  next_calibration_at?: number | null;
+}
+export interface CalibReportOptions {
+  projectName: string;
+  equipos: CalibEquipInput[];
+  tablas: CalibTableInput[];
+}
+
+/** Estado de calibración (días restantes hasta la próxima). Mismo umbral que la UI. */
+function calibStatus(ms: number | null | undefined): { text: string; bg: string; fg: string; order: number } {
+  if (!ms) return { text: 'Sin fecha', bg: '#eceff3', fg: '#888', order: 3 };
+  const days = Math.ceil((ms - Date.now()) / 86400000);
+  if (days < 0)   return { text: `Vencida hace ${-days} día${-days === 1 ? '' : 's'}`, bg: '#fdecea', fg: '#d93025', order: 0 };
+  if (days === 0) return { text: 'Vence hoy', bg: '#fdf0d5', fg: '#b8860b', order: 1 };
+  if (days <= 30) return { text: `Faltan ${days} día${days === 1 ? '' : 's'}`, bg: '#fdf0d5', fg: '#b8860b', order: 2 };
+  return { text: `Faltan ${days} días`, bg: '#e7f4ea', fg: '#1e8e3e', order: 4 };
+}
+
+function calibRows(items: { c1: string; c2: string; c3: string; last: number | null | undefined; next: number | null | undefined }[]): string {
+  if (items.length === 0) {
+    return `<tr><td colspan="6" style="text-align:center;color:#aaa;font-style:italic;">Sin registros.</td></tr>`;
+  }
+  // Orden: lo más urgente primero (vencidas → próximas → ok → sin fecha).
+  const sorted = [...items].sort((a, b) => calibStatus(a.next).order - calibStatus(b.next).order);
+  return sorted.map(it => {
+    const st = calibStatus(it.next);
+    return `<tr>
+      <td><strong>${escHtml(it.c1)}</strong></td>
+      <td>${escHtml(it.c2)}</td>
+      <td>${escHtml(it.c3)}</td>
+      <td>${fmtDate(it.last ?? null)}</td>
+      <td>${fmtDate(it.next ?? null)}</td>
+      <td><span class="status-badge" style="background:${st.bg};color:${st.fg};">${st.text}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+export async function generateCalibrationReportPdf(opts: CalibReportOptions): Promise<void> {
+  const { projectName, equipos, tablas } = opts;
+  const now = new Date();
+  const generatedAt = fmtDateTime(now.getTime());
+
+  // Resumen de estado (cuántos vencidos / por vencer).
+  const allNext = [...equipos.map(e => e.next_calibration_at), ...tablas.map(t => t.next_calibration_at)];
+  const vencidas = allNext.filter(ms => ms && Math.ceil((ms - Date.now()) / 86400000) < 0).length;
+  const porVencer = allNext.filter(ms => ms && (() => { const d = Math.ceil((ms - Date.now()) / 86400000); return d >= 0 && d <= 30; })()).length;
+
+  const equipBody = calibRows(equipos.map(e => ({
+    c1: e.code ?? '—',
+    c2: e.name ?? '—',
+    c3: [e.type ? String(e.type).replace(/_/g, ' ') : '', e.brand ?? '', e.model ?? ''].filter(Boolean).join(' · ') || '—',
+    last: e.last_calibration_at,
+    next: e.next_calibration_at,
+  })));
+  const tablaBody = calibRows(tablas.map(t => ({
+    c1: t.group_key,
+    c2: t.name ?? t.group_key,
+    c3: `${t.columns_count} col · ${t.rows_count} filas`,
+    last: t.last_calibration_at,
+    next: t.next_calibration_at,
+  })));
+
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"/><style>${CSS}</style></head><body>
+  <div class="page">
+    <div class="proto-header">
+      <div class="proto-header-center"><div class="proto-name">Reporte de Calibración</div></div>
+      <div class="proto-num">${escHtml(generatedAt)}</div>
+    </div>
+    <div class="proto-info-grid">
+      <div class="proto-info-row">
+        <div class="proto-info-cell"><span class="proto-info-label">Proyecto</span><span class="proto-info-value">${escHtml(projectName)}</span></div>
+        <div class="proto-info-cell"><span class="proto-info-label">Equipos de laboratorio</span><span class="proto-info-value">${equipos.length}</span></div>
+        <div class="proto-info-cell"><span class="proto-info-label">Tablas auxiliares</span><span class="proto-info-value">${tablas.length}</span></div>
+      </div>
+      <div class="proto-info-row">
+        <div class="proto-info-cell"><span class="proto-info-label">Calibraciones vencidas</span><span class="proto-info-value" style="color:${vencidas ? '#d93025' : '#1e8e3e'}">${vencidas}</span></div>
+        <div class="proto-info-cell"><span class="proto-info-label">Por vencer (≤30 días)</span><span class="proto-info-value" style="color:${porVencer ? '#b8860b' : '#1e8e3e'}">${porVencer}</span></div>
+      </div>
+    </div>
+
+    <div class="section-group-header">Equipos de laboratorio</div>
+    <table>
+      <thead><tr><th>Código</th><th>Equipo</th><th>Tipo / Marca</th><th>Última calib.</th><th>Próxima calib.</th><th>Estado</th></tr></thead>
+      <tbody>${equipBody}</tbody>
+    </table>
+
+    <div class="section-group-header" style="margin-top:18px;">Tablas auxiliares (grupos calibrables)</div>
+    <table>
+      <thead><tr><th>Llave</th><th>Tabla</th><th>Contenido</th><th>Última calib.</th><th>Próxima calib.</th><th>Estado</th></tr></thead>
+      <tbody>${tablaBody}</tbody>
+    </table>
+
+    <div class="proto-footer">
+      <div class="footer-right">Reporte de Calibración · ${escHtml(projectName)}<br/>Generado el ${escHtml(generatedAt)}</div>
+    </div>
+  </div>
+  </body></html>`;
+
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const safeName = projectName.replace(/[^a-zA-Z0-9\-_]/g, '_');
+  await generateAndDownloadPdf(html, `CALIBRACION-${safeName}-${dateStr}.pdf`);
 }

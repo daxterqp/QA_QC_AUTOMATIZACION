@@ -13,6 +13,9 @@ export default class User extends Model {
   @field('password') password!: string | null;
   @field('pin') pin!: string | null;
   @field('signature_uri') signatureUri!: string | null;
+  /** v43 — soft-delete: false = cuenta inactiva (sin login). Las firmas y
+   *  aprobaciones históricas se conservan intactas. null/undefined ⇒ activo. */
+  @field('is_active') isActive!: boolean | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

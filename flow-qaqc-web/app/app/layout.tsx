@@ -8,11 +8,17 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@lib/auth-context';
 import { useCreateProject, useJoinProject, useProjects } from '@hooks/useProjects';
+import { ProjectConfigModal } from '@components/project/ProjectConfigModal';
+import type { ProjectFeatureFlags } from '@/types';
 import PdfPreview from '@components/PdfPreview';
 import { cn, getInitials } from '@lib/utils';
+import { roleLabel } from '@lib/roles';
+import { useI18n } from '@lib/i18n';
+import LanguageSelector from '@components/LanguageSelector';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { currentUser, loading, signOut } = useAuth();
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -26,6 +32,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [joinName,    setJoinName]    = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [joinError,   setJoinError]   = useState('');
+  // v22 — wizard de 2 pasos: tras nombre+password, pedir módulos al CREATOR.
+  const [pendingCreate, setPendingCreate] = useState<{ name: string; password: string } | null>(null);
 
   const { data: projects = [] } = useProjects();
   const appSyncDone = useRef(false);
@@ -58,7 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (loading || !currentUser) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="text-primary font-semibold text-sm animate-pulse">Cargando...</div>
+        <div className="text-primary font-semibold text-sm animate-pulse">{t('common.loading')}</div>
       </div>
     );
   }
@@ -73,11 +81,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const handleCreate = async () => {
     if (!newName.trim() || !newPassword.trim()) return;
     const duplicate = projects.find((p: any) => p.name.toLowerCase().trim() === newName.toLowerCase().trim());
-    if (duplicate) { alert('Ya existe un proyecto con ese nombre. Usa un nombre diferente.'); return; }
-    await createProject.mutateAsync({ name: newName.trim(), password: newPassword.trim() });
+    if (duplicate) { alert(t('webLayout.duplicateProject')); return; }
+    // Step 2: pasa al config de módulos. Solo CREATOR ve este modal.
+    if (isCreator) {
+      setPendingCreate({ name: newName.trim(), password: newPassword.trim() });
+      setShowNewModal(false);
+    } else {
+      // Roles no-CREATOR no deberían poder crear, pero por compatibilidad creamos con defaults
+      await createProject.mutateAsync({ name: newName.trim(), password: newPassword.trim() });
+      setNewName('');
+      setNewPassword('');
+      setShowNewModal(false);
+    }
+  };
+
+  const handleCreateWithFlags = async (flags: ProjectFeatureFlags, _mapTileUrl: string | null) => {
+    if (!pendingCreate) return;
+    // map_tile_url se setea en la edición posterior; al crear lo dejamos null implícito (default DB).
+    await createProject.mutateAsync({ name: pendingCreate.name, password: pendingCreate.password, featureFlags: flags });
     setNewName('');
     setNewPassword('');
-    setShowNewModal(false);
+    setPendingCreate(null);
   };
 
   const handleJoin = async () => {
@@ -89,14 +113,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setJoinPassword('');
       setShowJoinModal(false);
     } catch (e: any) {
-      setJoinError(e.message ?? 'Error al unirse');
+      setJoinError(e.message ?? t('webLayout.joinError'));
     }
   };
 
   const navLinks = [
-    { href: '/app/projects',  label: 'Proyectos',  icon: FolderKanban    },
-    { href: '/app/dashboard', label: 'Dashboard',  icon: LayoutDashboard },
-    ...(isCreator ? [{ href: '/app/admin/users', label: 'Usuarios', icon: Users }] : []),
+    { href: '/app/projects',  label: t('webLayout.navProjects'),  icon: FolderKanban    },
+    { href: '/app/dashboard', label: t('webLayout.navDashboard'),  icon: LayoutDashboard },
+    ...(isCreator ? [{ href: '/app/admin/users', label: t('webLayout.navUsers'), icon: Users }] : []),
   ];
 
   return (
@@ -141,7 +165,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold text-light hover:bg-white/10 hover:text-white transition w-full text-left"
               >
                 <Plus size={15} />
-                Nuevo proyecto
+                {t('webLayout.newProject')}
               </button>
             )}
             <button
@@ -149,23 +173,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold text-light hover:bg-white/10 hover:text-white transition w-full text-left"
             >
               <LogIn size={15} />
-              Unirse a proyecto
+              {t('webLayout.joinProject')}
             </button>
           </div>
         </nav>
 
-        {/* User */}
+        {/* Selector de idioma (es/en/pt) — persistido por navegador. */}
+        <div className="border-t border-white/10 px-3 pt-3 pb-1">
+          <LanguageSelector />
+        </div>
+
+        {/* User — toca para abrir "Mi cuenta" (firma, contraseña, preferencias). */}
         <div className="border-t border-white/10 p-4 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-            {getInitials(currentUser.name, currentUser.apellido)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-bold truncate">{currentUser.name}</p>
-            <p className="text-light text-[10px] truncate">{currentUser.role}</p>
-          </div>
+          <Link href="/app/me" className="flex-1 min-w-0 flex items-center gap-3 hover:opacity-90 transition">
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              {getInitials(currentUser.name, currentUser.apellido)}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-xs font-bold truncate">{currentUser.name}</p>
+              <p className="text-light text-[10px] truncate">{roleLabel(currentUser.role)}</p>
+            </div>
+          </Link>
           <button
             onClick={handleSignOut}
-            title="Cerrar sesión"
+            title={t('webLayout.signOut')}
             className="text-light hover:text-white transition"
           >
             <LogOut size={15} />
@@ -183,29 +214,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 bg-navy/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-modal w-full max-w-sm p-6 flex flex-col gap-3">
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-navy font-bold text-base">Nuevo Proyecto</h3>
+              <h3 className="text-navy font-bold text-base">{t('webLayout.newProjectTitle')}</h3>
               <button onClick={() => setShowNewModal(false)} className="text-gray-400 hover:text-navy transition">
                 <X size={18} />
               </button>
             </div>
             <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Nombre del proyecto *
+              {t('webLayout.projectNameLabel')}
             </label>
             <input
               autoFocus
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              placeholder="Ej: Edificio Torre Norte"
+              placeholder={t('webLayout.projectNamePlaceholder')}
               className="border border-border rounded-md px-3.5 py-3 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Contraseña del proyecto *
+              {t('webLayout.projectPasswordLabel')}
             </label>
             <input
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleCreate()}
-              placeholder="Contraseña para unirse"
+              placeholder={t('webLayout.projectPasswordPlaceholder')}
               className="border border-border rounded-md px-3.5 py-3 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <div className="flex gap-2 mt-2">
@@ -213,7 +244,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 onClick={() => setShowNewModal(false)}
                 className="flex-1 border border-border rounded-md py-3 text-sm font-semibold text-gray-500 hover:bg-surface transition"
               >
-                Cancelar
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleCreate}
@@ -221,7 +252,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 className="flex-1 bg-primary text-white rounded-md py-3 text-sm font-bold disabled:opacity-50 hover:bg-navy transition flex items-center justify-center gap-2"
               >
                 {createProject.isPending && <Loader2 size={14} className="animate-spin" />}
-                Crear
+                {t('webLayout.create')}
               </button>
             </div>
           </div>
@@ -233,29 +264,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="fixed inset-0 bg-navy/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-modal w-full max-w-sm p-6 flex flex-col gap-3">
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-navy font-bold text-base">Unirse a Proyecto</h3>
+              <h3 className="text-navy font-bold text-base">{t('webLayout.joinProjectTitle')}</h3>
               <button onClick={() => { setShowJoinModal(false); setJoinError(''); }} className="text-gray-400 hover:text-navy transition">
                 <X size={18} />
               </button>
             </div>
             <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Nombre del proyecto
+              {t('webLayout.joinNameLabel')}
             </label>
             <input
               autoFocus
               value={joinName}
               onChange={e => { setJoinName(e.target.value); setJoinError(''); }}
-              placeholder="Nombre exacto del proyecto"
+              placeholder={t('webLayout.joinNamePlaceholder')}
               className="border border-border rounded-md px-3.5 py-3 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Contraseña
+              {t('webLayout.passwordLabel')}
             </label>
             <input
               value={joinPassword}
               onChange={e => { setJoinPassword(e.target.value); setJoinError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleJoin()}
-              placeholder="Contraseña del proyecto"
+              placeholder={t('webLayout.joinPasswordPlaceholder')}
               className="border border-border rounded-md px-3.5 py-3 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             {joinError && (
@@ -266,7 +297,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 onClick={() => { setShowJoinModal(false); setJoinError(''); }}
                 className="flex-1 border border-border rounded-md py-3 text-sm font-semibold text-gray-500 hover:bg-surface transition"
               >
-                Cancelar
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleJoin}
@@ -274,7 +305,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 className="flex-1 bg-primary text-white rounded-md py-3 text-sm font-bold disabled:opacity-50 hover:bg-navy transition flex items-center justify-center gap-2"
               >
                 {joinProject.isPending && <Loader2 size={14} className="animate-spin" />}
-                Unirse
+                {t('webLayout.join')}
               </button>
             </div>
           </div>
@@ -283,6 +314,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* PDF Preview overlay */}
       <PdfPreview />
+
+      {/* Step 2 del wizard de creación: configuración de módulos (solo CREATOR) */}
+      {pendingCreate && (
+        <ProjectConfigModal
+          title={t('webLayout.configModulesTitle', { name: pendingCreate.name })}
+          confirmLabel={t('webLayout.createProjectConfirm')}
+          onConfirm={handleCreateWithFlags}
+          onCancel={() => setPendingCreate(null)}
+        />
+      )}
     </div>
   );
 }

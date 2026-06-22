@@ -25,6 +25,9 @@ import {
   locationsCollection,
   projectsCollection,
   protocolTemplatesCollection,
+  labAuxTablesCollection,
+  samplesCollection,
+  projectSectorsCollection,
 } from '@db/index';
 import { getProjectSettings } from './ProjectSettings';
 import { getOrDownloadSignatureUri } from './UserSignatureService';
@@ -32,6 +35,36 @@ import type Protocol from '@db/models/Protocol';
 import type ProtocolItem from '@db/models/ProtocolItem';
 import type Location from '@db/models/Location';
 import type User from '@db/models/User';
+import type SampleModel from '@db/models/Sample';
+import { isNumericProtocol } from '@utils/numericProtocol';
+import { generateProtocolQrImg } from '@utils/qrCode';
+import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, type ProjectFeatureFlags } from '@utils/featureFlags';
+import {
+  buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfItem, type NumericPdfBlock,
+} from '@utils/numericPdfHtml';
+import type { CroquisResult, CroquisLegend } from '@services/CroquisService';
+
+// v41 — Tablas auxiliares del proyecto para recomputar BUSCAR() en el PDF.
+// Módulo-scope porque la exportación es secuencial (no concurrente); se setea al
+// inicio de cada export y lo leen los renders de bloques numéricos.
+let _pdfAuxTables: import('@utils/formulaEval').AuxTables = {};
+// v43.4 — Flags del proyecto cargados al inicio de cada export, para leer la config
+// de impresión por tipo de ensayo (getTemplatePrintConfig).
+let _pdfFlags: ProjectFeatureFlags | null = null;
+async function loadPdfAuxTables(projectId: string): Promise<void> {
+  _pdfAuxTables = {};
+  _pdfFlags = null;
+  try {
+    const tbls = await labAuxTablesCollection.query(Q.where('project_id', projectId)).fetch();
+    for (const t of tbls as any[]) {
+      try { _pdfAuxTables[String(t.groupKey).toLowerCase()] = { columns: JSON.parse(t.columnsJson ?? '[]'), rows: JSON.parse(t.rowsJson ?? '[]') }; } catch { /* corrupta */ }
+    }
+  } catch { /* sin tablas → BUSCAR vacío en PDF */ }
+  try {
+    const proj: any = (await projectsCollection.query(Q.where('id', projectId)).fetch())[0];
+    _pdfFlags = parseFeatureFlagsJson(proj?.featureFlags);
+  } catch { _pdfFlags = null; }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -271,7 +304,7 @@ h1 { font-size: 28px; font-weight: 900; letter-spacing: 1px; }
 h2 { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 10px; }
 h3 { font-size: 12px; font-weight: 700; letter-spacing: 0.4px; margin-bottom: 6px; }
 
-.page { page-break-before: always; padding: 32px 36px 150px 36px; min-height: 100vh; position: relative; }
+.page { page-break-before: always; padding: 32px 36px 118px 36px; min-height: 100vh; position: relative; }
 .page:first-child { page-break-before: avoid; padding-bottom: 36px; }
 
 /* ── Portada ── */
@@ -309,7 +342,7 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .td-noanswer { color: #aaa; }
 
 /* ── Protocolo individual ── */
-.proto-header { display: flex; flex-direction: row; align-items: center; margin-bottom: 16px; gap: 12px; border-bottom: 2px solid #0e213d; padding-bottom: 12px; }
+.proto-header { display: flex; flex-direction: row; align-items: center; margin-bottom: 9px; gap: 12px; border-bottom: 2px solid #0e213d; padding-bottom: 7px; }
 .proto-logo { max-height: 56px; max-width: 100px; object-fit: contain; }
 .proto-header-center { flex: 1; display: flex; align-items: center; justify-content: center; }
 .proto-num { font-size: 10px; font-weight: 700; color: #1a4f7a; text-align: right; min-width: 80px; }
@@ -317,12 +350,22 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .section-group-header { background: #e8eef5; padding: 5px 10px; font-size: 10px; font-weight: 700; color: #1a4f7a; text-transform: uppercase; letter-spacing: 0.4px; border-radius: 4px; margin: 8px 0 4px 0; }
 
 /* ── Info grid por protocolo ── */
-.proto-info-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.proto-info-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: 5px; }
 .proto-info-row { display: flex; flex-direction: row; gap: 6px; }
 .proto-info-cell { flex: 1; background: #f4f6f9; border-radius: 5px; padding: 5px 9px; display: flex; flex-direction: column; }
 .proto-info-label { font-size: 8px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.3px; }
 .proto-info-value { font-size: 10px; font-weight: 600; color: #1a1a2e; margin-top: 1px; }
-.proto-divider { border: none; border-top: 2px solid #1a4f7a; margin: 10px 0; }
+/* v43.4 — Encabezado de datos generales COMPACTO (ahorra espacio vertical). */
+.proto-info-compact { gap: 2px; margin-bottom: 5px; }
+.proto-info-compact .proto-info-row { gap: 3px; }
+.proto-info-compact .proto-info-cell { padding: 2px 6px; border-radius: 3px; }
+.proto-info-compact .proto-info-label { font-size: 6.5px; }
+.proto-info-compact .proto-info-value { font-size: 8.5px; margin-top: 0; }
+.proto-divider { border: none; border-top: 2px solid #1a4f7a; margin: 5px 0; }
+/* v43.4 — El primer bloque de cada columna arranca SIN margen superior, para que
+   ambas columnas (y la versión 1 columna) tengan exactamente el mismo offset
+   respecto a la línea superior. */
+.numcol > *:first-child { margin-top: 0 !important; }
 
 /* ── Footer firma (fijado al fondo de cada página) ── */
 .proto-footer { position: absolute; bottom: 32px; left: 36px; right: 36px; border-top: 1px solid #ddd; padding-top: 12px; display: flex; flex-direction: row; align-items: flex-end; gap: 16px; }
@@ -524,7 +567,7 @@ function buildSummaryTable(
     const pg = pageMap.get(p.id) ?? '';
     return `
 <tr>
-  <td><a href="#protocol-${p.id}" style="color:#1a4f7a;text-decoration:none;"><strong>${escHtml(p.protocolNumber)}</strong></a></td>
+  <td><a href="#protocol-${p.id}" style="color:#1a4f7a;text-decoration:none;"><strong>${escHtml((p as any).protocolCode ? `${(p as any).protocolCode} · ${p.protocolNumber}` : p.protocolNumber)}</strong></a></td>
   <td>${escHtml(p.locationReference)}</td>
   <td><span class="status-badge" style="background:${sc}">${sl}</span></td>
   <td>${escHtml(filledName)}</td>
@@ -562,6 +605,97 @@ function buildSummaryTable(
 
 const ROWS_PER_PAGE = 20;
 
+// ── Parte B: protocolos numéricos → PDF con el formato del audit screen ──────
+
+/** Mapea los modelos WatermelonDB (camelCase) al shape plano del helper. */
+function toNumericPdfItems(items: ProtocolItem[]): NumericPdfItem[] {
+  return items.map(it => ({
+    id: it.id,
+    item_description: it.itemDescription,
+    validation_method: it.validationMethod,
+    partida_item: it.partidaItem,
+    comments: it.comments,
+    section: it.section,
+  }));
+}
+
+// v43.6 — El croquis se inserta como un BLOQUE numérico (igual que un gráfico), no en
+// página dedicada. El PESO depende solo de twoColumn → idéntico en conteo y render
+// (el conteo pasa croquisB64=null = placeholder, mismo peso). Así "Página X de Y" no
+// se desfasa aunque la captura del mapa falle.
+const CROQUIS_ROW_PX = 24;   // espejo de ROW_PX en numericPdfHtml
+
+/** Fila de leyenda: swatch (cuadro o punto) + etiqueta. */
+function croquisLegendRow(swatch: string, label: string): string {
+  return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">${swatch}<span style="font-size:9px;color:#333;line-height:1.15;">${escHtml(label)}</span></div>`;
+}
+/** Leyenda del croquis (a la DERECHA del mapa, como la de un gráfico). El título es el
+ *  mismo "Croquis de ubicación del ensayo". `mapName` va en plomo para no resaltar. */
+function croquisLegendHtml(legend: CroquisLegend | null): string {
+  if (!legend) {
+    return `<div style="font-size:9.5px;font-weight:700;color:#6b7280;margin-bottom:6px;">Croquis de ubicación del ensayo</div>`;
+  }
+  const dot = `<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#c0392b;border:1.5px solid #fff;box-shadow:0 0 0 1px #c0392b;flex-shrink:0;"></span>`;
+  const box = (c: string) => `<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${c}66;border:1.5px solid ${c};flex-shrink:0;"></span>`;
+  // Orden: ensayo (rojo) → otros sectores (plomo) → sector(es) activo(s) (su color/nombre).
+  let rows = croquisLegendRow(dot, legend.pointLabel);
+  if (legend.hasOtherSectors) rows += croquisLegendRow(box('#9ca3af'), 'Otros sectores');
+  for (const s of legend.activeSectors) rows += croquisLegendRow(box(s.color), s.name);
+  return `
+    <div style="font-size:9.5px;font-weight:700;color:#6b7280;margin-bottom:6px;">Croquis de ubicación del ensayo</div>
+    ${rows}
+    ${legend.mapName ? `<div style="font-size:8.5px;color:#9ca3af;margin-top:5px;font-style:italic;">${escHtml(legend.mapName)}</div>` : ''}`;
+}
+/** Figura de croquis: mapa a la IZQUIERDA + leyenda a la DERECHA (como un gráfico). */
+function croquisFigureHtml(croquisB64: string | null, legend: CroquisLegend | null, imgWidth: number): string {
+  const img = croquisB64
+    ? `<img src="${croquisB64}" style="display:block;width:${imgWidth}px;aspect-ratio:4/3;object-fit:cover;border:1px solid #d8dee6;border-radius:5px;"/>`
+    : `<div style="width:${imgWidth}px;aspect-ratio:4/3;min-height:${Math.round(imgWidth * 0.75)}px;border:1px dashed #d8dee6;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:10px;">Croquis no disponible</div>`;
+  return `<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin:8px 0 6px;page-break-inside:avoid;">
+    <div style="flex:0 0 ${imgWidth}px;">${img}</div>
+    <div style="flex:0 1 auto;min-width:0;">${croquisLegendHtml(legend)}</div>
+  </div>`;
+}
+function croquisNumericBlock(twoColumn: boolean, croquisB64: string | null, legend: CroquisLegend | null = null): NumericPdfBlock {
+  // 2 col: angosto (150) para dejar sitio a la leyenda. 1 col: aprovecha el ancho (380).
+  const w = twoColumn ? 150 : 380;
+  const h = Math.round(w * 0.75);    // 4:3
+  return {
+    html: croquisFigureHtml(croquisB64, legend, w),
+    weight: Math.max(6, Math.round((h + 22) / CROQUIS_ROW_PX)),
+  };
+}
+
+/** Nº de páginas que ocupará un protocolo (clásico o numérico). El conteo del
+ *  primer pase DEBE coincidir con el render para no desfasar "Página X de Y".
+ *  v43.4 — usa la MISMA config de impresión (presupuesto/2 columnas/letra) que el
+ *  render real, leyendo la config del tipo (idProtocolo).
+ *  v43.6 — `croquisInline` reserva el bloque del croquis (start/end) para que el conteo
+ *  coincida con el render. */
+function protoPageCount(items: ProtocolItem[], idProtocolo: string | null = null, croquisInline = false): number {
+  const cfg = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
+  const fScale = PRINT_FONT_SCALE[cfg.font_level];
+  const numericItems = toNumericPdfItems(items);
+  if (isNumericProtocol(numericItems)) {
+    try {
+      // v43.6 — Usar EXACTAMENTE el mismo chartWidth que el render: si no, el gráfico
+      // pesa distinto (default 640 vs 440·escala) y el conteo se desfasa del render.
+      const gScale = PRINT_GRAPH_SCALE[cfg.graph_size];
+      const chartWidth = Math.round((cfg.two_column ? 210 : 440) * gScale);
+      const blocks = buildNumericProtocolBlocks(numericItems, { fontScale: fScale, twoColumn: cfg.two_column, chartWidth, splitTables: cfg.split_tables });
+      if (croquisInline) {
+        const cb = croquisNumericBlock(cfg.two_column, null);
+        cfg.croquis.placement === 'start' ? blocks.unshift(cb) : blocks.push(cb);
+      }
+      const perCol = Math.max(12, Math.round(cfg.col_budget / fScale));
+      const cols = paginateNumericBlocks(blocks, perCol, cfg.split_tables).length;
+      return cfg.two_column ? Math.max(1, Math.ceil(cols / 2)) : Math.max(1, cols);
+    } catch { /* estructura inesperada → conteo clásico */ }
+  }
+  const rpp = Math.max(8, Math.round(ROWS_PER_PAGE / fScale));
+  return Math.max(1, Math.ceil(items.length / rpp));
+}
+
 function buildProtocolPages(
   protocol: Protocol,
   items: ProtocolItem[],
@@ -575,11 +709,25 @@ function buildProtocolPages(
   specialty: string | null,
   idProtocolo: string | null,
   locationOnly: string | null,
+  qrImg: string | null = null,   // v43.6 — QR del ensayo como data-URI SVG (deep-link flow://protocol/…)
+  croquisB64: string | null = null,   // v43.5 — croquis (mapa capturado a PNG) del ensayo
+  croquisInline = false,   // v43.6 — insertar el croquis como SECCIÓN (start/end per cfg)
+  croquisLegend: CroquisLegend | null = null,   // v43.6 — leyenda a la derecha del mapa
 ): string {
   const filledName = protocol.filledById ? (userMap.get(protocol.filledById)?.fullName ?? '—') : '—';
   const signedName = protocol.signedById ? (userMap.get(protocol.signedById)?.fullName ?? signerName) : signerName;
   const sc = statusColor(protocol.status);
   const sl = statusLabel(protocol.status);
+  // v42d — En ensayos NUMÉRICOS, Datos Generales no lleva "Ubicación/Especialidad"
+  // (se trabaja por coordenadas/sector, igual que el Audit). Clásicos: sin cambio.
+  const isNumeric = isNumericProtocol(toNumericPdfItems(items));
+  // v43.4 — Config de impresión por tipo de ensayo (idProtocolo).
+  const cfg = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
+  const fontScale = PRINT_FONT_SCALE[cfg.font_level];
+  const headerColor = getPrintHeaderColor(_pdfFlags);   // color GLOBAL para todos los ensayos
+  const coordsStr = (protocol.latitude != null && protocol.longitude != null)
+    ? `${Number(protocol.latitude).toFixed(6)}, ${Number(protocol.longitude).toFixed(6)}`
+    : 'Sin coordenadas';
 
   const logoHtml = logoB64
     ? `<img src="${logoB64}" class="proto-logo" alt="Logo"/>`
@@ -596,51 +744,38 @@ function buildProtocolPages(
   <div class="proto-header">
     ${logoHtml}
     <div class="proto-header-center">
-      <div class="proto-name">${escHtml(protocol.protocolNumber)}</div>
+      <div class="proto-name">${escHtml((protocol as any).protocolCode ? `${(protocol as any).protocolCode} — ${protocol.protocolNumber}` : protocol.protocolNumber)}</div>
     </div>
     <div class="proto-num">
       <span class="status-badge" style="background:${sc}">${sl}</span>
     </div>
   </div>
-  <div class="proto-info-grid">
-    <div class="proto-info-row">
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Proyecto</span>
-        <span class="proto-info-value">${escHtml(projectName)}</span>
-      </div>
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Fecha</span>
-        <span class="proto-info-value">${today}</span>
-      </div>
-    </div>
-    <div class="proto-info-row">
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Supervisor</span>
-        <span class="proto-info-value">${escHtml(filledName)}</span>
-      </div>
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Fecha realización</span>
-        <span class="proto-info-value">${fmtDateTime(protocol.filledAt ?? protocol.submittedAt)}</span>
-      </div>
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Fecha aprobación</span>
-        <span class="proto-info-value">${fmtDateTime(protocol.signedAt)}</span>
-      </div>
-    </div>
-    <div class="proto-info-row">
-      <div class="proto-info-cell">
-        <span class="proto-info-label">ID Protocolo</span>
-        <span class="proto-info-value">${escHtml(idProtocolo ?? protocol.protocolNumber)}</span>
-      </div>
-      <div class="proto-info-cell">
-        <span class="proto-info-label">Ubicación</span>
-        <span class="proto-info-value">${escHtml(locationOnly ?? protocol.locationReference)}</span>
-      </div>
-      ${specialty
-        ? `<div class="proto-info-cell"><span class="proto-info-label">Especialidad</span><span class="proto-info-value">${escHtml(specialty)}</span></div>`
-        : '<div class="proto-info-cell" style="background:transparent;box-shadow:none;"></div>'
-      }
-    </div>
+  <div style="display:flex;gap:10px;align-items:flex-start;">
+  ${(() => {
+    // v43.5 — Encabezado de datos generales: el usuario elige QUÉ campos van
+    // (header_fields) y el nivel define el N° de FILAS (3/2/1). Los campos elegidos se
+    // reparten en esas filas (izquierda→derecha).
+    const cell = (label: string, value: string) => `<div class="proto-info-cell"><span class="proto-info-label">${escHtml(label)}</span><span class="proto-info-value">${escHtml(value)}</span></div>`;
+    // Valor de cada campo disponible.
+    const fieldHtml: Record<string, string> = {
+      proyecto: cell('Proyecto', projectName),
+      fecha: cell('Fecha', today),
+      supervisor: cell('Supervisor', filledName),
+      f_realizacion: cell('Fecha realización', fmtDateTime(protocol.filledAt ?? protocol.submittedAt)),
+      f_aprobacion: cell('Fecha aprobación', fmtDateTime(protocol.signedAt)),
+      id_protocolo: cell('ID Protocolo', idProtocolo ?? protocol.protocolNumber),
+      ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', locationOnly ?? protocol.locationReference),
+      especialidad: !isNumeric && specialty ? cell('Especialidad', specialty) : '',
+    };
+    const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
+    const nRows = PRINT_HEADER_ROWS[cfg.header_size];
+    // Repartir los campos en nRows filas, lo más parejo posible.
+    const perRow = Math.max(1, Math.ceil(cells.length / nRows));
+    let rows = '';
+    for (let i = 0; i < cells.length; i += perRow) rows += `<div class="proto-info-row">${cells.slice(i, i + perRow).join('')}</div>`;
+    const cls = cfg.header_size === 'normal' ? '' : ' proto-info-compact';
+    return `<div class="proto-info-grid${cls}" style="flex:1;">${rows}`;
+  })()}
     ${protocol.rejectionReason ? `
     <div class="proto-info-row">
       <div class="proto-info-cell" style="background:#fce8e6;flex:1;">
@@ -649,19 +784,117 @@ function buildProtocolPages(
       </div>
     </div>` : ''}
   </div>
+  ${(qrImg && cfg.show_qr) ? (() => {
+    // v43.6 — QR como <svg> INLINE (se renderiza siempre en el motor de impresión, a
+    // diferencia de PNG/canvas o data-URI). El SVG viene SIN width → le inyectamos
+    // width/height EXACTOS para que aparezca Y respete el tamaño por nivel de encabezado.
+    const qrPx = cfg.header_size === 'xcompact' ? 44 : cfg.header_size === 'compact' ? 54 : 100;
+    const showCode = cfg.header_size === 'normal';
+    const qrSized = qrImg.replace('<svg ', `<svg width="${qrPx}" height="${qrPx}" preserveAspectRatio="xMidYMid meet" style="display:block;width:${qrPx}px;height:${qrPx}px;" `);
+    return `<div style="display:flex;flex-direction:column;align-items:center;width:${qrPx + 6}px;flex-shrink:0;">
+    ${qrSized}
+    ${showCode ? `<div style="font-size:11px;font-weight:bold;color:#0e213d;margin-top:2px;letter-spacing:0.3px;">${escHtml((protocol as any).protocolCode ?? '')}</div>` : ''}
+  </div>`;
+  })() : ''}
+  </div>
   <hr class="proto-divider"/>`;
 
-  // Dividir ítems en chunks de ROWS_PER_PAGE
+  // v43.6 — Croquis como SECCIÓN (no página dedicada). Se inserta como un bloque más
+  // (igual que un gráfico) al inicio o al final del contenido, según cfg.croquis.placement.
+  const wantCroquisInline = croquisInline && cfg.croquis.show && (cfg.croquis.placement === 'start' || cfg.croquis.placement === 'end');
+
+  // Footer común a ambos formatos (clásico y numérico).
+  const footerFor = (pageIdx: number) => `
+  <div class="proto-footer">
+    <div class="signature-block">
+      ${signatureHtml}
+      <div class="signature-name">${escHtml(signedName)}</div>
+      <div class="signature-role">Jefe de Calidad</div>
+    </div>
+    <div class="footer-right">
+      Dosier de Calidad<br/>
+      Página ${globalPageStart + pageIdx} de ${totalDocPages}
+    </div>
+  </div>`;
+
+  // ── Parte B: protocolo NUMÉRICO → mismo formato que la pantalla de audit ──
+  // (secciones con banda, encabezados col-, fila de letras, ✓/✗ por fila y
+  // gráficos numerados). Los clásicos siguen el path de abajo sin cambios.
+  const numericItems = toNumericPdfItems(items);
+  if (isNumericProtocol(numericItems)) {
+    try {
+      // v43.4 — Config de impresión: tamaño de gráfico + letra compacta + 2 columnas.
+      const gScale = PRINT_GRAPH_SCALE[cfg.graph_size];
+      // v43.4 — El gráfico va a la IZQUIERDA y la leyenda+título a la derecha, así que
+      // el gráfico ocupa ~60% del ancho disponible (deja sitio a la leyenda).
+      const baseChartW = cfg.two_column ? 210 : 440;
+      const chartWidth = Math.round(baseChartW * gScale);
+      const blocks = buildNumericProtocolBlocks(numericItems, {
+        protocolCode: (protocol as any).protocolCode ?? null,
+        auxTables: _pdfAuxTables,
+        fontScale, twoColumn: cfg.two_column, chartWidth, headerColor, splitTables: cfg.split_tables,
+      });
+      // v43.6 — Croquis como un bloque/sección más (mismo peso que en protoPageCount).
+      if (wantCroquisInline) {
+        const cb = croquisNumericBlock(cfg.two_column, croquisB64, croquisLegend);
+        cfg.croquis.placement === 'start' ? blocks.unshift(cb) : blocks.push(cb);
+      }
+      // Presupuesto por columna = altura ÚTIL de una página. v43.6 — configurable por
+      // tipo (cfg.col_budget, default 39): más alto = más contenido por columna antes de
+      // saltar de página; demasiado alto desborda hasta el pie. /fontScale con letra
+      // compacta. Con split_tables la tabla siguiente rellena lo que sobra del gráfico.
+      const perCol = Math.max(12, Math.round(cfg.col_budget / fontScale));
+      let contents: string[];
+      if (cfg.two_column) {
+        // Empaque EXPLÍCITO: cada "columna" se empaca a la altura de página (bloques
+        // atómicos, nunca se parte una tabla); luego 2 columnas por hoja, lado a lado.
+        const colsHtml = paginateNumericBlocks(blocks, perCol, cfg.split_tables);
+        contents = [];
+        for (let i = 0; i < colsHtml.length; i += 2) {
+          // Línea divisoria sutil (plomo) entre las dos columnas. Lógica PROPIA: lleva
+          // un margen inferior para terminar por ENCIMA del fondo de las columnas, así
+          // nunca toca la línea del pie de página (independiente del llenado de filas).
+          contents.push(`<div style="display:flex;gap:14px;align-items:stretch;">
+  <div class="numcol" style="flex:1;min-width:0;">${colsHtml[i]}</div>
+  <div style="flex:0 0 1px;background:#d9dde3;align-self:stretch;margin-bottom:14px;"></div>
+  <div class="numcol" style="flex:1;min-width:0;">${colsHtml[i + 1] ?? ''}</div>
+</div>`);
+        }
+        if (contents.length === 0) contents = [''];
+      } else {
+        contents = paginateNumericBlocks(blocks, perCol, cfg.split_tables).map(c => `<div class="numcol">${c}</div>`);
+      }
+      return contents.map((content, pageIdx) => `
+<div class="page"${pageIdx === 0 ? ` id="protocol-${protocol.id}"` : ''}>
+  ${headerHtml}
+  ${pageIdx > 0 ? '<div style="font-size:9px;color:#888;margin-bottom:6px;">— Continuación del protocolo —</div>' : ''}
+  ${content}
+  ${footerFor(pageIdx)}
+</div>`).join('');
+    } catch (e) {
+      console.warn('[Dossier] render numérico falló — fallback al formato clásico:', e);
+    }
+  }
+
+  // Dividir ítems en chunks de ROWS_PER_PAGE. v43.4 — con letra compacta caben más
+  // filas por hoja (clásicos = una sola tabla): rowsPerPage escala con 1/fontScale.
+  const rowsPerPage = Math.max(8, Math.round(ROWS_PER_PAGE / fontScale));
   const chunks: ProtocolItem[][] = [];
-  for (let i = 0; i < items.length; i += ROWS_PER_PAGE) {
-    chunks.push(items.slice(i, i + ROWS_PER_PAGE));
+  for (let i = 0; i < items.length; i += rowsPerPage) {
+    chunks.push(items.slice(i, i + rowsPerPage));
   }
   if (chunks.length === 0) chunks.push([]);
   const totalPages = chunks.length;
 
+  // v43.6 — Croquis como sección en clásicos (start = pág 0 tras header; end = última pág
+  // antes del pie). Mapa a la izquierda + leyenda a la derecha. Los clásicos casi siempre
+  // caben en 1 página, así que no altera el conteo.
+  const croquisClassicHtml = wantCroquisInline ? croquisFigureHtml(croquisB64, croquisLegend, 380) : '';
+  const lastChunkIdx = chunks.length - 1;
+
   return chunks.map((chunk, pageIdx) => {
     const pageNum = pageIdx + 1;
-    let rowNumber = pageIdx * ROWS_PER_PAGE + 1; // numeración global de filas
+    let rowNumber = pageIdx * rowsPerPage + 1; // numeración global de filas
 
     // Generar filas con encabezados de sección al inicio de cada grupo dentro del chunk
     let itemsHtml = '';
@@ -701,31 +934,23 @@ function buildProtocolPages(
 <div class="page"${anchorId}>
   ${headerHtml}
   ${pageIdx > 0 ? `<div style="font-size:9px;color:#888;margin-bottom:6px;">— Continuación de lista de ítems${continuacion} —</div>` : ''}
+  ${(croquisClassicHtml && cfg.croquis.placement === 'start' && pageIdx === 0) ? croquisClassicHtml : ''}
 
-  <table>
+  <table style="font-size:${(10 * fontScale).toFixed(2)}px;">
     <thead>
       <tr>
-        <th style="width:36px;text-align:center;">#</th>
-        <th>Descripción</th>
-        <th style="width:88px;">Método</th>
-        <th style="width:52px;text-align:center;">Conforme</th>
-        <th style="width:140px;">Obs. levantada</th>
+        <th style="width:36px;text-align:center;background:${headerColor};">#</th>
+        <th style="background:${headerColor};">Descripción</th>
+        <th style="width:88px;background:${headerColor};">Método</th>
+        <th style="width:52px;text-align:center;background:${headerColor};">Conforme</th>
+        <th style="width:140px;background:${headerColor};">Obs. levantada</th>
       </tr>
     </thead>
     <tbody>${itemsHtml}</tbody>
   </table>
+  ${(croquisClassicHtml && cfg.croquis.placement === 'end' && pageIdx === lastChunkIdx) ? croquisClassicHtml : ''}
 
-  <div class="proto-footer">
-    <div class="signature-block">
-      ${signatureHtml}
-      <div class="signature-name">${escHtml(signedName)}</div>
-      <div class="signature-role">Jefe de Calidad</div>
-    </div>
-    <div class="footer-right">
-      Dosier de Calidad<br/>
-      Página ${globalPageStart + pageIdx} de ${totalDocPages}
-    </div>
-  </div>
+  ${footerFor(pageIdx)}
 </div>`;
   }).join('');
 }
@@ -741,8 +966,9 @@ async function buildPhotoPanel(
   signerName: string,
   pageNumber: number,
   totalDocPages: number,
+  croquisB64: string | null = null,   // v43.6 — croquis (placement 'photos') ya en base64/data-URI
 ): Promise<string> {
-  if (evidenceUris.length === 0) return '';
+  if (evidenceUris.length === 0 && !croquisB64) return '';
 
   // Detectar orientación y separar
   const orientations = await Promise.all(evidenceUris.map(uri => getImageOrientation(uri)));
@@ -750,6 +976,8 @@ async function buildPhotoPanel(
 
   const verticals: string[] = [];
   const horizontals: string[] = [];
+  // v43.6 — El croquis (4:3 = horizontal) va PRIMERO en el panel. Ya es data-URI.
+  if (croquisB64) horizontals.push(croquisB64);
   for (let i = 0; i < evidenceUris.length; i++) {
     if (!b64s[i]) continue;
     if (orientations[i] === 'portrait') verticals.push(b64s[i]!);
@@ -817,15 +1045,66 @@ async function buildPhotoPanel(
   }).join('');
 }
 
+// ── Página de croquis (mapa capturado) ────────────────────────────────────────
+// v43.5 — Página dedicada con el croquis 4:3 centrado (placement 'start'/'end').
+// Reservar 1 página mantiene exacta la numeración del documento.
+function buildCroquisPage(
+  croquisB64: string,
+  title: string,
+  subtitle: string | null,
+  logoB64: string | null,
+  signB64: string | null,
+  signerName: string,
+  pageNumber: number,
+  totalDocPages: number,
+): string {
+  const signatureHtml = signB64
+    ? `<img src="${signB64}" class="signature-img" alt="Firma"/>`
+    : '<div class="signature-line"></div>';
+  const logoHtml = logoB64
+    ? `<img src="${logoB64}" class="proto-logo" alt="Logo"/>`
+    : '<div style="min-width:80px;"></div>';
+  return `
+<div class="page">
+  <div class="photo-page-header">
+    ${logoHtml}
+    <div class="photo-panel-title">${escHtml(title)}${subtitle ? `<div style="font-size:10px;font-weight:600;color:#555;margin-top:2px;">${escHtml(subtitle)}</div>` : ''}</div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:center;margin-top:18px;">
+    <div style="width:78%;max-width:560px;">
+      <img src="${croquisB64}" style="display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid #d8dee6;border-radius:6px;"/>
+      <div style="font-size:9px;color:#888;text-align:center;margin-top:5px;">Croquis de ubicación — sectores del proyecto + ensayo(s) ploteado(s)</div>
+    </div>
+  </div>
+  <div class="proto-footer">
+    <div class="signature-block">
+      ${signatureHtml}
+      <div class="signature-name">${escHtml(signerName)}</div>
+      <div class="signature-role">Jefe de Calidad</div>
+    </div>
+    <div class="footer-right">
+      Dosier de Calidad<br/>
+      Página ${pageNumber} de ${totalDocPages}
+    </div>
+  </div>
+</div>`;
+}
+
 // ── Función principal ─────────────────────────────────────────────────────────
 
 export async function exportDossierPdf(
   projectId: string,
   projectName: string,
   currentUserId: string,
+  /** Si se pasa, solo se exportan estos protocolos (filtros del Dossier). */
+  protocolIds?: string[] | null,
+  /** v43.5 — croquis (mapa→PNG + leyenda) por protocolId, capturados antes de exportar. */
+  croquisByProtocol: Record<string, CroquisResult> = {},
 ): Promise<string> {
+  const idSet = protocolIds && protocolIds.length > 0 ? new Set(protocolIds) : null;
+  await loadPdfAuxTables(projectId);   // v41 — BUSCAR() en el PDF
   // ── 1. Cargar datos ──────────────────────────────────────────────────────
-  const [protocols, allProtocols, allUsers, locations, settings, projectArr, allTemplates] = await Promise.all([
+  const [protocolsAll, allProtocols, allUsers, locations, settings, projectArr, allTemplates] = await Promise.all([
     protocolsCollection
       .query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')))
       .fetch(),
@@ -838,6 +1117,9 @@ export async function exportDossierPdf(
     projectsCollection.query(Q.where('id', projectId)).fetch(),
     protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
   ]);
+
+  // Aplica el filtro de selección del Dossier (rango de fechas / estado / tipo / etc.).
+  const protocols = idSet ? protocolsAll.filter(p => idSet.has(p.id)) : protocolsAll;
 
   const userMap = new Map<string, User>(allUsers.map(u => [u.id, u]));
   const locationMap = new Map(locations.map(l => [l.id, l]));
@@ -1007,12 +1289,20 @@ export async function exportDossierPdf(
     }
     pageMap.set(p.id, _calcPage); // page where this protocol starts
     const its = itemsByProtocol.get(p.id) ?? [];
-    const itemPages = Math.max(1, Math.ceil(its.length / ROWS_PER_PAGE));
+    const idpForCount = p.templateId ? (templateMap.get(p.templateId)?.idProtocolo ?? null) : null;
+    const cfgCount = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idpForCount);
+    const hasCoordsC = (p as any).latitude != null && (p as any).longitude != null;
+    // v43.6 — Croquis como sección inline (start/end): reservar su bloque en el conteo.
+    const croquisInlineC = cfgCount.croquis.show && (cfgCount.croquis.placement === 'start' || cfgCount.croquis.placement === 'end') && hasCoordsC;
+    const itemPages = protoPageCount(its, idpForCount, croquisInlineC);
     totalDocPages += itemPages;
     _calcPage += itemPages;
+    // Panel fotográfico + croquis-en-fotos (placement 'photos').
+    const croquisForPhotosC = cfgCount.croquis.show && cfgCount.croquis.placement === 'photos' && !!croquisByProtocol[p.id];
     const photoUrisCount = (evidencesByProtocol.get(p.id) ?? []).length;
-    if (photoUrisCount > 0) {
-      const photoPages = Math.ceil(photoUrisCount / 8);
+    const effPhotos = (cfgCount.show_photos ? photoUrisCount : 0) + (croquisForPhotosC ? 1 : 0);
+    if (effPhotos > 0) {
+      const photoPages = Math.ceil(effPhotos / 8);
       totalDocPages += photoPages;
       _calcPage += photoPages;
     }
@@ -1027,12 +1317,19 @@ export async function exportDossierPdf(
   for (let i = 0; i < protocols.length; i++) {
     const p = protocols[i];
     const its = itemsByProtocol.get(p.id) ?? [];
-    const its_itemPages = Math.max(1, Math.ceil(its.length / ROWS_PER_PAGE));
     const location = p.locationId ? locationMap.get(p.locationId) : undefined;
     const specialty = location?.specialty ?? null;
     const locationOnly = location?.locationOnly ?? null;
     const template = p.templateId ? templateMap.get(p.templateId) : undefined;
     const idProtocolo = template?.idProtocolo ?? null;
+    const cfgP = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
+    const hasCoords = (p as any).latitude != null && (p as any).longitude != null;
+    const cro = croquisByProtocol[p.id];
+    const croquisB64 = cro?.img ?? null;
+    const croquisLegend = cro?.legend ?? null;
+    const croquisInline = cfgP.croquis.show && (cfgP.croquis.placement === 'start' || cfgP.croquis.placement === 'end') && hasCoords;
+    const croquisForPhotos = cfgP.croquis.show && cfgP.croquis.placement === 'photos' && !!croquisB64;
+    const its_itemPages = protoPageCount(its, idProtocolo, croquisInline);
 
     // Insert section cover at group boundary
     if (locationOnly && locationOnly !== prevLocationOnly) {
@@ -1054,6 +1351,9 @@ export async function exportDossierPdf(
       } catch { /* use project default */ }
     }
 
+    let qrImg: string | null = null;
+    try { qrImg = (await generateProtocolQrImg({ idProtocolo, externalId: (p as any).externalId ?? null, protocolUuid: p.id })).svg; } catch { /* QR opcional */ }
+
     const html = buildProtocolPages(
       p,
       its,
@@ -1067,12 +1367,18 @@ export async function exportDossierPdf(
       specialty,
       idProtocolo,
       locationOnly,
+      qrImg,
+      croquisB64,
+      croquisInline,   // v43.6 — croquis como sección (start/end)
+      croquisLegend,
     );
     pageOffset += its_itemPages;
-    // Panel fotográfico (si hay fotos)
-    const photoUris = evidencesByProtocol.get(p.id) ?? [];
+
+    // Panel fotográfico (fotos del tipo + croquis si placement='photos').
+    const photoUris = (cfgP.show_photos ? (evidencesByProtocol.get(p.id) ?? []) : []);
     const locRef = locationOnly && specialty ? `${locationOnly}-${specialty}` : (locationOnly ?? specialty ?? null);
-    const photoHtml = await buildPhotoPanel(
+    const effPhotosCount = photoUris.length + (croquisForPhotos ? 1 : 0);
+    const photoHtml = effPhotosCount > 0 ? await buildPhotoPanel(
       p.protocolNumber ?? p.id,
       locRef,
       photoUris,
@@ -1081,8 +1387,9 @@ export async function exportDossierPdf(
       protoSignerName,
       pageOffset,
       totalDocPages,
-    );
-    if (photoHtml) pageOffset += Math.ceil(photoUris.length / 8);
+      croquisForPhotos ? croquisB64 : null,
+    ) : '';
+    if (photoHtml) pageOffset += Math.ceil(effPhotosCount / 8);
     protocolPagesHtml.push(html + photoHtml);
   }
   const protocolPages = protocolPagesHtml.join('');
@@ -1126,7 +1433,12 @@ export async function exportSingleProtocolPdf(
   projectId: string,
   projectName: string,
   currentUserId: string,
+  /** v43.5 — croquis (mapa→PNG + leyenda) del ensayo, capturado antes de exportar. */
+  croquis: CroquisResult | null = null,
 ): Promise<string> {
+  const croquisB64 = croquis?.img ?? null;
+  const croquisLegend = croquis?.legend ?? null;
+  await loadPdfAuxTables(projectId);   // v41 — BUSCAR() en el PDF
   // Cargar datos necesarios
   const [protocol, allUsers, locations, settings, allTemplates] = await Promise.all([
     protocolsCollection.find(protocolId),
@@ -1201,9 +1513,18 @@ export async function exportSingleProtocolPdf(
   const template = protocol.templateId ? templateMap.get(protocol.templateId) : undefined;
   const idProtocolo = template?.idProtocolo ?? null;
 
-  const itemPages = Math.max(1, Math.ceil(its.length / ROWS_PER_PAGE));
-  const photoPages = photoUris.length > 0 ? Math.ceil(photoUris.length / 8) : 0;
+  const cfgP = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
+  const hasCoords = (protocol as any).latitude != null && (protocol as any).longitude != null;
+  const croquisInline = !!croquisB64 && cfgP.croquis.show && (cfgP.croquis.placement === 'start' || cfgP.croquis.placement === 'end') && hasCoords;
+  const croquisForPhotos = !!croquisB64 && cfgP.croquis.show && cfgP.croquis.placement === 'photos';
+  const itemPages = protoPageCount(its, idProtocolo, croquisInline);
+  const visiblePhotos = cfgP.show_photos ? photoUris : [];
+  const effPhotos = visiblePhotos.length + (croquisForPhotos ? 1 : 0);
+  const photoPages = effPhotos > 0 ? Math.ceil(effPhotos / 8) : 0;
   const totalPages = itemPages + photoPages;
+
+  let qrImg: string | null = null;
+  try { qrImg = (await generateProtocolQrImg({ idProtocolo, externalId: (protocol as any).externalId ?? null, protocolUuid: protocol.id })).svg; } catch { /* QR opcional */ }
 
   const protocolHtml = buildProtocolPages(
     protocol,
@@ -1218,19 +1539,24 @@ export async function exportSingleProtocolPdf(
     specialty,
     idProtocolo,
     locationOnly,
+    qrImg,
+    croquisB64,
+    croquisInline,   // v43.6 — croquis como sección (start/end)
+    croquisLegend,
   );
 
   const locRef = locationOnly && specialty ? `${locationOnly}-${specialty}` : (locationOnly ?? specialty ?? null);
-  const photoHtml = await buildPhotoPanel(
+  const photoHtml = effPhotos > 0 ? await buildPhotoPanel(
     protocol.protocolNumber ?? protocol.id,
     locRef,
-    photoUris,
+    visiblePhotos,
     logoB64,
     signB64,
     protoSignerName,
     itemPages + 1,
     totalPages,
-  );
+    croquisForPhotos ? croquisB64 : null,
+  ) : '';
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -1252,6 +1578,236 @@ ${protocolHtml}${photoHtml}
     .replace(/[^a-zA-Z0-9\-_]/g, '_');
   const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const targetUri = `${FileSystem.documentDirectory}PROTOCOLO-${safeName}-${dateStr}.pdf`;
+  try { await FileSystem.deleteAsync(targetUri, { idempotent: true }); } catch {}
+  await FileSystem.moveAsync({ from: uri, to: targetUri });
+  return targetUri;
+}
+
+// ── Dossier de MUESTRA (agrupación de ensayos) ───────────────────────────────
+// v43.5 — Página de datos de la muestra (estilo proto-info-grid).
+
+function fmtDepth(from: number | null, to: number | null): string {
+  if (from == null && to == null) return '—';
+  if (from != null && to != null) return `${from} – ${to} m`;
+  return `${from ?? to} m`;
+}
+
+function sampleCoordsStr(s: SampleModel): string {
+  if (s.coordEast != null && s.coordNorth != null) {
+    const sys = s.coordSystem ? `${s.coordSystem} · ` : '';
+    const z = s.coordElevation != null ? ` · Cota ${s.coordElevation}` : '';
+    return `${sys}E ${Number(s.coordEast).toFixed(2)} · N ${Number(s.coordNorth).toFixed(2)}${z}`;
+  }
+  if (s.latitude != null && s.longitude != null) {
+    return `${Number(s.latitude).toFixed(6)}, ${Number(s.longitude).toFixed(6)}`;
+  }
+  return 'Sin coordenadas';
+}
+
+function buildSampleDataPage(
+  sample: SampleModel,
+  sectorName: string | null,
+  locationName: string | null,
+  ensayoCount: number,
+  logoB64: string | null,
+  signB64: string | null,
+  signerName: string,
+  pageNumber: number,
+  totalDocPages: number,
+): string {
+  const logoHtml = logoB64 ? `<img src="${logoB64}" class="proto-logo" alt="Logo"/>` : '<div style="min-width:80px;"></div>';
+  const signatureHtml = signB64 ? `<img src="${signB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
+  const cell = (label: string, value: string) => `<div class="proto-info-cell"><span class="proto-info-label">${escHtml(label)}</span><span class="proto-info-value">${escHtml(value)}</span></div>`;
+
+  let layerStr = '—';
+  if (sample.layerInfoJson) { try { const o = JSON.parse(sample.layerInfoJson); layerStr = typeof o === 'string' ? o : JSON.stringify(o); } catch { layerStr = sample.layerInfoJson; } }
+
+  // Campos en filas de 2 celdas.
+  const cells = [
+    cell('Código de muestra', sample.sampleCode || '—'),
+    cell('Fecha', sample.sampleDate || '—'),
+    cell('Sector', sectorName || '—'),
+    cell('Ubicación', locationName || '—'),
+    cell('Tipo de material', sample.materialType || '—'),
+    cell('Condición', sample.condition || '—'),
+    cell('Profundidad', fmtDepth(sample.depthFrom, sample.depthTo)),
+    cell('Coordenadas', sampleCoordsStr(sample)),
+    cell('Información de capa', layerStr),
+    cell('N° de ensayos', String(ensayoCount)),
+  ];
+  let rows = '';
+  for (let i = 0; i < cells.length; i += 2) rows += `<div class="proto-info-row">${cells.slice(i, i + 2).join('')}</div>`;
+  const notesRow = sample.notes ? `<div class="proto-info-row"><div class="proto-info-cell" style="flex:1;"><span class="proto-info-label">Notas</span><span class="proto-info-value">${escHtml(sample.notes)}</span></div></div>` : '';
+
+  return `
+<div class="page" id="sample-${sample.id}">
+  <div class="proto-header">
+    ${logoHtml}
+    <div style="flex:1;text-align:center;">
+      <div style="font-size:16px;font-weight:800;color:#0e213d;">Muestra ${escHtml(sample.sampleCode || '')}</div>
+      <div style="font-size:10px;color:#666;margin-top:2px;">Datos generales de la muestra</div>
+    </div>
+    <div style="min-width:80px;"></div>
+  </div>
+  <hr class="proto-divider"/>
+  <div class="proto-info-grid">${rows}${notesRow}</div>
+  <div class="proto-footer">
+    <div class="signature-block">
+      ${signatureHtml}
+      <div class="signature-name">${escHtml(signerName)}</div>
+      <div class="signature-role">Jefe de Calidad</div>
+    </div>
+    <div class="footer-right">
+      Dosier de Calidad — Muestra<br/>
+      Página ${pageNumber} de ${totalDocPages}
+    </div>
+  </div>
+</div>`;
+}
+
+/**
+ * Exporta un dossier para una o varias MUESTRAS: portada + por cada muestra una página
+ * de datos + sus ensayos (mismo render que el dossier por tipo) + un croquis con TODOS
+ * los ensayos de la muestra ploteados (si se capturó). `croquisBySample` = {sampleId: png}.
+ */
+export async function exportSampleDossierPdf(
+  sampleIds: string[],
+  projectId: string,
+  projectName: string,
+  currentUserId: string,
+  croquisBySample: Record<string, string> = {},
+): Promise<string> {
+  await loadPdfAuxTables(projectId);
+  const [samplesAll, allUsers, locations, settings, sectors] = await Promise.all([
+    samplesCollection.query(Q.where('project_id', projectId)).fetch() as Promise<SampleModel[]>,
+    usersCollection.query().fetch(),
+    locationsCollection.query(Q.where('project_id', projectId)).fetch(),
+    getProjectSettings(projectId),
+    projectSectorsCollection.query(Q.where('project_id', projectId)).fetch(),
+  ]);
+  const allTemplates = await protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch();
+  const idSet = new Set(sampleIds);
+  const samples = samplesAll.filter(s => idSet.has(s.id));
+  if (samples.length === 0) throw new Error('No hay muestras seleccionadas.');
+
+  const userMap = new Map<string, User>(allUsers.map(u => [u.id, u]));
+  const locationMap = new Map(locations.map(l => [l.id, l]));
+  const sectorMap = new Map((sectors as any[]).map(s => [s.id, s.name as string]));
+  const templateMap = new Map(allTemplates.map(t => [t.id, t]));
+  const signerName = userMap.get(currentUserId)?.fullName ?? 'Jefe de Calidad';
+
+  // Logo + firma (mismo flujo que el dossier por tipo).
+  let logoB64: string | null = null;
+  const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+  const logoInfo = await FileSystem.getInfoAsync(localLogoUri);
+  if (logoInfo.exists) { logoB64 = await toBase64(localLogoUri); }
+  else {
+    try {
+      const { downloadFromS3 } = require('./S3Service');
+      await downloadFromS3(`logos/project_${projectId}/logo.jpg`, localLogoUri);
+      logoB64 = await toBase64(localLogoUri);
+    } catch { /* sin logo */ }
+  }
+  const signB64 = await toBase64(await getOrDownloadSignatureUri(currentUserId) ?? settings.signatureUri);
+
+  // Ensayos por muestra (no-DRAFT) + ítems/evidencias.
+  const protocolsBySample = new Map<string, Protocol[]>();
+  const itemsByProtocol = new Map<string, ProtocolItem[]>();
+  const evidencesByProtocol = new Map<string, string[]>();
+  for (const s of samples) {
+    const ps = await protocolsCollection
+      .query(Q.where('sample_id', s.id), Q.where('status', Q.notEq('DRAFT')))
+      .fetch() as Protocol[];
+    protocolsBySample.set(s.id, ps);
+    for (const p of ps) {
+      const its = await protocolItemsCollection.query(Q.where('protocol_id', p.id)).fetch() as ProtocolItem[];
+      itemsByProtocol.set(p.id, its);
+      const photoUris: string[] = [];
+      if (its.length > 0) {
+        const evs = await evidencesCollection.query(Q.where('protocol_item_id', Q.oneOf(its.map(i => i.id)))).fetch();
+        photoUris.push(...evs.map(ev => ev.localUri).filter(Boolean) as string[]);
+      }
+      try { const raw = await AsyncStorage.getItem(`protocol_extra_photos_${p.id}`); if (raw) { const ex = JSON.parse(raw); if (Array.isArray(ex)) photoUris.push(...ex); } } catch {}
+      if (photoUris.length > 0) evidencesByProtocol.set(p.id, photoUris);
+    }
+  }
+
+  // ── Conteo de páginas: portada(1) + por muestra: datos(1) + croquis(0/1) + ensayos + fotos
+  let totalDocPages = 1;
+  for (const s of samples) {
+    totalDocPages += 1;                                   // página de datos
+    if (croquisBySample[s.id]) totalDocPages += 1;        // croquis de la muestra
+    for (const p of (protocolsBySample.get(s.id) ?? [])) {
+      const its = itemsByProtocol.get(p.id) ?? [];
+      const idp = p.templateId ? (templateMap.get(p.templateId)?.idProtocolo ?? null) : null;
+      totalDocPages += protoPageCount(its, idp);
+      const photoCount = (evidencesByProtocol.get(p.id) ?? []).length;
+      if (photoCount > 0 && getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idp).show_photos) {
+        totalDocPages += Math.ceil(photoCount / 8);
+      }
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  const today = fmtDate(Date.now());
+  const totalEnsayos = samples.reduce((n, s) => n + (protocolsBySample.get(s.id)?.length ?? 0), 0);
+  const coverPage = buildCoverPage(projectName, logoB64, totalEnsayos, totalEnsayos, today, signerName, signB64);
+
+  let cursor = 2;   // tras la portada
+  const pages: string[] = [];
+  for (const s of samples) {
+    const ps = protocolsBySample.get(s.id) ?? [];
+    const sectorName = s.sectorId ? (sectorMap.get(s.sectorId) ?? null) : null;
+    const loc = s.locationId ? locationMap.get(s.locationId) : undefined;
+    const locationName = loc?.locationOnly ?? loc?.name ?? null;
+
+    pages.push(buildSampleDataPage(s, sectorName, locationName, ps.length, logoB64, signB64, signerName, cursor, totalDocPages));
+    cursor += 1;
+
+    const croquisB64 = croquisBySample[s.id] ?? null;
+    if (croquisB64) {
+      pages.push(buildCroquisPage(croquisB64, `Croquis — Muestra ${s.sampleCode || ''}`, locationName, logoB64, signB64, signerName, cursor, totalDocPages));
+      cursor += 1;
+    }
+
+    for (const p of ps) {
+      const its = itemsByProtocol.get(p.id) ?? [];
+      const location = p.locationId ? locationMap.get(p.locationId) : undefined;
+      const specialty = location?.specialty ?? null;
+      const locOnly = location?.locationOnly ?? null;
+      const idProtocolo = p.templateId ? (templateMap.get(p.templateId)?.idProtocolo ?? null) : null;
+      let qrImg: string | null = null;
+      try { qrImg = (await generateProtocolQrImg({ idProtocolo, externalId: (p as any).externalId ?? null, protocolUuid: p.id })).svg; } catch {}
+      const html = buildProtocolPages(p, its, userMap, logoB64, signB64, signerName, cursor, totalDocPages, projectName, specialty, idProtocolo, locOnly, qrImg, null);
+      cursor += protoPageCount(its, idProtocolo);
+      const photoUris = evidencesByProtocol.get(p.id) ?? [];
+      const showPhotos = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo).show_photos;
+      const locRef = locOnly && specialty ? `${locOnly}-${specialty}` : (locOnly ?? specialty ?? null);
+      const photoHtml = (showPhotos && photoUris.length > 0)
+        ? await buildPhotoPanel(p.protocolNumber ?? p.id, locRef, photoUris, logoB64, signB64, signerName, cursor, totalDocPages)
+        : '';
+      if (photoHtml) cursor += Math.ceil(photoUris.length / 8);
+      pages.push(html + photoHtml);
+    }
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dosier de Muestras — ${escHtml(projectName)}</title>
+<style>${CSS}</style>
+</head>
+<body>
+${coverPage}${pages.join('')}
+</body>
+</html>`;
+
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const targetUri = `${FileSystem.documentDirectory}MUESTRAS-${samples.length}-${dateStr}.pdf`;
   try { await FileSystem.deleteAsync(targetUri, { idempotent: true }); } catch {}
   await FileSystem.moveAsync({ from: uri, to: targetUri });
   return targetUri;

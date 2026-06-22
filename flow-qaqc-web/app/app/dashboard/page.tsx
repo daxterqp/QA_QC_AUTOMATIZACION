@@ -19,6 +19,7 @@ import {
   useUsersMap,
 } from '@hooks/useHistorical';
 import { useAuth } from '@lib/auth-context';
+import { useI18n } from '@lib/i18n';
 import { cn } from '@lib/utils';
 import type { Protocol, Location, PlanAnnotation } from '@/types';
 
@@ -67,6 +68,7 @@ function AnalysisCard({
   href?: string;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const total = a + b;
   const pctA = total > 0 ? Math.round((a / total) * 100) : 0;
   const pctB = 100 - pctA;
@@ -77,10 +79,10 @@ function AnalysisCard({
       onClick={href ? () => router.push(href) : undefined}
     >
       <p className="text-xs font-bold text-gray-700">{title}</p>
-      {href && <p className="text-[10px] text-gray-400 -mt-2">Toca para ver detalle</p>}
+      {href && <p className="text-[10px] text-gray-400 -mt-2">{t('webDash.tapForDetail')}</p>}
 
       {total === 0 ? (
-        <p className="text-xs text-gray-400 text-center py-2">Sin datos</p>
+        <p className="text-xs text-gray-400 text-center py-2">{t('webDash.noData')}</p>
       ) : (
         <>
           <div className="flex h-7 rounded-md overflow-hidden w-full">
@@ -123,6 +125,7 @@ function WeeklyBarChart({
   projectId: string;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [specialty, setSpecialty] = useState('');
   const [weekDetail, setWeekDetail] = useState<{ label: string; items: Protocol[] } | null>(null);
 
@@ -169,9 +172,9 @@ function WeeklyBarChart({
   return (
     <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-bold text-gray-700">Avance semanal</p>
+        <p className="text-xs font-bold text-gray-700">{t('webDash.weeklyProgress')}</p>
         <span className="text-xs font-bold text-primary bg-light px-2.5 py-1 rounded-full">
-          {approvedTotal}/{totalLocCount} completados
+          {t('webDash.completedCount', { done: approvedTotal, total: totalLocCount })}
         </span>
       </div>
 
@@ -182,7 +185,7 @@ function WeeklyBarChart({
             className={cn('px-3 py-1 rounded-full text-xs font-semibold border transition-colors',
               !specialty ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-border hover:bg-light')}
           >
-            Todas
+            {t('webDash.all')}
           </button>
           {specialties.map(sp => (
             <button key={sp} onClick={() => setSpecialty(sp)}
@@ -209,7 +212,7 @@ function WeeklyBarChart({
               <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#9ca3af' }} />
               <Tooltip
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                formatter={(v) => [v, 'Aprobados']}
+                formatter={(v) => [v, t('webDash.approvedTooltip')]}
               />
               <Bar dataKey="count" radius={[4, 4, 0, 0]} cursor="pointer">
                 {weekData.map((_, i) => (
@@ -226,9 +229,9 @@ function WeeklyBarChart({
           onClick={() => setWeekDetail(null)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-3 shadow-modal"
             onClick={e => e.stopPropagation()}>
-            <p className="text-sm font-bold text-gray-900">{weekDetail.label} — Protocolos aprobados</p>
+            <p className="text-sm font-bold text-gray-900">{t('webDash.weekApprovedProtocols', { week: weekDetail.label })}</p>
             {weekDetail.items.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2 text-center">Sin protocolos aprobados esta semana.</p>
+              <p className="text-xs text-gray-400 py-2 text-center">{t('webDash.noApprovedThisWeek')}</p>
             ) : (
               <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
                 {weekDetail.items.map((p, idx) => {
@@ -252,7 +255,7 @@ function WeeklyBarChart({
             )}
             <button onClick={() => setWeekDetail(null)}
               className="text-xs font-semibold text-primary hover:underline self-end">
-              Cerrar
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -270,6 +273,7 @@ function SpecialtyBarChart({
   projectId: string;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [specDetail, setSpecDetail] = useState<{ name: string; items: Protocol[] } | null>(null);
 
   const locSpecMap = useMemo(() => {
@@ -322,12 +326,12 @@ function SpecialtyBarChart({
 
   return (
     <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-3">
-      <p className="text-xs font-bold text-gray-700">Avance por especialidad</p>
+      <p className="text-xs font-bold text-gray-700">{t('webDash.progressBySpecialty')}</p>
       <div className="flex gap-4 flex-wrap">
         {[
-          { color: C.pending, label: 'Pendiente' },
-          { color: C.success, label: 'Aprobados' },
-          { color: C.danger,  label: 'Rechazados' },
+          { color: C.pending, label: t('webDash.inProgress') },
+          { color: C.success, label: t('webDash.approved') },
+          { color: C.danger,  label: t('webDash.rejected') },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
@@ -361,16 +365,16 @@ function SpecialtyBarChart({
           </button>
         );
       })}
-      <p className="text-[10px] text-gray-400">Toca una barra para ver detalle</p>
+      <p className="text-[10px] text-gray-400">{t('webDash.tapBarForDetail')}</p>
 
       {specDetail && (
         <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4"
           onClick={() => setSpecDetail(null)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-5 flex flex-col gap-3 shadow-modal"
             onClick={e => e.stopPropagation()}>
-            <p className="text-sm font-bold text-gray-900">{specDetail.name} — Protocolos</p>
+            <p className="text-sm font-bold text-gray-900">{t('webDash.specProtocols', { spec: specDetail.name })}</p>
             {specDetail.items.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2 text-center">Sin protocolos en esta especialidad.</p>
+              <p className="text-xs text-gray-400 py-2 text-center">{t('webDash.noSpecProtocols')}</p>
             ) : (
               <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
                 {[...specDetail.items]
@@ -393,7 +397,7 @@ function SpecialtyBarChart({
                         {(p.status === 'APPROVED' || p.status === 'REJECTED') && (
                           <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full text-white',
                             p.status === 'APPROVED' ? 'bg-success' : 'bg-danger')}>
-                            {p.status === 'APPROVED' ? 'Aprobado' : 'Rechazado'}
+                            {p.status === 'APPROVED' ? t('webDash.statusApproved') : t('webDash.statusRejected')}
                           </span>
                         )}
                       </button>
@@ -403,7 +407,7 @@ function SpecialtyBarChart({
             )}
             <button onClick={() => setSpecDetail(null)}
               className="text-xs font-semibold text-primary hover:underline self-end">
-              Cerrar
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -414,6 +418,7 @@ function SpecialtyBarChart({
 
 // ── Notes section ─────────────────────────────────────────────────────────────
 function NotesSection({ projectId }: { projectId: string }) {
+  const { t } = useI18n();
   const { currentUser } = useAuth();
   const { data: notes = [] } = useDashboardNotes(projectId);
   const { data: usersMap = {} } = useUsersMap();
@@ -428,13 +433,13 @@ function NotesSection({ projectId }: { projectId: string }) {
 
   async function handleAdd() {
     if (!noteText.trim() || !currentUser) return;
-    await addNote.mutateAsync({ text: noteText, userId: currentUser.id });
+    await addNote.mutateAsync({ content: noteText, userId: currentUser.id });
     setNoteText('');
   }
 
   async function handleUpdate(noteId: string) {
     if (!editingText.trim()) return;
-    await updateNote.mutateAsync({ noteId, text: editingText });
+    await updateNote.mutateAsync({ noteId, content: editingText });
     setEditingId(null);
     setEditingText('');
   }
@@ -446,7 +451,7 @@ function NotesSection({ projectId }: { projectId: string }) {
 
   return (
     <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-3">
-      <p className="text-xs font-bold text-gray-700">Anotaciones</p>
+      <p className="text-xs font-bold text-gray-700">{t('webDash.notes')}</p>
 
       <div className="flex gap-2 items-end">
         <textarea
@@ -454,7 +459,7 @@ function NotesSection({ projectId }: { projectId: string }) {
                      text-gray-800 placeholder-gray-400 resize-none
                      focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
           rows={2}
-          placeholder="Escribe una anotación..."
+          placeholder={t('webDash.notePlaceholder')}
           value={noteText}
           onChange={e => setNoteText(e.target.value)}
         />
@@ -465,16 +470,16 @@ function NotesSection({ projectId }: { projectId: string }) {
                      disabled:opacity-40 hover:bg-primary/90 transition-colors flex items-center gap-1"
         >
           {addNote.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-          Guardar
+          {t('common.save')}
         </button>
       </div>
 
       {notes.length === 0 ? (
-        <p className="text-xs text-gray-400 text-center py-2">Sin anotaciones aún.</p>
+        <p className="text-xs text-gray-400 text-center py-2">{t('webDash.noNotesYet')}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {notes.map(note => {
-            const isOwner = currentUser?.id === note.user_id;
+            const isOwner = currentUser?.id === note.created_by_id;
             const isEditing = editingId === note.id;
             return (
               <div key={note.id} className="bg-surface rounded-lg p-3 flex flex-col gap-2">
@@ -491,26 +496,26 @@ function NotesSection({ projectId }: { projectId: string }) {
                     <div className="flex gap-2 justify-end">
                       <button onClick={() => { setEditingId(null); setEditingText(''); }}
                         className="text-xs text-gray-500 hover:text-gray-700 font-semibold">
-                        Cancelar
+                        {t('common.cancel')}
                       </button>
                       <button onClick={() => handleUpdate(note.id)}
                         disabled={!editingText.trim() || updateNote.isPending}
                         className="text-xs text-white bg-primary px-3 py-1.5 rounded-md font-bold
                                    disabled:opacity-40 hover:bg-primary/90 transition-colors">
-                        Guardar
+                        {t('common.save')}
                       </button>
                     </div>
                   </>
                 ) : (
                   <>
-                    <p className="text-sm text-gray-800 leading-relaxed">{note.text}</p>
+                    <p className="text-sm text-gray-800 leading-relaxed">{note.content}</p>
                     <div className="flex items-center justify-between">
                       <p className="text-[11px] text-gray-400">
-                        {usersMap[note.user_id] ?? '—'} · {new Date(note.created_at).toLocaleString('es-PE')}
+                        {usersMap[note.created_by_id] ?? '—'} · {new Date(note.created_at).toLocaleString('es-PE')}
                       </p>
                       {isOwner && (
                         <div className="flex gap-3">
-                          <button onClick={() => { setEditingId(note.id); setEditingText(note.text); }}
+                          <button onClick={() => { setEditingId(note.id); setEditingText(note.content); }}
                             className="text-gray-400 hover:text-primary transition-colors">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -534,18 +539,18 @@ function NotesSection({ projectId }: { projectId: string }) {
           onClick={() => setConfirmDeleteId(null)}>
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 flex flex-col gap-4 shadow-modal"
             onClick={e => e.stopPropagation()}>
-            <p className="text-sm font-bold text-gray-900">¿Eliminar anotación?</p>
-            <p className="text-xs text-gray-500">Esta acción no se puede deshacer.</p>
+            <p className="text-sm font-bold text-gray-900">{t('webDash.deleteNoteTitle')}</p>
+            <p className="text-xs text-gray-500">{t('webDash.deleteNoteWarning')}</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setConfirmDeleteId(null)}
                 className="text-sm text-gray-500 font-semibold">
-                Cancelar
+                {t('common.cancel')}
               </button>
               <button onClick={() => handleDelete(confirmDeleteId)}
                 disabled={deleteNote.isPending}
                 className="px-4 py-2 rounded-lg bg-danger text-white text-sm font-bold
                            disabled:opacity-50 hover:bg-red-700 transition-colors">
-                Eliminar
+                {t('common.delete')}
               </button>
             </div>
           </div>
@@ -557,6 +562,7 @@ function NotesSection({ projectId }: { projectId: string }) {
 
 // ── Project data loader (renders dashboard for a specific project) ─────────────
 function ProjectDashboard({ projectId }: { projectId: string }) {
+  const { t } = useI18n();
   const { data: projects = [] } = useProjects();
   const { data: protocols = [], isLoading: loadingP } = useHistoricalProtocols(projectId);
   const { data: locations = [], isLoading: loadingL } = useHistoricalLocations(projectId);
@@ -621,17 +627,17 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
     <div className="flex flex-col gap-4">
       {/* Date filters */}
       <div className="bg-white rounded-xl shadow-subtle p-4 flex flex-col gap-3">
-        <p className="text-xs font-bold text-gray-700">Filtros por fecha</p>
-        <p className="text-[11px] text-gray-400 -mt-2">Afectan: aprobados/rechazados y observaciones</p>
+        <p className="text-xs font-bold text-gray-700">{t('webDash.dateFilters')}</p>
+        <p className="text-[11px] text-gray-400 -mt-2">{t('webDash.dateFiltersHint')}</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Fecha inicial</label>
+            <label className="text-xs text-gray-500 font-medium">{t('webDash.dateFrom')}</label>
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm
                          focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Fecha final</label>
+            <label className="text-xs text-gray-500 font-medium">{t('webDash.dateTo')}</label>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm
                          focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
@@ -640,7 +646,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
         {(dateFrom || dateTo) && (
           <button onClick={() => { setDateFrom(''); setDateTo(''); }}
             className="text-xs text-primary hover:underline self-start font-semibold">
-            Limpiar filtros
+            {t('webDash.clearFilters')}
           </button>
         )}
       </div>
@@ -648,16 +654,16 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
       {/* Analysis cards */}
       <div className="grid grid-cols-2 gap-3">
         <AnalysisCard
-          title="Aprobados vs Rechazados"
+          title={t('webDash.approvedVsRejected')}
           a={approved} b={rejected}
-          labelA="Aprobados" labelB="Rechazados"
+          labelA={t('webDash.approved')} labelB={t('webDash.rejected')}
           colorA={C.success} colorB={C.danger}
           href={`/app/projects/${projectId}/dossier`}
         />
         <AnalysisCard
-          title="Obs. Abiertas vs Resueltas"
+          title={t('webDash.obsOpenVsClosed')}
           a={obsOpen} b={obsClosed}
-          labelA="Abiertas" labelB="Resueltas"
+          labelA={t('webDash.obsOpen')} labelB={t('webDash.obsClosed')}
           colorA={C.warning} colorB={C.secondary}
         />
       </div>
@@ -689,6 +695,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const { t } = useI18n();
   const { data: projects = [], isLoading: loadingProjects } = useProjects();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -700,9 +707,9 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col min-h-screen bg-surface">
       <PageHeader
-        title="Dashboard"
+        title={t('webDash.title')}
         subtitle={selectedProject?.name}
-        crumbs={[{ label: 'Dashboard' }]}
+        crumbs={[{ label: t('webDash.title') }]}
         syncing={loadingProjects}
       />
 
@@ -713,7 +720,7 @@ export default function DashboardPage() {
           <div className="h-12 bg-white rounded-xl shadow-subtle animate-pulse" />
         ) : projects.length === 0 ? (
           <div className="bg-white rounded-xl shadow-subtle p-4 text-center text-sm text-gray-400">
-            Sin proyectos disponibles
+            {t('webDash.noProjects')}
           </div>
         ) : (
           <div className="relative">
@@ -722,7 +729,7 @@ export default function DashboardPage() {
               className="w-full bg-white rounded-xl shadow-subtle px-4 py-3 flex items-center justify-between
                          text-sm font-semibold text-navy hover:shadow-card transition-shadow"
             >
-              <span>{selectedProject?.name ?? 'Seleccionar proyecto'}</span>
+              <span>{selectedProject?.name ?? t('webDash.selectProject')}</span>
               <ChevronDown className={cn('w-4 h-4 text-gray-400 transition-transform', dropdownOpen && 'rotate-180')} />
             </button>
 

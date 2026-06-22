@@ -44,13 +44,16 @@ export async function POST(req: NextRequest) {
     if (!alreadyLinked) {
       const now = Date.now();
       const { error } = await supabase.from('plans').insert({
-        project_id:  projectId,
-        name:        planName,
-        s3_key:      s3Key,
-        file_type:   fileType,
-        location_id: loc.id,
-        created_at:  now,
-        updated_at:  now,
+        id:             crypto.randomUUID(),
+        project_id:     projectId,
+        name:           planName,
+        file_uri:       '',
+        s3_key:         s3Key,
+        file_type:      fileType,
+        location_id:    loc.id,
+        uploaded_by_id: '',
+        created_at:     now,
+        updated_at:     now,
       });
       if (!error) linked++;
       else console.error('[plans/relink] insert error:', error);

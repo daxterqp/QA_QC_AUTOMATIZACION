@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { useAuth } from '@lib/auth-context';
 import type { Location, Protocol, ProtocolTemplate, ProtocolTemplateItem } from '@/types';
 
 const supabase = createClient();
@@ -114,11 +115,15 @@ export function useLocationProtocols(locationId: string, projectId: string) {
         .map(idProt => matchingTemplates.find(t => t.id_protocolo === idProt))
         .filter((t): t is ProtocolTemplate => !!t);
 
-      // 4. Emparejar cada template con su instancia
-      return ordered.map(tmpl => ({
-        template: tmpl,
-        instance: existingInstances.find(p => p.template_id === tmpl.id) ?? null,
-      }));
+      // 4. Emparejar cada template con su instancia. v39 — un tipo oculto solo
+      //    aparece si YA tiene instancia (para no perder el registro); si está
+      //    oculto y sin instancia, no se muestra (no se puede crear uno nuevo).
+      return ordered
+        .map(tmpl => ({
+          template: tmpl,
+          instance: existingInstances.find(p => p.template_id === tmpl.id) ?? null,
+        }))
+        .filter(row => !row.template.is_hidden || row.instance != null);
     },
     enabled: !!locationId && !!projectId,
     staleTime: 0,
@@ -135,62 +140,29 @@ export function useCreateProtocolInstance(locationId: string, projectId: string)
       templateId,
       templateName,
       locationName,
+      /** v25 — Si la plantilla declara directivas `repeat-[...]`, este map indica
+       *  cuántas filas generar por grupo. Si falta o no hay directivas, no se
+       *  expande nada (comportamiento legacy). */
+      repeatChoices,
     }: {
       templateId: string;
       templateName: string;
       locationName: string;
-    }): Promise<Protocol> => {
-      // Crear protocolo
-      const now = Date.now();
-      const { data: protocol, error: protoErr } = await supabase
-        .from('protocols')
-        .insert({
-          id: crypto.randomUUID(),
-          project_id: projectId,
-          location_id: locationId,
-          template_id: templateId,
-          protocol_number: templateName,
-          location_reference: locationName,
-          status: 'DRAFT',
-          created_at: now,
-          updated_at: now,
-        })
-        .select()
-        .single();
-      if (protoErr) throw protoErr;
-
-      // Cargar items de la plantilla
-      const { data: templateItems, error: itemsErr } = await supabase
-        .from('protocol_template_items')
-        .select('*')
-        .eq('template_id', templateId)
-        .order('created_at', { ascending: true });
-      if (itemsErr) throw itemsErr;
-
-      // Crear items del protocolo
-      if (templateItems && templateItems.length > 0) {
-        const itemsToInsert = (templateItems as ProtocolTemplateItem[]).map((ti) => ({
-          id: crypto.randomUUID(),
-          protocol_id: protocol.id,
-          partida_item: ti.partida_item,
-          item_description: ti.item_description,
-          validation_method: ti.validation_method,
-          section: ti.section,
-          is_compliant: false,
-          is_na: false,
-          has_answer: false,
-          comments: null,
-          created_at: now,
-          updated_at: now,
-        }));
-
-        const { error: insertErr } = await supabase
-          .from('protocol_items')
-          .insert(itemsToInsert);
-        if (insertErr) throw insertErr;
-      }
-
-      return protocol as Protocol;
+      repeatChoices?: Record<string, number>;
+    }): Promise<{ protocol: Protocol; warnings: string[] }> => {
+      // v31 — Delegado al núcleo compartido con los modos de llenado nuevos
+      // (useEnsayos.createEnsayoInstances): mismo flujo + ensayo_date default
+      // hoy + código correlativo si el proyecto lo tiene activo.
+      const { createEnsayoInstances } = await import('./useEnsayos');
+      const { protocols, warnings } = await createEnsayoInstances({
+        projectId,
+        templateId,
+        templateName,
+        locationId,
+        locationName,
+        repeatChoices,
+      });
+      return { protocol: protocols[0], warnings };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['location-protocols', locationId, projectId] });
@@ -199,16 +171,44 @@ export function useCreateProtocolInstance(locationId: string, projectId: string)
   });
 }
 
+// ── Helper: cargar template items + extraer directivas (para preflight UI) ─────
+//
+// Útil para que la página de instancia consulte ANTES de crear: si la plantilla
+// tiene directivas paramétricas, mostrar el modal de N. Si no, crear directo.
+
+export function useTemplateDirectives(templateId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['template-directives', templateId],
+    queryFn: () => fetchTemplateDirectives(templateId ?? ''),
+    enabled: !!templateId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Versión imperativa de `useTemplateDirectives` — útil para flujos donde
+ *  necesitamos await SIN race conditions (ej. modal de plantillas paramétricas). */
+export async function fetchTemplateDirectives(templateId: string) {
+  if (!templateId) return [];
+  const { data, error } = await supabase
+    .from('protocol_template_items')
+    .select('partida_item, item_description, validation_method, section')
+    .eq('template_id', templateId);
+  if (error) throw error;
+  const { extractRepeatDirectives } = await import('@lib/parametricExpand');
+  return extractRepeatDirectives(data ?? []);
+}
+
 // ── Eliminar ubicaciones (cascade) ──────────────────────────────────────────
 
 export function useDeleteLocations(projectId: string) {
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
   return useMutation({
     mutationFn: async (locationIds: string[]) => {
       const res = await fetch('/api/locations/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, locationIds }),
+        body: JSON.stringify({ projectId, locationIds, deletedById: currentUser?.id ?? null, deletedByName: currentUser?.name ?? null }),
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
@@ -225,12 +225,16 @@ export function useDeleteLocations(projectId: string) {
 
 export function useDeleteProtocols(locationId: string, projectId: string) {
   const qc = useQueryClient();
+  const { currentUser } = useAuth();
+  // v43 — Solo Jefe (RESIDENT) o Creador pueden eliminar ensayos.
+  const canDelete = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
   return useMutation({
     mutationFn: async (protocolIds: string[]) => {
+      if (!canDelete) throw new Error('Solo el Jefe o el Creador del proyecto pueden eliminar ensayos.');
       const res = await fetch('/api/protocols/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ protocolIds }),
+        body: JSON.stringify({ protocolIds, deletedById: currentUser?.id ?? null, deletedByName: currentUser?.name ?? null }),
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();

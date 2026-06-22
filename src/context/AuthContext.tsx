@@ -117,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (data && data.length > 0) {
           const remote = data[0];
+          if (remote.is_active === false) return 'not_found';   // v43 — cuenta inactiva
           const remotePassword = remote.password ?? remote.name;
           if (remotePassword !== password) return 'wrong_password';
 
@@ -135,6 +136,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch { /* sin internet */ }
       return 'not_found';
     }
+
+    // v43 — Cuenta inactiva (soft-delete): pierde el acceso. Sus firmas y
+    // aprobaciones históricas se conservan, pero no puede iniciar sesión.
+    if ((user as any).isActive === false) return 'not_found';
 
     // 3. Verificar contraseña
     const storedPassword = user.password ?? user.name;
@@ -162,6 +167,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Fix #8.1 — Detener cualquier tracker GPS activo ANTES de limpiar la
+    // sesión, evitando que el GPS siga capturando puntos tras el logout.
+    try {
+      // lazy require para evitar ciclos de import entre módulos de servicios
+      const wss = require('@services/WorkSessionService');
+      if (wss?.stopAllTrackers) await wss.stopAllTrackers();
+    } catch { /* módulo no disponible */ }
     if (isDemo) {
       setCurrentUser(null);
       setIsDemo(false);
@@ -185,18 +197,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const deleteAccount = useCallback(async () => {
     if (!currentUser || isDemo) return;
     const userId = currentUser.id;
-    // 1. Remove push token
+    // Fix #8.1 — Detener trackers GPS antes de cerrar la cuenta.
+    try {
+      const wss = require('@services/WorkSessionService');
+      if (wss?.stopAllTrackers) await wss.stopAllTrackers();
+    } catch { /* módulo no disponible */ }
+    // 1. Quitar push token (deja de recibir notificaciones).
     unregisterPushToken(userId).catch(() => {});
-    // 2. Delete from Supabase: user_project_access, push_tokens, user record
-    await supabase.from('push_tokens').delete().eq('user_id', userId);
-    await supabase.from('user_project_access').delete().eq('user_id', userId);
-    await supabase.from('users').delete().eq('id', userId);
-    // 3. Delete local user record
+    // 2. v43 — SOFT-DELETE: NO se borra de la base. Se marca inactivo (is_active=false).
+    //    El usuario pierde el acceso (login bloqueado), pero toda su información, firmas
+    //    y aprobaciones se conservan INTACTAS para mantener la trazabilidad.
+    try { await supabase.from('users').update({ is_active: false, updated_at: Date.now() }).eq('id', userId); } catch { /* offline / falta columna */ }
     try {
       const user = await usersCollection.find(userId);
-      await database.write(async () => { await user.destroyPermanently(); });
-    } catch { /* already gone */ }
-    // 4. Clear session
+      await database.write(async () => { await (user as any).update((u: any) => { u.isActive = false; }); });
+    } catch { /* no local */ }
+    // 3. Cerrar sesión (pierde el acceso). El registro permanece, inactivo.
     await AsyncStorage.removeItem(STORAGE_KEY);
     setCurrentUser(null);
   }, [currentUser, isDemo]);

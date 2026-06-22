@@ -8,9 +8,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList,
-  Alert, ActivityIndicator, ScrollView, Switch, Image, TextInput,
+  Alert, ActivityIndicator, ScrollView, Switch, Image, TextInput, Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '@config/supabase';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -34,9 +36,18 @@ import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { downloadPlansFromS3, downloadDwgFromS3 } from '@services/S3SyncService';
 import { pushPlansToSupabase, pushProjectToSupabase } from '@services/SupabaseSyncService';
+import {
+  pickAndParseTraceability, importTraceabilityLocally,
+  TraceabilityImportError, TraceabilityImportCancelled, type TraceabilityImportSummary,
+} from '@services/TraceabilityExcelImporter';
+import { equipmentCollection, activitiesCollection, equipmentActivitiesCollection, labAuxTablesCollection } from '@db/index';
+import type Equipment from '@models/Equipment';
+import ProjectSectorsContent from '@components/ProjectSectorsContent';
+import { exportCalibrationReport } from '@services/CalibrationReportService';
+import { useI18n, tx } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FileUpload'>;
-type Tab = 'actividades' | 'ubicaciones' | 'planos_pdf' | 'planos_dwg' | 'personalizar';
+type Tab = 'actividades' | 'ubicaciones' | 'equipos_lab' | 'equipos' | 'sectores' | 'planos_pdf' | 'planos_dwg' | 'personalizar';
 
 interface DwgFile {
   name: string;
@@ -48,9 +59,20 @@ function formatDate(d: Date): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** v41 (#5a) — Indicador de días para la próxima calibración. */
+function calibBadgeMobile(ms: number | null): { text: string; color: string; bg: string } | null {
+  if (!ms) return null;
+  const days = Math.ceil((ms - Date.now()) / 86400000);
+  if (days < 0)   return { text: tx(-days === 1 ? 'fileUpload.calib.overdueOne' : 'fileUpload.calib.overdueOther', { days: -days }), color: Colors.danger, bg: '#fdecea' };
+  if (days === 0) return { text: tx('fileUpload.calib.today'), color: Colors.warning, bg: '#fdf0d5' };
+  if (days <= 30) return { text: tx(days === 1 ? 'fileUpload.calib.remainingOne' : 'fileUpload.calib.remainingOther', { days }), color: Colors.warning, bg: '#fdf0d5' };
+  return { text: tx('fileUpload.calib.remainingOther', { days }), color: Colors.success, bg: '#e7f4ea' };
+}
+
 export default function FileUploadScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const { currentUser } = useAuth();
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>('actividades');
 
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
@@ -216,11 +238,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
         if (result.canceled || !result.assets?.length) { keepGoing = false; break; }
         await processAsset(result.assets[0], destDir, linked, unlinked, skipped);
-      } catch { Alert.alert('Error', 'No se pudo cargar el plano.'); break; }
+      } catch { Alert.alert(t('fileUpload.error.title'), t('fileUpload.pdf.uploadError')); break; }
       keepGoing = await new Promise<boolean>((resolve) => {
-        Alert.alert('Plano agregado', `Total: ${linked.length + unlinked.length}. ¿Agregar otro?`, [
-          { text: 'Terminar', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Agregar otro', onPress: () => resolve(true) },
+        Alert.alert(t('fileUpload.pdf.addedTitle'), t('fileUpload.pdf.addedMsg', { count: linked.length + unlinked.length }), [
+          { text: t('fileUpload.pdf.finish'), style: 'cancel', onPress: () => resolve(false) },
+          { text: t('fileUpload.pdf.addAnother'), onPress: () => resolve(true) },
         ]);
       });
     }
@@ -231,10 +253,10 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     }
     if (linked.length + unlinked.length + skipped.length > 0) {
       const lines: string[] = [];
-      if (linked.length) lines.push(`Vinculados (${linked.length}): ${linked.join(', ')}`);
-      if (unlinked.length) lines.push(`Sin ubicación (${unlinked.length}): ${unlinked.join(', ')}`);
-      if (skipped.length) lines.push(`Ya existían (${skipped.length})`);
-      Alert.alert('Resumen', lines.join('\n'));
+      if (linked.length) lines.push(t('fileUpload.pdf.summaryLinked', { count: linked.length, names: linked.join(', ') }));
+      if (unlinked.length) lines.push(t('fileUpload.pdf.summaryUnlinked', { count: unlinked.length, names: unlinked.join(', ') }));
+      if (skipped.length) lines.push(t('fileUpload.pdf.summarySkipped', { count: skipped.length }));
+      Alert.alert(t('fileUpload.pdf.summaryTitle'), lines.join('\n'));
     }
   };
 
@@ -245,11 +267,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       const result = await downloadPlansFromS3(projectId, projectName, currentUser.id);
       await relinkSilent();
       const lines: string[] = [];
-      if (result.downloaded > 0) lines.push(`Descargados: ${result.downloaded}`);
-      if (result.skipped > 0) lines.push(`Ya existían: ${result.skipped}`);
-      if (result.error) lines.push(`Error: ${result.error}`);
-      Alert.alert('Recargar PDF', lines.length ? lines.join('\n') : 'No se encontraron planos nuevos.');
-    } catch (e) { Alert.alert('Error', String(e)); }
+      if (result.downloaded > 0) lines.push(t('fileUpload.pdf.reloadDownloaded', { count: result.downloaded }));
+      if (result.skipped > 0) lines.push(t('fileUpload.pdf.reloadSkipped', { count: result.skipped }));
+      if (result.error) lines.push(t('fileUpload.pdf.reloadError', { error: result.error }));
+      Alert.alert(t('fileUpload.pdf.reloadTitle'), lines.length ? lines.join('\n') : t('fileUpload.pdf.reloadNone'));
+    } catch (e) { Alert.alert(t('fileUpload.error.title'), String(e)); }
     finally { setPulling(false); }
   };
 
@@ -265,7 +287,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         return names.includes(planName.toLowerCase().trim());
       });
       if (matchingLocs.length === 0) {
-        Alert.alert('Sin coincidencias', `No se encontraron ubicaciones que referencien "${planName}".`);
+        Alert.alert(t('fileUpload.relink.noMatchTitle'), t('fileUpload.relink.noMatchMsg', { name: planName }));
         return;
       }
       const existingLocIds = new Set(plansForName.map((p) => (p as any).locationId).filter(Boolean));
@@ -289,17 +311,17 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         linked++;
       }
       if (linked > 0) pushPlansToSupabase(projectId).catch(() => {});
-      Alert.alert('Revínculo completado', linked > 0 ? `${linked} ubicación(es) vinculadas.` : 'Ya estaba completamente vinculado.');
+      Alert.alert(t('fileUpload.relink.doneTitle'), linked > 0 ? t('fileUpload.relink.doneLinked', { count: linked }) : t('fileUpload.relink.alreadyLinked'));
     } catch (e) {
-      Alert.alert('Error', String(e));
+      Alert.alert(t('fileUpload.error.title'), String(e));
     }
   };
 
   const handleDeletePlan = (plan: Plan) => {
-    Alert.alert('Eliminar plano', `¿Eliminar "${plan.name}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('fileUpload.pdf.deleteTitle'), t('fileUpload.pdf.deleteMsg', { name: plan.name }), [
+      { text: t('fileUpload.common.cancel'), style: 'cancel' },
       {
-        text: 'Eliminar', style: 'destructive',
+        text: t('fileUpload.common.delete'), style: 'destructive',
         onPress: async () => {
           const shared = plans.filter((p) => p.fileUri === plan.fileUri);
           if (shared.length <= 1) { try { await FileSystem.deleteAsync(plan.fileUri, { idempotent: true }); } catch { /* */ } }
@@ -351,9 +373,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         } catch { /* sin conectividad, ignorar */ }
       }
       await loadDwgFiles();
-      Alert.alert('Cargado', `${added.length} archivo(s) DWG guardado(s).`);
+      Alert.alert(t('fileUpload.dwg.loadedTitle'), t('fileUpload.dwg.loadedMsg', { count: added.length }));
     } catch {
-      Alert.alert('Error', 'No se pudo cargar el archivo DWG.');
+      Alert.alert(t('fileUpload.error.title'), t('fileUpload.dwg.loadError'));
     } finally {
       setDwgLoading(false);
     }
@@ -368,15 +390,15 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         flags: 1,
       });
     } catch {
-      Alert.alert('No se pudo abrir el archivo DWG', 'Asegúrate de tener una app compatible instalada.');
+      Alert.alert(t('fileUpload.dwg.openErrorTitle'), t('fileUpload.dwg.openErrorMsg'));
     }
   };
 
   const deleteDwg = (file: DwgFile) => {
-    Alert.alert('Eliminar DWG', `¿Eliminar "${file.name}.dwg"?`, [
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('fileUpload.dwg.deleteTitle'), t('fileUpload.dwg.deleteMsg', { name: file.name }), [
+      { text: t('fileUpload.common.cancel'), style: 'cancel' },
       {
-        text: 'Eliminar', style: 'destructive',
+        text: t('fileUpload.common.delete'), style: 'destructive',
         onPress: async () => {
           await FileSystem.deleteAsync(file.uri, { idempotent: true });
           setDwgFiles((prev) => prev.filter((f) => f.uri !== file.uri));
@@ -391,11 +413,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       const result = await downloadDwgFromS3(projectName, dwgDir);
       await loadDwgFiles();
       const lines: string[] = [];
-      if (result.downloaded > 0) lines.push(`Descargados: ${result.downloaded}`);
-      if (result.skipped > 0) lines.push(`Ya existían: ${result.skipped}`);
-      if (result.error) lines.push(`Error: ${result.error}`);
-      Alert.alert('Recargar DWG', lines.length ? lines.join('\n') : 'No se encontraron archivos nuevos.');
-    } catch (e) { Alert.alert('Error', String(e)); }
+      if (result.downloaded > 0) lines.push(t('fileUpload.dwg.reloadDownloaded', { count: result.downloaded }));
+      if (result.skipped > 0) lines.push(t('fileUpload.dwg.reloadSkipped', { count: result.skipped }));
+      if (result.error) lines.push(t('fileUpload.dwg.reloadError', { error: result.error }));
+      Alert.alert(t('fileUpload.dwg.reloadTitle'), lines.length ? lines.join('\n') : t('fileUpload.dwg.reloadNone'));
+    } catch (e) { Alert.alert(t('fileUpload.error.title'), String(e)); }
     finally { setDwgPulling(false); }
   };
 
@@ -409,6 +431,30 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       .fetch();
     setTemplates(res);
   }, [projectId]);
+
+  const isCreator = currentUser?.role === 'CREATOR';
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // v39 — Ocultar / mostrar tipo de ensayo (no elimina). Un tipo oculto no
+  // aparece en los selectores de ensayo NUEVO ni se puede crear, pero sus
+  // registros existentes siguen visibles.
+  const toggleTemplateHidden = useCallback(async (t: ProtocolTemplate) => {
+    const next = !(t as any).isHidden;
+    setTogglingId(t.id);
+    try {
+      await database.write(async () => {
+        await (t as any).update((r: any) => { r.isHidden = next; });
+      });
+      supabase.from('protocol_templates').update({ is_hidden: next }).eq('id', t.id)
+        .then(({ error }) => { if (error) console.warn('[template hidden] push falló:', error.message); });
+      await loadTemplates();
+    } catch (e) {
+      Alert.alert(tx('fileUpload.error.title'), tx('fileUpload.template.visibilityError'));
+      console.warn('[toggleTemplateHidden]', e);
+    } finally {
+      setTogglingId(null);
+    }
+  }, [loadTemplates]);
 
   useEffect(() => {
     if (activeTab === 'actividades') loadTemplates();
@@ -489,14 +535,15 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     // Also keep in AsyncStorage as local backup
     await saveProjectSettings(projectId, { stampComment: stampComment.trim() || null });
     setStampCommentSaving(false);
-    Alert.alert('Guardado', 'El comentario se estampará en las fotos de todos los usuarios.');
+    Alert.alert(t('fileUpload.saved.title'), t('fileUpload.stamp.commentSavedMsg'));
   };
 
   const handlePickStampPhoto = async () => {
     setStampLoading(true);
     try {
+      // Android SAF rinde mejor con un único type string que con array.
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/jpeg', 'image/png'],
+        type: 'image/*',
         copyToCacheDirectory: true,
       });
       if (result.canceled || !result.assets?.[0]) return;
@@ -514,9 +561,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
       await FileSystem.copyAsync({ from: asset.uri, to: localUri });
       setStampPhotoUri(localUri);
-      Alert.alert('Logo guardado', 'El logo del proyecto está disponible para todos los usuarios.');
+      Alert.alert(t('fileUpload.stamp.logoSavedTitle'), t('fileUpload.stamp.logoSavedMsg'));
     } catch {
-      Alert.alert('Error', 'No se pudo cargar el logo.');
+      Alert.alert(t('fileUpload.error.title'), t('fileUpload.stamp.logoError'));
     } finally {
       setStampLoading(false);
     }
@@ -526,8 +573,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     if (!currentUser?.id) return;
     setSignatureLoading(true);
     try {
+      // Android SAF rinde mejor con un único type string que con array.
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/jpeg', 'image/png'],
+        type: 'image/*',
         copyToCacheDirectory: true,
       });
       if (result.canceled || !result.assets?.[0]) return;
@@ -540,9 +588,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       const sigS3Key = `signatures/${currentUser.id}/signature.jpg`;
       await uploadToS3(asset.uri, sigS3Key, 'image/jpeg');
       await saveUserSignatureS3Key(currentUser.id, sigS3Key);
-      Alert.alert('Firma guardada', 'La firma se incluirá en los reportes PDF exportados.');
+      Alert.alert(t('fileUpload.signature.savedTitle'), t('fileUpload.signature.savedMsg'));
     } catch {
-      Alert.alert('Error', 'No se pudo cargar la firma.');
+      Alert.alert(t('fileUpload.error.title'), t('fileUpload.signature.error'));
     } finally {
       setSignatureLoading(false);
     }
@@ -568,7 +616,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           ) : (
             <>
               <Ionicons name="cloud-upload-outline" size={18} color={Colors.white} />
-              <Text style={styles.importBtnText}>Importar Excel de Actividades</Text>
+              <Text style={styles.importBtnText}>{t('fileUpload.act.importBtn')}</Text>
             </>
           )}
         </TouchableOpacity>
@@ -578,10 +626,10 @@ export default function FileUploadScreen({ navigation, route }: Props) {
             <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
             <Text style={styles.successText}>
               {actState.totalProtocols > 0
-                ? `${actState.totalProtocols} protocolo${actState.totalProtocols !== 1 ? 's' : ''} importado${actState.totalProtocols !== 1 ? 's' : ''}${actState.modifiedProtocols > 0 ? ` · ${actState.modifiedProtocols} modificado${actState.modifiedProtocols !== 1 ? 's' : ''}` : ''}`
+                ? `${t(actState.totalProtocols !== 1 ? 'fileUpload.act.importedOther' : 'fileUpload.act.importedOne', { count: actState.totalProtocols })}${actState.modifiedProtocols > 0 ? t(actState.modifiedProtocols !== 1 ? 'fileUpload.act.modifiedSuffixOther' : 'fileUpload.act.modifiedSuffixOne', { count: actState.modifiedProtocols }) : ''}`
                 : actState.modifiedProtocols > 0
-                  ? `${actState.modifiedProtocols} protocolo${actState.modifiedProtocols !== 1 ? 's' : ''} modificado${actState.modifiedProtocols !== 1 ? 's' : ''}`
-                  : 'Sin cambios'}
+                  ? t(actState.modifiedProtocols !== 1 ? 'fileUpload.act.modifiedOnlyOther' : 'fileUpload.act.modifiedOnlyOne', { count: actState.modifiedProtocols })
+                  : t('fileUpload.common.noChanges')}
             </Text>
           </View>
         )}
@@ -595,16 +643,29 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
       {templates.length > 0 && (
         <View style={styles.listSection}>
-          <Text style={styles.listTitle}>Protocolos cargados ({templates.length})</Text>
-          {templates.map((t) => (
-            <View key={t.id} style={styles.listRow}>
-              <View style={styles.listRowLeft}>
-                <Text style={styles.listRowId}>{t.idProtocolo}</Text>
-                <Text style={styles.listRowName} numberOfLines={2}>{t.name}</Text>
+          <Text style={styles.listTitle}>{t('fileUpload.act.loadedTitle', { count: templates.length })}</Text>
+          {templates.map((t) => {
+            const hidden = !!(t as any).isHidden;
+            return (
+              <View key={t.id} style={styles.listRow}>
+                <View style={styles.listRowLeft}>
+                  <Text style={styles.listRowId}>{t.idProtocolo}</Text>
+                  <Text style={[styles.listRowName, hidden && { color: Colors.textMuted, textDecorationLine: 'line-through' }]} numberOfLines={2}>{t.name}</Text>
+                </View>
+                {hidden && <Text style={styles.hiddenBadge}>{tx('fileUpload.act.hiddenBadge')}</Text>}
+                {!hidden && <Text style={styles.listRowDate}>{formatDate(new Date(t.createdAt))}</Text>}
+                {isCreator && (
+                  <TouchableOpacity
+                    onPress={() => toggleTemplateHidden(t)}
+                    disabled={togglingId === t.id}
+                    style={styles.eyeBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name={hidden ? 'eye-off-outline' : 'eye-outline'} size={18} color={hidden ? Colors.warning : Colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
               </View>
-              <Text style={styles.listRowDate}>{formatDate(new Date(t.createdAt))}</Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
     </ScrollView>
@@ -627,7 +688,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           ) : (
             <>
               <Ionicons name="cloud-upload-outline" size={18} color={Colors.white} />
-              <Text style={styles.importBtnText}>Importar Excel de Ubicaciones</Text>
+              <Text style={styles.importBtnText}>{t('fileUpload.loc.importBtn')}</Text>
             </>
           )}
         </TouchableOpacity>
@@ -637,10 +698,10 @@ export default function FileUploadScreen({ navigation, route }: Props) {
             <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
             <Text style={styles.successText}>
               {locState.totalLocations > 0
-                ? `${locState.totalLocations} ubicación${locState.totalLocations !== 1 ? 'es' : ''} importada${locState.totalLocations !== 1 ? 's' : ''}${locState.modifiedLocations > 0 ? ` · ${locState.modifiedLocations} modificada${locState.modifiedLocations !== 1 ? 's' : ''}` : ''}`
+                ? `${t(locState.totalLocations !== 1 ? 'fileUpload.loc.importedOther' : 'fileUpload.loc.importedOne', { count: locState.totalLocations })}${locState.modifiedLocations > 0 ? t(locState.modifiedLocations !== 1 ? 'fileUpload.loc.modifiedSuffixOther' : 'fileUpload.loc.modifiedSuffixOne', { count: locState.modifiedLocations }) : ''}`
                 : locState.modifiedLocations > 0
-                  ? `${locState.modifiedLocations} ubicación${locState.modifiedLocations !== 1 ? 'es' : ''} modificada${locState.modifiedLocations !== 1 ? 's' : ''}`
-                  : 'Sin cambios'}
+                  ? t(locState.modifiedLocations !== 1 ? 'fileUpload.loc.modifiedOnlyOther' : 'fileUpload.loc.modifiedOnlyOne', { count: locState.modifiedLocations })
+                  : t('fileUpload.common.noChanges')}
             </Text>
           </View>
         )}
@@ -654,7 +715,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
       {locationList.length > 0 && (
         <View style={styles.listSection}>
-          <Text style={styles.listTitle}>Ubicaciones cargadas ({locationList.length})</Text>
+          <Text style={styles.listTitle}>{t('fileUpload.loc.loadedTitle', { count: locationList.length })}</Text>
           {locationList.map((loc) => (
             <View key={loc.id} style={styles.listRow}>
               <View style={styles.listRowLeft}>
@@ -671,6 +732,11 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     </ScrollView>
   );
 
+  const renderEquiposLab = () => <EquiposTab projectId={projectId} projectName={projectName} category="laboratorio" title={t('fileUpload.equipos.titleLab')} />;
+  const renderEquipos = () => <EquiposTab projectId={projectId} projectName={projectName} category="maquinaria_pesada" title={t('fileUpload.equipos.titleMaq')} />;
+
+  const renderSectores = () => <ProjectSectorsContent projectId={projectId} />;
+
   const renderPlanosPdf = () => (
     <View style={styles.pdfContainer}>
       {/* Barra de acciones */}
@@ -684,7 +750,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           {uploading ? <ActivityIndicator color={Colors.white} size="small" /> : (
             <>
               <Ionicons name="cloud-upload-outline" size={22} color={Colors.white} />
-              <Text style={styles.pdfActionBtnText}>Subir PDF</Text>
+              <Text style={styles.pdfActionBtnText}>{t('fileUpload.pdf.uploadBtn')}</Text>
             </>
           )}
         </TouchableOpacity>
@@ -697,7 +763,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           {pulling ? <ActivityIndicator color={Colors.white} size="small" /> : (
             <>
               <Ionicons name="cloud-download-outline" size={22} color={Colors.white} />
-              <Text style={styles.pdfActionBtnText}>Recargar PDF</Text>
+              <Text style={styles.pdfActionBtnText}>{t('fileUpload.pdf.reloadBtn')}</Text>
             </>
           )}
         </TouchableOpacity>
@@ -711,9 +777,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Ionicons name="document-outline" size={44} color={Colors.border} />
-            <Text style={styles.emptyText}>Sin planos PDF cargados</Text>
+            <Text style={styles.emptyText}>{t('fileUpload.pdf.emptyTitle')}</Text>
             <Text style={styles.emptySubText}>
-              El nombre del PDF debe coincidir con el "Plano de referencia" de la ubicación.
+              {t('fileUpload.pdf.emptySub')}
             </Text>
           </View>
         }
@@ -742,8 +808,8 @@ export default function FileUploadScreen({ navigation, route }: Props) {
                 <View style={styles.pdfCardInfo}>
                   <Text style={styles.pdfCardName} numberOfLines={1}>{group.name}</Text>
                   {linkedLocs.length > 0
-                    ? <Text style={styles.pdfCardLoc}>{linkedLocs.length} ubicación(es)</Text>
-                    : <Text style={styles.pdfCardNoLoc}>Sin ubicación vinculada</Text>
+                    ? <Text style={styles.pdfCardLoc}>{t('fileUpload.pdf.cardLocations', { count: linkedLocs.length })}</Text>
+                    : <Text style={styles.pdfCardNoLoc}>{t('fileUpload.pdf.cardNoLoc')}</Text>
                   }
                 </View>
                 <View style={styles.pdfCardRight}>
@@ -772,7 +838,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
                         >
                           <Ionicons name="location-outline" size={13} color={locName ? Colors.success : Colors.textMuted} />
                           <Text style={[styles.pdfLocName, !locName && styles.pdfLocNameNone]}>
-                            {locName ?? 'Sin ubicación'}
+                            {locName ?? t('fileUpload.pdf.locRowNone')}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => handleDeletePlan(plan)} style={styles.pdfDelBtn}>
@@ -801,7 +867,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         >
           {dwgLoading
             ? <ActivityIndicator color={Colors.white} size="small" />
-            : <><Ionicons name="cloud-upload-outline" size={22} color={Colors.white} /><Text style={styles.pdfActionBtnText}>Cargar DWG</Text></>
+            : <><Ionicons name="cloud-upload-outline" size={22} color={Colors.white} /><Text style={styles.pdfActionBtnText}>{t('fileUpload.dwg.uploadBtn')}</Text></>
           }
         </TouchableOpacity>
         <TouchableOpacity
@@ -812,7 +878,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         >
           {dwgPulling
             ? <ActivityIndicator color={Colors.white} size="small" />
-            : <><Ionicons name="cloud-download-outline" size={22} color={Colors.white} /><Text style={styles.pdfActionBtnText}>Recargar DWG</Text></>
+            : <><Ionicons name="cloud-download-outline" size={22} color={Colors.white} /><Text style={styles.pdfActionBtnText}>{t('fileUpload.dwg.reloadBtn')}</Text></>
           }
         </TouchableOpacity>
       </View>
@@ -824,8 +890,8 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Ionicons name="layers-outline" size={40} color={Colors.border} />
-            <Text style={styles.emptyText}>Sin archivos DWG cargados.</Text>
-            <Text style={styles.emptySubText}>Carga archivos .dwg para verlos en DWG FastView.</Text>
+            <Text style={styles.emptyText}>{t('fileUpload.dwg.emptyTitle')}</Text>
+            <Text style={styles.emptySubText}>{t('fileUpload.dwg.emptySub')}</Text>
           </View>
         }
         renderItem={({ item }) => (
@@ -844,7 +910,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
                 activeOpacity={0.8}
               >
                 <Ionicons name="eye-outline" size={14} color={Colors.white} />
-                <Text style={styles.dwgOpenBtnText}>Ver DWG</Text>
+                <Text style={styles.dwgOpenBtnText}>{t('fileUpload.dwg.openBtn')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.dwgDelBtn}
@@ -865,9 +931,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       <View style={styles.settingCard}>
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>
-            <Text style={styles.settingTitle}>Estampado de fotos</Text>
+            <Text style={styles.settingTitle}>{t('fileUpload.stamp.title')}</Text>
             <Text style={styles.settingDesc}>
-              Agrega timestamp y logo del proyecto en cada foto capturada.
+              {t('fileUpload.stamp.desc')}
             </Text>
           </View>
           <Switch
@@ -887,14 +953,14 @@ export default function FileUploadScreen({ navigation, route }: Props) {
                 ) : (
                   <View style={styles.stampPreviewPlaceholder}>
                     <Ionicons name="image-outline" size={28} color={Colors.border} />
-                    <Text style={styles.stampPreviewPlaceholderText}>Sin logo</Text>
+                    <Text style={styles.stampPreviewPlaceholderText}>{t('fileUpload.stamp.noLogo')}</Text>
                   </View>
                 )}
               </View>
               <View style={styles.stampPreviewLabels}>
-                <Text style={styles.stampPreviewTitle}>Logo del proyecto</Text>
+                <Text style={styles.stampPreviewTitle}>{t('fileUpload.stamp.logoTitle')}</Text>
                 <Text style={styles.stampPreviewSub}>
-                  Se muestra en la esquina superior derecha con 25% de opacidad.
+                  {t('fileUpload.stamp.logoSub')}
                 </Text>
                 <TouchableOpacity
                   style={[styles.stampPickBtn, stampLoading && styles.btnDisabled]}
@@ -907,7 +973,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
                     : <>
                         <Ionicons name="image-outline" size={16} color={Colors.white} />
                         <Text style={styles.stampPickBtnText}>
-                          {stampPhotoUri ? 'Cambiar foto' : 'Subir foto'}
+                          {stampPhotoUri ? t('fileUpload.stamp.changePhoto') : t('fileUpload.stamp.uploadPhoto')}
                         </Text>
                       </>
                   }
@@ -920,14 +986,14 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
         {stampEnabled && (
           <View style={styles.stampCommentRow}>
-            <Text style={styles.stampCommentLabel}>Comentario en fotos</Text>
-            <Text style={styles.settingDesc}>Texto que aparece bajo el timestamp en cada foto.</Text>
+            <Text style={styles.stampCommentLabel}>{t('fileUpload.stamp.commentLabel')}</Text>
+            <Text style={styles.settingDesc}>{t('fileUpload.stamp.commentDesc')}</Text>
             <View style={styles.stampCommentInputRow}>
               <TextInput
                 style={styles.stampCommentInput}
                 value={stampComment}
                 onChangeText={setStampComment}
-                placeholder="Ej: Proyecto Edificio Norte — Fase 2"
+                placeholder={t('fileUpload.stamp.commentPlaceholder')}
                 placeholderTextColor={Colors.textMuted}
               />
               <TouchableOpacity
@@ -937,7 +1003,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
               >
                 {stampCommentSaving
                   ? <ActivityIndicator color={Colors.white} size="small" />
-                  : <Text style={styles.stampPickBtnText}>Guardar</Text>
+                  : <Text style={styles.stampPickBtnText}>{t('fileUpload.common.save')}</Text>
                 }
               </TouchableOpacity>
             </View>
@@ -945,65 +1011,40 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         )}
       </View>
 
-      {/* ── Firma del Jefe de Calidad ─────────────────────────────────────── */}
+      {/* v44 — La "Firma" dejó de ser config de proyecto: ahora es personal de cada usuario
+          y se ingresa desde el menú lateral → "Ingresar firma". */}
       <View style={styles.settingCard}>
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>
-            <Text style={styles.settingTitle}>Firma del Jefe de Calidad</Text>
+            <Text style={styles.settingTitle}>{t('fileUpload.signature.title')}</Text>
             <Text style={styles.settingDesc}>
-              Aparece al pie de cada protocolo en el dossier PDF exportado.
+              {t('fileUpload.signature.desc')}
             </Text>
-          </View>
-        </View>
-        <View style={styles.stampPreviewRow}>
-          <View style={styles.signaturePreviewBox}>
-            {signatureUri ? (
-              <Image source={{ uri: signatureUri }} style={styles.stampPreviewImg} resizeMode="contain" />
-            ) : (
-              <View style={styles.stampPreviewPlaceholder}>
-                <Ionicons name="create-outline" size={28} color={Colors.border} />
-                <Text style={styles.stampPreviewPlaceholderText}>Sin firma</Text>
-              </View>
-            )}
-          </View>
-          <View style={styles.stampPreviewLabels}>
-            <Text style={styles.stampPreviewSub}>
-              Sube una imagen de la firma (JPEG o PNG). Se mostrará en todos los reportes de este proyecto.
-            </Text>
-            <TouchableOpacity
-              style={[styles.stampPickBtn, signatureLoading && styles.btnDisabled]}
-              onPress={handlePickSignature}
-              disabled={signatureLoading}
-              activeOpacity={0.85}
-            >
-              {signatureLoading
-                ? <ActivityIndicator color={Colors.white} size="small" />
-                : <>
-                    <Ionicons name="create-outline" size={16} color={Colors.white} />
-                    <Text style={styles.stampPickBtnText}>
-                      {signatureUri ? 'Cambiar firma' : 'Subir firma'}
-                    </Text>
-                  </>
-              }
-            </TouchableOpacity>
           </View>
         </View>
       </View>
     </ScrollView>
   );
 
-  const tabs: { key: Tab; label: string; icon: string }[] = [
-    { key: 'actividades',  label: 'Activ.',      icon: 'document-text-outline' },
-    { key: 'ubicaciones',  label: 'Ubic.',        icon: 'location-outline' },
-    { key: 'planos_pdf',   label: 'PDF',          icon: 'document-outline' },
-    { key: 'planos_dwg',   label: 'DWG',          icon: 'layers-outline' },
-    { key: 'personalizar', label: 'Config.',      icon: 'settings-outline' },
+  const allTabs: { key: Tab; label: string; icon: string }[] = [
+    { key: 'actividades',  label: t('fileUpload.tab.actividades'),  icon: 'document-text-outline' },
+    { key: 'ubicaciones',  label: t('fileUpload.tab.ubicaciones'),  icon: 'location-outline' },
+    // v29 — Tab unificado: acepta CSV/xlsx simple de equipos O xlsx multi-hoja
+    // con bundle completo de trazabilidad (equipos + actividades + turnos +
+    // plantillas + vínculos). El parser autodetecta el formato.
+    { key: 'equipos_lab',  label: t('fileUpload.tab.equipos_lab'),  icon: 'flask-outline' },
+    { key: 'equipos',      label: t('fileUpload.tab.equipos'),      icon: 'construct-outline' },
+    { key: 'sectores',     label: t('fileUpload.tab.sectores'),     icon: 'shapes-outline' },
+    { key: 'planos_pdf',   label: t('fileUpload.tab.planos_pdf'),   icon: 'document-outline' },
+    { key: 'planos_dwg',   label: t('fileUpload.tab.planos_dwg'),   icon: 'layers-outline' },
+    { key: 'personalizar', label: t('fileUpload.tab.personalizar'), icon: 'settings-outline' },
   ];
+  const tabs = allTabs;
 
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Cargar Archivos"
+        title={t('fileUpload.header.title')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
@@ -1037,6 +1078,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
       <View style={styles.content}>
         {activeTab === 'actividades'  && renderActividades()}
         {activeTab === 'ubicaciones'  && renderUbicaciones()}
+        {activeTab === 'equipos_lab'  && renderEquiposLab()}
+        {activeTab === 'equipos'      && renderEquipos()}
+        {activeTab === 'sectores'     && renderSectores()}
         {activeTab === 'planos_pdf'   && renderPlanosPdf()}
         {activeTab === 'planos_dwg'   && renderPlanosDwg()}
         {activeTab === 'personalizar' && renderPersonalizar()}
@@ -1048,19 +1092,21 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
 
+  // v43 — Opciones en DOS filas (wrap a 4 por fila) en vez de todas apretadas en una.
   tabBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     backgroundColor: Colors.white,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
   },
   tabItem: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 10, gap: 3,
+    width: '25%', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 11, gap: 3,
     borderBottomWidth: 2, borderBottomColor: 'transparent',
   },
   tabItemActive: { borderBottomColor: Colors.primary },
-  tabLabel: { fontSize: 9, fontWeight: '600', color: Colors.textMuted, letterSpacing: 0.3 },
+  tabLabel: { fontSize: 10, fontWeight: '600', color: Colors.textMuted, letterSpacing: 0.3 },
   tabLabelActive: { color: Colors.primary, fontWeight: '800' },
 
   content: { flex: 1 },
@@ -1117,6 +1163,8 @@ const styles = StyleSheet.create({
   listRowName: { fontSize: 13, fontWeight: '600', color: Colors.navy },
   listRowSub: { fontSize: 11, color: Colors.textMuted },
   listRowDate: { fontSize: 11, color: Colors.textMuted, minWidth: 60, textAlign: 'right' },
+  hiddenBadge: { fontSize: 10, fontWeight: '800', color: Colors.warning, backgroundColor: '#fdf0d5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
+  eyeBtn: { paddingLeft: 10, paddingVertical: 2 },
 
   // ── Planos PDF inline ─────────────────────────────────────────────────────
   pdfContainer: { flex: 1 },
@@ -1253,3 +1301,628 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary,
   },
 });
+
+// ── v29 — Tab Equipos UNIFICADO ────────────────────────────────────────────
+// Acepta CSV/xlsx simple (solo equipos) o xlsx multi-hoja (bundle completo de
+// trazabilidad: equipos + actividades + turnos + plantillas + vínculos).
+// El parser auto-detecta el formato y procesa todo lo que encuentra.
+
+interface EquipActivityInfo {
+  name: string;
+  kind: string;
+  templateName: string | null;
+}
+
+function EquiposTab({ projectId, projectName, category, title }: { projectId: string; projectName: string; category: 'laboratorio' | 'maquinaria_pesada'; title: string }) {
+  const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  const isMaq = category === 'maquinaria_pesada';
+  const [equipos, setEquipos] = useState<Equipment[]>([]);
+  const [actsByEquip, setActsByEquip] = useState<Record<string, EquipActivityInfo[]>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [parsed, setParsed] = useState<Awaited<ReturnType<typeof pickAndParseTraceability>> | null>(null);
+  const [summary, setSummary] = useState<TraceabilityImportSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sub = equipmentCollection
+      .query(Q.where('project_id', projectId), Q.sortBy('code', Q.asc))
+      .observe()
+      .subscribe(setEquipos);
+    return () => sub.unsubscribe();
+  }, [projectId]);
+
+  // v41 — Tablas auxiliares del proyecto (grupos), solo lectura en la sección Lab.
+  const [labTables, setLabTables] = useState<any[]>([]);
+  // v41 — Calibrar (editable) en móvil.
+  const [calTable, setCalTable] = useState<any | null>(null);
+  const [calCols, setCalCols] = useState<string[]>([]);
+  const [calRows, setCalRows] = useState<string[][]>([]);
+  const [calNext, setCalNext] = useState('');
+  const [calSaving, setCalSaving] = useState(false);
+  const [calNewRows, setCalNewRows] = useState<Set<number>>(new Set()); // filas nuevas → llave editable
+
+  const openCalibrate = useCallback((t: any) => {
+    let cols: string[] = [], rws: string[][] = [];
+    try { cols = JSON.parse(t.columnsJson ?? '[]'); rws = (JSON.parse(t.rowsJson ?? '[]') as string[][]).map(r => [...r]); } catch { /* corrupta */ }
+    setCalTable(t); setCalCols(cols); setCalRows(rws); setCalNewRows(new Set());
+    setCalNext(t.nextCalibrationAt ? new Date(t.nextCalibrationAt).toISOString().slice(0, 10) : '');
+  }, []);
+
+  // v41 (#4) — Adicionar medida: nueva fila con LLAVE única (editable).
+  const addCalMeasure = useCallback(() => {
+    setCalRows(prev => {
+      const keys = new Set(prev.map(r => (r[0] ?? '').trim()));
+      const nums = prev.map(r => Number(String(r[0]).replace(',', '.')));
+      let key: string;
+      if (prev.length > 0 && nums.every(n => Number.isFinite(n))) key = String(Math.max(...nums) + 1);
+      else { let i = 1; while (keys.has(`NUEVO-${i}`)) i++; key = `NUEVO-${i}`; }
+      const ncols = calCols.length || 1;
+      setCalNewRows(s => new Set(s).add(prev.length));
+      return [...prev, Array.from({ length: ncols }, (_, ci) => (ci === 0 ? key : ''))];
+    });
+  }, [calCols]);
+
+  const saveCalibrate = useCallback(async () => {
+    if (!calTable) return;
+    const keys = calRows.map(r => (r[0] ?? '').trim());
+    if (keys.some((k, i) => k !== '' && keys.indexOf(k) !== i)) {
+      Alert.alert(t('fileUpload.calibrate.duplicateKeysTitle'), t('fileUpload.calibrate.duplicateKeysMsg'));
+      return;
+    }
+    const rowsClean = calRows.filter(r => (r[0] ?? '').trim() !== '');
+    setCalSaving(true);
+    try {
+      const nextMs = /^\d{4}-\d{2}-\d{2}$/.test(calNext.trim()) ? new Date(calNext.trim() + 'T00:00:00').getTime() : null;
+      const now = Date.now();
+      await database.write(async () => {
+        await calTable.update((r: any) => { r.rowsJson = JSON.stringify(rowsClean); r.lastCalibrationAt = now; r.nextCalibrationAt = nextMs; });
+      });
+      supabase.from('lab_aux_tables').update({ rows_json: rowsClean, last_calibration_at: now, next_calibration_at: nextMs, updated_at: now }).eq('id', calTable.id)
+        .then(({ error }) => { if (error) console.warn('[calibrar] push falló:', error.message); });
+      setCalTable(null);
+    } catch (e) {
+      Alert.alert(t('fileUpload.error.title'), t('fileUpload.calibrate.saveError'));
+    } finally { setCalSaving(false); }
+  }, [calTable, calRows, calNext]);
+  useEffect(() => {
+    if (isMaq) return;
+    const sub = labAuxTablesCollection
+      .query(Q.where('project_id', projectId), Q.sortBy('group_key', Q.asc))
+      .observe()
+      .subscribe(setLabTables);
+    return () => sub.unsubscribe();
+  }, [projectId, isMaq]);
+
+  // Cargar vínculos equipo-actividad + nombres de actividades. Se re-ejecuta
+  // cuando cambia la lista de equipos (porque la lista determina los
+  // equipment_ids relevantes para esta consulta).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (equipos.length === 0) { setActsByEquip({}); return; }
+      const eqIds = equipos.map(e => e.id);
+      const [links, acts] = await Promise.all([
+        equipmentActivitiesCollection.query(Q.where('equipment_id', Q.oneOf(eqIds))).fetch(),
+        activitiesCollection.query(Q.where('project_id', projectId)).fetch(),
+      ]);
+      if (cancelled) return;
+      const actsById: Record<string, { name: string; kind: string }> = {};
+      for (const a of acts as any[]) actsById[a.id] = { name: a.name, kind: a.kind };
+      const map: Record<string, EquipActivityInfo[]> = {};
+      for (const link of links as any[]) {
+        const act = actsById[link.activityId];
+        if (!act) continue;
+        if (!map[link.equipmentId]) map[link.equipmentId] = [];
+        map[link.equipmentId].push({
+          name: act.name,
+          kind: act.kind,
+          templateName: null, // resuelto abajo si hay template
+        });
+      }
+      setActsByEquip(map);
+    })();
+    return () => { cancelled = true; };
+  }, [equipos, projectId]);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Solo los equipos de ESTA categoría (los previos a v40 sin categoría → laboratorio).
+  const filtered = useMemo(
+    () => equipos.filter(e => ((e as any).category ?? 'laboratorio') === category),
+    [equipos, category],
+  );
+
+  const handlePick = async () => {
+    setError(null); setImporting(true); setSummary(null); setParsed(null);
+    try {
+      const result = await pickAndParseTraceability();
+      // Auto-import: se importa de frente al subir (sin paso de confirmación).
+      const s = await importTraceabilityLocally(projectId, result, category);
+      setSummary(s);
+    } catch (e) {
+      if (e instanceof TraceabilityImportCancelled) return;
+      const msg = e instanceof TraceabilityImportError ? e.message : (e as Error).message ?? String(e);
+      setError(msg);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!parsed) return;
+    setImporting(true); setError(null);
+    try {
+      const s = await importTraceabilityLocally(projectId, parsed, category);
+      setSummary(s);
+      setParsed(null);
+    } catch (e) {
+      setError((e as Error).message ?? String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const detectedKind = parsed
+    ? (parsed.actividades.length + parsed.turnos.length + parsed.plantillas.length + parsed.equipoActividad.length > 0
+        ? 'bundle' : 'simple')
+    : null;
+
+  return (
+    <ScrollView contentContainerStyle={[equiposStyles.scrollWrap, { paddingBottom: Math.max(40, insets.bottom + 24) }]}>
+      {/* Header: subir archivo */}
+      <View style={equiposStyles.card}>
+        <Text style={equiposStyles.cardTitle}>{title}</Text>
+        <Text style={equiposStyles.cardSubtitle}>
+          {isMaq
+            ? t('fileUpload.equipos.subtitleMaq', { csv: 'CSV', excel: 'Excel' })
+            : t('fileUpload.equipos.subtitleLab', { csv: 'CSV', excel: 'Excel' })}
+        </Text>
+        <TouchableOpacity onPress={handlePick} disabled={importing} style={equiposStyles.uploadBtn} activeOpacity={0.85}>
+          {importing
+            ? <ActivityIndicator color={Colors.white} size="small" />
+            : <Ionicons name="cloud-upload-outline" size={18} color={Colors.white} />}
+          <Text style={equiposStyles.uploadBtnText}>{t('fileUpload.equipos.uploadBtn')}</Text>
+        </TouchableOpacity>
+        {error && (
+          <View style={equiposStyles.errorBox}>
+            <Ionicons name="alert-circle-outline" size={14} color={Colors.danger} />
+            <Text style={equiposStyles.errorText}>{error}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Preview de importación */}
+      {parsed && (
+        <View style={equiposStyles.card}>
+          <Text style={equiposStyles.cardTitle}>
+            {detectedKind === 'bundle'
+              ? t('fileUpload.equipos.detectedBundle')
+              : t('fileUpload.equipos.detectedSimple')}
+          </Text>
+          <View style={equiposStyles.previewList}>
+            <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.lineEquipos')}<Text style={equiposStyles.previewNum}>{parsed.equipos.length}</Text></Text>
+            {detectedKind === 'bundle' && (
+              <>
+                <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.lineActividades')}<Text style={equiposStyles.previewNum}>{parsed.actividades.length}</Text></Text>
+                <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.lineLinks')}<Text style={equiposStyles.previewNum}>{parsed.equipoActividad.length}</Text></Text>
+                <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.lineTurnos')}<Text style={equiposStyles.previewNum}>{parsed.turnos.length}</Text></Text>
+                <Text style={equiposStyles.previewLine}>
+                  {t('fileUpload.equipos.lineTemplateItems')}<Text style={equiposStyles.previewNum}>{parsed.plantillas.length}</Text>{t('fileUpload.equipos.templatesFrom', { count: new Set(parsed.plantillas.map(p => p.templateName)).size })}
+                </Text>
+              </>
+            )}
+          </View>
+          {parsed.warnings.length > 0 && (
+            <View style={equiposStyles.warnBox}>
+              {parsed.warnings.slice(0, 6).map((w, i) => (
+                <Text key={i} style={equiposStyles.warnText}>⚠ {w}</Text>
+              ))}
+              {parsed.warnings.length > 6 && (
+                <Text style={equiposStyles.warnText}>{t('fileUpload.equipos.moreWarnings', { count: parsed.warnings.length - 6 })}</Text>
+              )}
+            </View>
+          )}
+          <View style={equiposStyles.actionRow}>
+            <TouchableOpacity onPress={() => setParsed(null)} disabled={importing} style={equiposStyles.btnSecondary}>
+              <Text style={equiposStyles.btnSecondaryText}>{t('fileUpload.common.cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleConfirm} disabled={importing} style={[equiposStyles.uploadBtn, { flex: 1, marginTop: 0 }]}>
+              {importing
+                ? <ActivityIndicator color={Colors.white} size="small" />
+                : <Ionicons name="checkmark-circle-outline" size={16} color={Colors.white} />}
+              <Text style={equiposStyles.uploadBtnText}>{t('fileUpload.equipos.confirmImport')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Summary post-importación */}
+      {summary && (
+        <View style={[equiposStyles.card, { borderColor: Colors.success, backgroundColor: Colors.success + '08' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+            <Text style={[equiposStyles.cardTitle, { color: Colors.success }]}>{t('fileUpload.equipos.importDoneTitle')}</Text>
+          </View>
+          <View style={equiposStyles.previewList}>
+            <Text style={equiposStyles.previewLine}>
+              {t('fileUpload.equipos.summaryEquipos', { added: summary.equipment.added, modified: summary.equipment.modified, deduped: summary.equipment.deduped ? t('fileUpload.equipos.summaryEquiposDeduped', { count: summary.equipment.deduped }) : '' })}
+            </Text>
+            {(summary.activities.added > 0 || summary.activities.modified > 0) && (
+              <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.summaryActividades', { added: summary.activities.added, modified: summary.activities.modified })}</Text>
+            )}
+            {(summary.links.added > 0 || summary.links.modified > 0 || summary.links.skipped > 0) && (
+              <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.summaryLinks', { added: summary.links.added, modified: summary.links.modified, skipped: summary.links.skipped })}</Text>
+            )}
+            {(summary.shifts.added > 0 || summary.shifts.modified > 0) && (
+              <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.summaryTurnos', { added: summary.shifts.added, modified: summary.shifts.modified })}</Text>
+            )}
+            {(summary.templates.added > 0 || summary.templates.modified > 0) && (
+              <Text style={equiposStyles.previewLine}>{t('fileUpload.equipos.summaryTemplates', { added: summary.templates.added, modified: summary.templates.modified, items: summary.templateItems.added })}</Text>
+            )}
+          </View>
+          {summary.warnings.length > 0 && (
+            <View style={equiposStyles.warnBox}>
+              {summary.warnings.slice(0, 6).map((w, i) => (
+                <Text key={i} style={equiposStyles.warnText}>⚠ {w}</Text>
+              ))}
+              {summary.warnings.length > 6 && (
+                <Text style={equiposStyles.warnText}>{t('fileUpload.equipos.moreWarnings', { count: summary.warnings.length - 6 })}</Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* #5b — Reporte rápido de calibración (solo Lab.) */}
+      {!isMaq && (filtered.length > 0 || labTables.length > 0) && (
+        <TouchableOpacity
+          onPress={() => exportCalibrationReport({
+            projectName,
+            equipos: filtered.map(e => { const x = e as any; return { code: x.code, name: x.name, type: x.type, brand: x.brand, model: x.model, lastCalibrationAt: x.lastCalibrationAt ?? null, nextCalibrationAt: x.nextCalibrationAt ?? null }; }),
+            tablas: labTables.map((t: any) => { let cols: string[] = []; let rows: string[][] = []; try { cols = JSON.parse(t.columnsJson ?? '[]'); rows = (JSON.parse(t.rowsJson ?? '[]') as string[][]).map(r => [...r]); } catch { /* corrupta */ } return { groupKey: t.groupKey, name: t.name, columnsCount: cols.length, rowsCount: rows.length, columns: cols, rows, lastCalibrationAt: t.lastCalibrationAt ?? null, nextCalibrationAt: t.nextCalibrationAt ?? null }; }),
+          }).catch(() => Alert.alert(t('fileUpload.error.title'), t('fileUpload.equipos.reportError')))}
+          style={equiposStyles.reportBtn}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="document-text-outline" size={16} color={Colors.primary} />
+          <Text style={equiposStyles.reportBtnText}>{t('fileUpload.equipos.reportBtn')}</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* v41 — Tablas auxiliares (grupos: taras, moldes…) solo en Lab. */}
+      {!isMaq && labTables.length > 0 && (
+        <View style={{ gap: 6 }}>
+          <Text style={[equiposStyles.cardTitle, { marginTop: 4 }]}>{t('fileUpload.equipos.auxTablesTitle', { count: labTables.length })}</Text>
+          {labTables.map((tbl: any) => {
+            let cols: string[] = []; let nrows = 0;
+            try { cols = JSON.parse(tbl.columnsJson ?? '[]'); nrows = (JSON.parse(tbl.rowsJson ?? '[]') as any[]).length; } catch { /* corrupta */ }
+            const nextStr = tbl.nextCalibrationAt ? new Date(tbl.nextCalibrationAt).toLocaleDateString('es-PE') : '—';
+            const bdg = calibBadgeMobile(tbl.nextCalibrationAt);
+            return (
+              <View key={tbl.id} style={equiposStyles.equipCard}>
+                <View style={[equiposStyles.catIcon, { backgroundColor: Colors.primary + '15', borderColor: Colors.primary + '40' }]}>
+                  <Ionicons name="grid-outline" size={18} color={Colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={equiposStyles.name} numberOfLines={1}>{tbl.name || tbl.groupKey}</Text>
+                  <Text style={equiposStyles.meta} numberOfLines={1}>{t('fileUpload.equipos.auxRowsMeta', { cols: cols.join(' · '), rows: nrows })}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                    <Text style={[equiposStyles.meta, { fontSize: 10 }]}>{t('fileUpload.equipos.nextCalibration', { date: nextStr })}</Text>
+                    {bdg && <Text style={[equiposStyles.calBadge, { color: bdg.color, backgroundColor: bdg.bg }]}>{bdg.text}</Text>}
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => openCalibrate(tbl)} style={equiposStyles.calibBtn} activeOpacity={0.8}>
+                  <Text style={equiposStyles.calibBtnText}>{t('fileUpload.equipos.calibrateBtn')}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {/* v41 — Modal Calibrar (editable) */}
+      <Modal visible={calTable != null} transparent animationType="slide" onRequestClose={() => setCalTable(null)}>
+        <View style={equiposStyles.calOverlay}>
+          <View style={equiposStyles.calCard}>
+            <View style={equiposStyles.calHeaderBar}>
+              <Text style={equiposStyles.calHeaderText}>{t('fileUpload.calibrate.headerTitle', { name: calTable?.name || calTable?.groupKey })}</Text>
+              <TouchableOpacity onPress={() => setCalTable(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={20} color={Colors.white} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal style={{ marginTop: 10 }}>
+              <View>
+                <View style={{ flexDirection: 'row' }}>
+                  {calCols.map((c, i) => (
+                    <Text key={i} style={equiposStyles.calHeadCell}>{c}{i === 0 ? t('fileUpload.calibrate.keySuffix') : ''}</Text>
+                  ))}
+                </View>
+                {calRows.map((r, ri) => {
+                  const keyEditable = calNewRows.has(ri);
+                  return (
+                  <View key={ri} style={{ flexDirection: 'row' }}>
+                    {calCols.map((_, ci) => (
+                      <TextInput
+                        key={ci}
+                        value={r[ci] ?? ''}
+                        editable={ci !== 0 || keyEditable}
+                        onChangeText={(v) => setCalRows(prev => prev.map((row, i) => i === ri ? row.map((c, j) => j === ci ? v : c) : row))}
+                        style={[equiposStyles.calCell, ci === 0 && !keyEditable && equiposStyles.calCellKey]}
+                      />
+                    ))}
+                  </View>
+                );})}
+              </View>
+            </ScrollView>
+            <TouchableOpacity onPress={addCalMeasure} style={equiposStyles.calAddBtn} activeOpacity={0.8}>
+              <Ionicons name="add-circle-outline" size={16} color={Colors.primary} />
+              <Text style={equiposStyles.calAddText}>{t('fileUpload.calibrate.addMeasure')}</Text>
+            </TouchableOpacity>
+            <Text style={[equiposStyles.cardSubtitle, { marginTop: 6 }]}>{t('fileUpload.calibrate.keyHint')}</Text>
+            <Text style={[equiposStyles.filterLabelLike]}>{t('fileUpload.calibrate.nextDateLabel')}</Text>
+            <TextInput value={calNext} onChangeText={setCalNext} placeholder="2027-01-15" placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none" style={equiposStyles.calDateInput} />
+            <View style={equiposStyles.actionRow}>
+              <TouchableOpacity onPress={() => setCalTable(null)} disabled={calSaving} style={equiposStyles.btnSecondary}>
+                <Text style={equiposStyles.btnSecondaryText}>{t('fileUpload.common.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveCalibrate} disabled={calSaving} style={[equiposStyles.uploadBtn, { flex: 1, marginTop: 0 }]}>
+                {calSaving ? <ActivityIndicator color={Colors.white} size="small" /> : <Ionicons name="checkmark-circle-outline" size={16} color={Colors.white} />}
+                <Text style={equiposStyles.uploadBtnText}>{t('fileUpload.calibrate.saveBtn')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Lista de equipos de esta categoría */}
+      {filtered.length === 0 && labTables.length === 0 && !parsed && !summary && (
+        <View style={equiposStyles.empty}>
+          <Ionicons name={isMaq ? 'construct-outline' : 'flask-outline'} size={40} color={Colors.textMuted} />
+          <Text style={equiposStyles.emptyText}>{isMaq ? t('fileUpload.equipos.emptyMaq') : t('fileUpload.equipos.emptyLab')}</Text>
+          <Text style={equiposStyles.emptyHint}>{t('fileUpload.equipos.emptyHint')}</Text>
+        </View>
+      )}
+
+      {filtered.map(eq => {
+        const e = eq as any;
+        const iconName = isMaq ? 'construct' : 'flask';
+        const tone = isMaq ? Colors.warning : Colors.primary;
+        const acts = actsByEquip[eq.id] ?? [];
+        const isOpen = expanded.has(eq.id);
+        return (
+          <View key={eq.id} style={equiposStyles.equipCardWrap}>
+            <TouchableOpacity
+              style={equiposStyles.equipCard}
+              onPress={() => toggleExpanded(eq.id)}
+              activeOpacity={0.7}
+            >
+              <View style={[equiposStyles.catIcon, { backgroundColor: tone + '15', borderColor: tone + '40' }]}>
+                <Ionicons name={iconName as any} size={20} color={tone} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={equiposStyles.cardHead}>
+                  <Text style={equiposStyles.code} numberOfLines={1}>{e.code}</Text>
+                  <Text style={[equiposStyles.catTag, { color: tone }]}>
+                    {isMaq ? t('fileUpload.equipos.tagMaq') : t('fileUpload.equipos.tagLab')}
+                  </Text>
+                </View>
+                <Text style={equiposStyles.name} numberOfLines={1}>{e.name}</Text>
+                <Text style={equiposStyles.meta} numberOfLines={1}>
+                  {(e.type as string).replace(/_/g, ' ')}{e.brand ? ` · ${e.brand}` : ''}{e.model ? ` ${e.model}` : ''}
+                </Text>
+              </View>
+              <View style={equiposStyles.equipCardRight}>
+                {acts.length > 0 && (
+                  <View style={equiposStyles.actsBadge}>
+                    <Text style={equiposStyles.actsBadgeText}>{acts.length}</Text>
+                  </View>
+                )}
+                <Ionicons
+                  name={isOpen ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={Colors.textMuted}
+                />
+              </View>
+            </TouchableOpacity>
+            {isOpen && (
+              <View style={equiposStyles.actsList}>
+                {acts.length === 0 ? (
+                  <Text style={equiposStyles.actsEmpty}>
+                    {t('fileUpload.equipos.noActivities')}
+                  </Text>
+                ) : (
+                  acts.map((a, i) => (
+                    <View key={i} style={equiposStyles.actRow}>
+                      <Ionicons
+                        name={kindIcon(a.kind)}
+                        size={14}
+                        color={kindColor(a.kind)}
+                      />
+                      <Text style={equiposStyles.actName} numberOfLines={1}>{a.name}</Text>
+                      <Text style={[equiposStyles.actKind, { color: kindColor(a.kind) }]}>
+                        {kindLabel(a.kind)}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function kindIcon(kind: string): any {
+  switch (kind) {
+    case 'productive':   return 'flash-outline';
+    case 'maintenance':  return 'build-outline';
+    case 'transport':    return 'car-outline';
+    case 'other':
+    default:             return 'ellipsis-horizontal-outline';
+  }
+}
+function kindColor(kind: string): string {
+  switch (kind) {
+    case 'productive':   return Colors.success;
+    case 'maintenance':  return Colors.warning;
+    case 'transport':    return Colors.primary;
+    case 'other':
+    default:             return Colors.textMuted;
+  }
+}
+function kindLabel(kind: string): string {
+  switch (kind) {
+    case 'productive':   return tx('fileUpload.kind.productive');
+    case 'maintenance':  return tx('fileUpload.kind.maintenance');
+    case 'transport':    return tx('fileUpload.kind.transport');
+    case 'other':
+    default:             return tx('fileUpload.kind.other');
+  }
+}
+
+const equiposStyles = StyleSheet.create({
+  scrollWrap: { padding: 12, gap: 12 },
+
+  // ── Cards (subida, preview, summary) ──
+  card: {
+    backgroundColor: Colors.white, borderRadius: Radius.lg,
+    borderWidth: 1, borderColor: Colors.border,
+    padding: 14, gap: 10,
+    marginBottom: 10,
+  },
+  cardTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, letterSpacing: 0.3 },
+  cardSubtitle: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+
+  // ── v41 — Calibrar tablas auxiliares ──
+  calibBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.primary, alignSelf: 'center' },
+  calibBtnText: { color: Colors.primary, fontSize: 12, fontWeight: '800' },
+  reportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.primary, marginTop: 4 },
+  reportBtnText: { color: Colors.primary, fontSize: 13, fontWeight: '800' },
+  calOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  calCard: { backgroundColor: Colors.white, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '85%', overflow: 'hidden' },
+  calHeaderBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.navy, paddingHorizontal: 16, paddingVertical: 14, marginHorizontal: -16, marginTop: -16, marginBottom: 4 },
+  calHeaderText: { color: Colors.white, fontSize: 14, fontWeight: '800', flex: 1 },
+  calAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.primary },
+  calAddText: { color: Colors.primary, fontSize: 12, fontWeight: '800' },
+  calBadge: { fontSize: 10, fontWeight: '800', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, overflow: 'hidden' },
+  calHeadCell: { width: 90, paddingVertical: 6, paddingHorizontal: 6, fontSize: 11, fontWeight: '800', color: Colors.textPrimary, backgroundColor: Colors.surface, borderWidth: 0.5, borderColor: Colors.border, textAlign: 'center' },
+  calCell: { width: 90, paddingVertical: 6, paddingHorizontal: 6, fontSize: 12, color: Colors.textPrimary, borderWidth: 0.5, borderColor: Colors.border, textAlign: 'center' },
+  calCellKey: { backgroundColor: Colors.surface, color: Colors.textMuted },
+  filterLabelLike: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 10, marginBottom: 4 },
+  calDateInput: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, color: Colors.textPrimary },
+
+  // ── Botones de subir + confirmar ──
+  uploadBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: Colors.primary, paddingVertical: 12, paddingHorizontal: 16,
+    borderRadius: Radius.md, marginTop: 4,
+  },
+  uploadBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13, letterSpacing: 0.5 },
+  btnSecondary: {
+    paddingVertical: 12, paddingHorizontal: 16,
+    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  btnSecondaryText: { color: Colors.textSecondary, fontWeight: '700', fontSize: 13 },
+  actionRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+
+  // ── Feedback boxes ──
+  errorBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    padding: 8, borderRadius: Radius.sm,
+    backgroundColor: Colors.danger + '15', borderWidth: 1, borderColor: Colors.danger + '40',
+  },
+  errorText: { color: Colors.danger, fontSize: 12, flex: 1 },
+  warnBox: {
+    padding: 8, borderRadius: Radius.sm,
+    backgroundColor: Colors.warning + '12', borderWidth: 1, borderColor: Colors.warning + '40',
+    gap: 2,
+  },
+  warnText: { fontSize: 11, color: Colors.textSecondary, lineHeight: 15 },
+  previewList: { gap: 4 },
+  previewLine: { fontSize: 12, color: Colors.textSecondary },
+  previewNum: { fontWeight: '800', color: Colors.textPrimary },
+
+  // ── Chips de filtro ──
+  filterRow: {
+    flexDirection: 'row', gap: 6, paddingVertical: 4, flexWrap: 'wrap',
+  },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
+  chipTextActive: { color: Colors.white },
+  chipCount: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8, backgroundColor: Colors.surface },
+  chipCountActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  chipCountText: { fontSize: 10, fontWeight: '800', color: Colors.textSecondary },
+  chipCountTextActive: { color: Colors.white },
+
+  // ── Estado vacío ──
+  empty: { padding: 40, alignItems: 'center', gap: 8 },
+  emptyText: { fontSize: 13, color: Colors.textSecondary, fontWeight: '700', textAlign: 'center' },
+  emptyHint: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic' },
+
+  // ── Lista de equipos (cards) ──
+  equipCardWrap: {
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    borderWidth: 1, borderColor: Colors.border,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  equipCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 12,
+  },
+  equipCardRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  actsBadge: {
+    backgroundColor: Colors.primary + '15',
+    borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2,
+    minWidth: 22, alignItems: 'center',
+  },
+  actsBadgeText: { fontSize: 11, fontWeight: '800', color: Colors.primary },
+  actsList: {
+    borderTopWidth: 1, borderTopColor: Colors.divider,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 12, paddingVertical: 8,
+    gap: 4,
+  },
+  actsEmpty: {
+    fontSize: 11, color: Colors.textMuted, fontStyle: 'italic',
+    paddingVertical: 4, textAlign: 'center',
+  },
+  actRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 6, paddingHorizontal: 4,
+  },
+  actName: { fontSize: 13, color: Colors.textPrimary, flex: 1, fontWeight: '600' },
+  actKind: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  catIcon: {
+    width: 44, height: 44, borderRadius: Radius.sm,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+  },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  code: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, letterSpacing: 0.5, flex: 1 },
+  catTag: { fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  name: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  meta: { fontSize: 11, color: Colors.textSecondary, marginTop: 2, textTransform: 'capitalize' },
+});
+
