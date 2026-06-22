@@ -262,8 +262,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         } else {
           // Dos dedos en la base que recorren TODA la pantalla (no solo su mitad), con
           // velocidad MUY variable (dos armónicos) → más creíble; el der. un poco más lento.
-          autoPhaseL += AUTO_SPEED * (0.3 + 0.7 * Math.abs(Math.sin(autoPhaseL * 0.6)) + 0.35 * Math.abs(Math.sin(autoPhaseL * 1.7)));
-          autoPhaseR += AUTO_SPEED * 0.78 * (0.3 + 0.7 * Math.abs(Math.sin(autoPhaseR * 0.55)) + 0.35 * Math.abs(Math.sin(autoPhaseR * 1.9)));
+          autoPhaseL += AUTO_SPEED * (0.35 + 0.4 * Math.abs(Math.sin(autoPhaseL * 0.6)) + 0.15 * Math.abs(Math.sin(autoPhaseL * 1.7)));
+          autoPhaseR += AUTO_SPEED * 0.78 * (0.35 + 0.4 * Math.abs(Math.sin(autoPhaseR * 0.55)) + 0.15 * Math.abs(Math.sin(autoPhaseR * 1.9)));
           const sL = (1 - Math.cos(autoPhaseL)) * 0.5;
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.88 * sL;        // recorre toda la pantalla
