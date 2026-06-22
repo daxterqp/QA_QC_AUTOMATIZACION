@@ -215,6 +215,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       let twinT = 180;    // cuenta regresiva para el próximo "twin" ambiental
       let autoPhaseL = 0, autoPhaseR = AUTO_PHASE_OFF;  // fases (el derecho irá más lento)
       let prevLX = 0.06, prevRX = 0.94;   // posición previa de cada dedo (para interpolar)
+      // Aparición/desaparición de cada dedo (~1s) ALTERNADA: arrancan en anti-fase
+      // (mientras uno está activo el otro descansa) con jitter aleatorio.
+      let onL = true, onR = false, tL = 60, tR = 60;
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
         const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
@@ -271,9 +274,12 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           // Vaivén en Y (visible) con frecuencias distintas → recorrido más orgánico.
           const lyy = AUTO_Y + 0.035 * Math.sin(autoPhaseL * 1.6);
           const ryy = AUTO_Y + 0.035 * Math.sin(autoPhaseR * 1.15 + 0.8);
-          pushSeg(prevLX, lx, lyy, AUTO_STR);
-          pushSeg(prevRX, rx, ryy, AUTO_STR);
-          prevLX = lx; prevRX = rx;
+          // Cada dedo prende/apaga ~1s (jitter); empiezan en anti-fase → alternan.
+          if (--tL <= 0) { onL = !onL; tL = 50 + Math.floor(Math.random() * 30); }
+          if (--tR <= 0) { onR = !onR; tR = 50 + Math.floor(Math.random() * 30); }
+          if (onL) pushSeg(prevLX, lx, lyy, AUTO_STR);
+          if (onR) pushSeg(prevRX, rx, ryy, AUTO_STR);
+          prevLX = lx; prevRX = rx;   // sigue avanzando aunque esté apagado (reaparece más adelante)
 
           // Gotita ambiental aleatoria.
           if (--ambient <= 0) {
