@@ -80,6 +80,7 @@ export default function LoginScreen() {
     enteredRef.current = true;
     Animated.timing(enterAnim, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     resetIdle();
+    glRef.current?.bigWave();   // ola fuerte que sube al pasar al login
   };
 
   const goToIntro = () => {
@@ -332,6 +333,17 @@ export default function LoginScreen() {
       {!entered && <Pressable style={StyleSheet.absoluteFill} onPress={enterApp} accessibilityLabel={t('login.tapToStart')} />}
       </>)}
 
+      {entered && (
+        <TouchableOpacity
+          style={[styles.backBtn, { top: insets.top + 6 }]}
+          onPress={goToIntro}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Volver"
+        >
+          <Ionicons name="chevron-back" size={22} color={Colors.white} />
+        </TouchableOpacity>
+      )}
+
       {/* Modal: olvidé mi contraseña */}
       <Modal visible={showReset} transparent animationType="fade" onRequestClose={() => setShowReset(false)}>
         <View style={styles.modalOverlay}>
@@ -442,6 +454,14 @@ const styles = StyleSheet.create({
   tapHint: {
     position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
     fontFamily: FF_SEMI, fontSize: 12, color: Colors.white, letterSpacing: 2, textTransform: 'uppercase',
+  },
+
+  backBtn: {
+    position: 'absolute', left: 14, zIndex: 20,
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
 
   // Tarjeta translúcida compacta

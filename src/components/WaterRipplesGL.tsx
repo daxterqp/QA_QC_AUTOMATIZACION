@@ -14,7 +14,11 @@ import { GLView } from 'expo-gl';
  * Si el equipo no soporta FBO half-float → onUnsupported() → el login usa ripple JS.
  */
 
-export type WaterGLHandle = { drop: (xNorm: number, yNorm: number, isMove?: boolean) => void };
+export type WaterGLHandle = {
+  drop: (xNorm: number, yNorm: number, isMove?: boolean) => void;
+  /** Ola fuerte que sube desde abajo (transición intro → login). */
+  bigWave: () => void;
+};
 
 const MAX_DROPS = 8; // impactos inyectados por frame (rastro del arrastre)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
@@ -140,6 +144,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       }
       lastUv.current = { x, y };
     },
+    bigWave() {
+      // Fila de impactos FUERTES en el borde inferior → ola plana que sube.
+      for (let i = 0; i < 8; i++) push((i + 0.5) / 8, 0.05, 3.2);
+    },
   }));
 
   const onContextCreate = (gl: any) => {
@@ -222,8 +230,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const loop = () => {
         // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
         if (--ambient <= 0) {
-          push(Math.random(), Math.random(), 0.18);   // intensidad baja = sutil
-          ambient = 50 + Math.floor(Math.random() * 110);
+          push(Math.random(), Math.random(), 0.4);    // más marcadas pero menos que el toque
+          ambient = 45 + Math.floor(Math.random() * 90);
         }
 
         const flat: number[] = [];
