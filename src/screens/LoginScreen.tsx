@@ -107,16 +107,18 @@ export default function LoginScreen() {
   const dropAt = (x: number, y: number, isMove: boolean) =>
     glRef.current?.drop(x / layoutRef.current.w, y / layoutRef.current.h, isMove);
   const onTouchGL = (e: any) => {
-    const { locationX, locationY } = e.nativeEvent;
-    lastMove.current = { x: locationX, y: locationY };
-    dropAt(locationX, locationY, false);
+    // pageX/pageY = coords absolutas de pantalla (NO relativas al hijo bajo el dedo,
+    // que hacían saltar el punto al pasar por un input).
+    const { pageX, pageY } = e.nativeEvent;
+    lastMove.current = { x: pageX, y: pageY };
+    dropAt(pageX, pageY, false);
     resetIdle();
   };
   const onTouchGLMove = (e: any) => {
-    const { locationX, locationY } = e.nativeEvent;
-    if (Math.hypot(locationX - lastMove.current.x, locationY - lastMove.current.y) > 8) {
-      lastMove.current = { x: locationX, y: locationY };
-      dropAt(locationX, locationY, true);
+    const { pageX, pageY } = e.nativeEvent;
+    if (Math.hypot(pageX - lastMove.current.x, pageY - lastMove.current.y) > 8) {
+      lastMove.current = { x: pageX, y: pageY };
+      dropAt(pageX, pageY, true);
     }
   };
   // Captura el toque en fase de captura SIN robar el responder (return false) →
