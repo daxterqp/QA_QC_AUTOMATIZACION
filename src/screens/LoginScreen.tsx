@@ -5,16 +5,26 @@ import {
   ImageBackground, ActivityIndicator, Animated, Dimensions, Pressable, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  useFonts,
+  Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
+} from '@expo-google-fonts/montserrat';
 import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const CARD_BG = '#f7f9fb'; // color sólido de la tarjeta (para "cortar" el borde con la etiqueta)
+const CARD_BG = '#f7f9fb';
+const FF_REG = 'Montserrat_400Regular';
+const FF_SEMI = 'Montserrat_600SemiBold';
+const FF_BOLD = 'Montserrat_700Bold';
+const FF_XBOLD = 'Montserrat_800ExtraBold';
 
 export default function LoginScreen() {
   const { t } = useI18n();
   const { login, resetPassword } = useAuth();
+  const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,14 +32,13 @@ export default function LoginScreen() {
   const [focused, setFocused] = useState<'email' | 'password' | null>(null);
   const [entered, setEntered] = useState(false);
 
-  // Modal "olvidé mi contraseña"
   const [showReset, setShowReset] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetting, setResetting] = useState(false);
 
-  const enterAnim = useRef(new Animated.Value(0)).current;   // 0 = intro (solo logo), 1 = login visible
-  const breathe = useRef(new Animated.Value(0)).current;     // drift sutil del fondo
-  const hintPulse = useRef(new Animated.Value(0)).current;   // pulso del "toca para comenzar"
+  const enterAnim = useRef(new Animated.Value(0)).current;
+  const breathe = useRef(new Animated.Value(0)).current;
+  const hintPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -72,45 +81,60 @@ export default function LoginScreen() {
     } finally { setResetting(false); }
   };
 
-  // Placeholders (se activan en el próximo paso).
   const handleGoogle = () => Alert.alert(t('login.googleSetupTitle'), t('login.googleSetupMsg'));
   const handleCreateAccount = () => Alert.alert(t('login.signupSoonTitle'), t('login.signupSoonMsg'));
 
-  // Interpolaciones de la animación.
-  const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.24, 0] });
-  const logoScale = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [1.55, 1] });
+  const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.27, 0] });
+  const logoScale = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [1.42, 1] });
   const introOpacity = enterAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' });
   const cardOpacity = enterAnim.interpolate({ inputRange: [0.35, 1], outputRange: [0, 1], extrapolate: 'clamp' });
   const cardTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
   const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
   const hintOpacity = hintPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
 
+  // Fondo siempre presente (también mientras cargan las fuentes).
+  const Background = (
+    <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
+      <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
+    </Animated.View>
+  );
+
+  if (!fontsLoaded) {
+    return <View style={styles.root}>{Background}</View>;
+  }
+
   return (
     <View style={styles.root}>
-      {/* Fondo con drift sutil (líneas en movimiento) */}
-      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
-        <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
-      </Animated.View>
+      {Background}
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" scrollEnabled={entered}>
 
           <Animated.View style={[styles.logoWrap, { transform: [{ translateY: logoTranslateY }, { scale: logoScale }] }]}>
             <Image source={require('../../assets/logo-login.png')} style={styles.logo} resizeMode="contain" />
-            <Animated.Text style={[styles.tagline, { opacity: introOpacity }]}>{t('login.subtitle')}</Animated.Text>
           </Animated.View>
-
-          {!entered && (
-            <Animated.Text style={[styles.tapHint, { opacity: Animated.multiply(introOpacity, hintOpacity) }]}>
-              {t('login.tapToStart')}
-            </Animated.Text>
-          )}
 
           <Animated.View
             style={[styles.card, { opacity: cardOpacity, transform: [{ translateY: cardTranslateY }] }]}
             pointerEvents={entered ? 'auto' : 'none'}
           >
-            {/* Correo (etiqueta sobre el borde) */}
+            {/* Arriba: Google + Crear cuenta */}
+            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85}>
+              <Ionicons name="logo-google" size={18} color="#4285F4" />
+              <Text style={styles.googleBtnText}>{t('login.continueGoogle')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleCreateAccount} style={styles.createBtn}>
+              <Text style={styles.createText}>{t('login.createAccount')}</Text>
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>{t('login.or')}</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Abajo: correo + contraseña + ingresar */}
             <View style={styles.field}>
               <View style={styles.fieldLabelChip}><Text style={styles.fieldLabel}>{t('login.emailLabel')}</Text></View>
               <View style={[styles.fieldBox, focused === 'email' && styles.fieldBoxFocused]}>
@@ -132,7 +156,6 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* Contraseña (etiqueta sobre el borde + ojo) */}
             <View style={styles.field}>
               <View style={styles.fieldLabelChip}><Text style={styles.fieldLabel}>{t('login.passwordLabel')}</Text></View>
               <View style={[styles.fieldBox, focused === 'password' && styles.fieldBoxFocused]}>
@@ -158,31 +181,23 @@ export default function LoginScreen() {
               <Text style={styles.forgotText}>{t('login.forgotPassword')}</Text>
             </TouchableOpacity>
 
+            {/* Botón Ingresar — degradado (cara de la app) */}
             <TouchableOpacity
-              style={[styles.btn, !canContinue && styles.btnDisabled]}
+              style={[styles.btnWrap, !canContinue && styles.btnWrapDisabled]}
               onPress={handleLogin}
               disabled={!canContinue || loading}
-              activeOpacity={0.85}
+              activeOpacity={0.9}
             >
-              {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.btnText}>{t('login.submit')}</Text>}
-            </TouchableOpacity>
-
-            {/* Divisor "o" */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>{t('login.or')}</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Google */}
-            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85}>
-              <Ionicons name="logo-google" size={18} color="#4285F4" />
-              <Text style={styles.googleBtnText}>{t('login.continueGoogle')}</Text>
-            </TouchableOpacity>
-
-            {/* Crear cuenta */}
-            <TouchableOpacity onPress={handleCreateAccount} style={styles.createBtn}>
-              <Text style={styles.createText}>{t('login.createAccount')}</Text>
+              <ImageBackground source={require('../../assets/login-btn.png')} style={styles.btnBg} imageStyle={styles.btnBgImg} resizeMode="cover">
+                {loading
+                  ? <ActivityIndicator color={Colors.white} />
+                  : (
+                    <View style={styles.btnContent}>
+                      <Text style={styles.btnText}>{t('login.submit')}</Text>
+                      <Ionicons name="arrow-forward" size={18} color={Colors.white} />
+                    </View>
+                  )}
+              </ImageBackground>
             </TouchableOpacity>
           </Animated.View>
 
@@ -201,7 +216,14 @@ export default function LoginScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Capa de toque del intro (solo logo → tocar para entrar) */}
+      {/* "Toca para comenzar" — abajo, sin tapar el logo */}
+      {!entered && (
+        <Animated.Text style={[styles.tapHint, { opacity: Animated.multiply(introOpacity, hintOpacity) }]}>
+          {t('login.tapToStart')}
+        </Animated.Text>
+      )}
+
+      {/* Capa de toque del intro */}
       {!entered && <Pressable style={StyleSheet.absoluteFill} onPress={enterApp} accessibilityLabel={t('login.tapToStart')} />}
 
       {/* Modal: olvidé mi contraseña */}
@@ -230,7 +252,7 @@ export default function LoginScreen() {
                 <Text style={styles.modalCancel}>{t('login.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalConfirm, (!resetValid || resetting) && styles.btnDisabled]}
+                style={[styles.modalConfirm, (!resetValid || resetting) && styles.btnWrapDisabled]}
                 onPress={handleReset}
                 disabled={!resetValid || resetting}
               >
@@ -248,69 +270,74 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.navy },
   flex: { flex: 1 },
-  scroll: { flexGrow: 1, justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 24, paddingTop: SCREEN_H * 0.13, paddingBottom: 36 },
+  scroll: { flexGrow: 1, justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 24, paddingTop: SCREEN_H * 0.085, paddingBottom: 32 },
 
-  logoWrap: { alignItems: 'center', marginBottom: 10 },
-  logo: { width: 300, height: 188 },
-  tagline: { fontSize: 13, color: Colors.light, textAlign: 'center', marginTop: 2, letterSpacing: 0.3 },
-  tapHint: { fontSize: 12.5, color: Colors.white, textAlign: 'center', marginTop: 18, letterSpacing: 1, textTransform: 'uppercase' },
+  logoWrap: { alignItems: 'center', marginBottom: 4 },
+  logo: { width: 336, height: 206 },
 
-  // Tarjeta translúcida (más compacta, sin título)
+  tapHint: {
+    position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
+    fontFamily: FF_SEMI, fontSize: 12, color: Colors.white, letterSpacing: 2, textTransform: 'uppercase',
+  },
+
+  // Tarjeta translúcida compacta
   card: {
     backgroundColor: CARD_BG,
     borderRadius: Radius.lg,
-    paddingHorizontal: 20, paddingTop: 22, paddingBottom: 18,
-    marginTop: 18,
-    gap: 14,
+    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 18,
+    marginTop: 8,
+    gap: 12,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
     ...Shadow.card, shadowOpacity: 0.35, shadowRadius: 24, elevation: 12,
   },
-
-  // Campo con etiqueta sobre el borde (notched outline)
-  field: { position: 'relative' },
-  fieldLabelChip: {
-    position: 'absolute', top: -8, left: 14, zIndex: 2,
-    backgroundColor: CARD_BG, paddingHorizontal: 6,
-  },
-  fieldLabel: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, letterSpacing: 0.3 },
-  fieldBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1.5, borderColor: Colors.border, borderRadius: 22,
-    paddingHorizontal: 18, backgroundColor: Colors.white,
-  },
-  fieldBoxFocused: { borderColor: Colors.primary },
-  fieldInput: { flex: 1, paddingVertical: 14, fontSize: 15, color: Colors.textPrimary },
-
-  forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
-  forgotText: { fontSize: 12.5, color: Colors.primary, fontWeight: '600' },
-
-  btn: { backgroundColor: Colors.primary, borderRadius: 24, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
-  btnDisabled: { backgroundColor: Colors.light },
-  btnText: { color: Colors.white, fontSize: 14, fontWeight: '700', letterSpacing: 2 },
-
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { fontSize: 12, color: Colors.textMuted },
 
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: 24,
     paddingVertical: 13, backgroundColor: Colors.white,
   },
-  googleBtnText: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  googleBtnText: { fontFamily: FF_BOLD, fontSize: 14, color: Colors.textPrimary },
+  createBtn: { alignItems: 'center', paddingVertical: 2 },
+  createText: { fontFamily: FF_BOLD, fontSize: 13.5, color: Colors.primary },
 
-  createBtn: { alignItems: 'center', paddingVertical: 4 },
-  createText: { fontSize: 13.5, color: Colors.primary, fontWeight: '700' },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 2 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
+  dividerText: { fontFamily: FF_REG, fontSize: 12, color: Colors.textMuted },
 
-  footer: { textAlign: 'center', color: Colors.light, fontSize: 11, paddingTop: 22, paddingHorizontal: 12, lineHeight: 18 },
-  privacyLink: { textAlign: 'center', color: Colors.light, fontSize: 11, textDecorationLine: 'underline', paddingTop: 8 },
+  field: { position: 'relative' },
+  fieldLabelChip: { position: 'absolute', top: -8, left: 14, zIndex: 2, backgroundColor: CARD_BG, paddingHorizontal: 6 },
+  fieldLabel: { fontFamily: FF_SEMI, fontSize: 11, color: Colors.textSecondary, letterSpacing: 0.3 },
+  fieldBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: Colors.border, borderRadius: 22,
+    paddingHorizontal: 18, backgroundColor: Colors.white,
+  },
+  fieldBoxFocused: { borderColor: Colors.primary },
+  fieldInput: { flex: 1, paddingVertical: 14, fontSize: 15, color: Colors.textPrimary, fontFamily: FF_REG },
+
+  forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
+  forgotText: { fontFamily: FF_SEMI, fontSize: 12.5, color: Colors.primary },
+
+  // Botón Ingresar con degradado
+  btnWrap: {
+    borderRadius: 26, overflow: 'hidden', marginTop: 2,
+    ...Shadow.card, shadowColor: Colors.navy, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8,
+  },
+  btnWrapDisabled: { opacity: 0.5 },
+  btnBg: { minHeight: 56, alignItems: 'center', justifyContent: 'center' },
+  btnBgImg: { borderRadius: 26 },
+  btnContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  btnText: { fontFamily: FF_XBOLD, color: Colors.white, fontSize: 15, letterSpacing: 2.5 },
+
+  footer: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, paddingTop: 20, paddingHorizontal: 12, lineHeight: 18 },
+  privacyLink: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, textDecorationLine: 'underline', paddingTop: 8 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.78)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, width: '100%', gap: 14 },
-  modalTitle: { fontSize: 17, fontWeight: '800', color: Colors.navy, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
+  modalTitle: { fontFamily: FF_XBOLD, fontSize: 17, color: Colors.navy, textAlign: 'center' },
+  modalSubtitle: { fontFamily: FF_REG, fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
   modalActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  modalCancel: { fontSize: 13, color: Colors.textMuted, padding: 8, fontWeight: '600' },
+  modalCancel: { fontFamily: FF_SEMI, fontSize: 13, color: Colors.textMuted, padding: 8 },
   modalConfirm: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: 22, paddingVertical: 12 },
-  modalConfirmText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
+  modalConfirmText: { fontFamily: FF_BOLD, color: Colors.white, fontSize: 13 },
 });

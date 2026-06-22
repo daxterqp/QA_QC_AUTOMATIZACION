@@ -48,8 +48,31 @@ async function resolveSharp() {
   try { return createRequire(path.join(WEB, 'package.json'))('sharp'); } catch { return null; }
 }
 
+// Degradado horizontal para el botón "Ingresar" (cara de la app).
+const BW = 900, BH = 150;
+const btnSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${BW}" height="${BH}" viewBox="0 0 ${BW} ${BH}">
+  <defs>
+    <linearGradient id="b" x1="0" y1="0" x2="1" y2="0.35">
+      <stop offset="0" stop-color="#243a68"/>
+      <stop offset="0.5" stop-color="#394e7d"/>
+      <stop offset="1" stop-color="#5e82bd"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="${BW}" height="${BH}" fill="url(#b)"/>
+  <rect width="${BW}" height="${BH}" fill="url(#sheen)"/>
+</svg>`;
+
 const sharp = await resolveSharp();
 if (!sharp) { console.error('[gen-login-bg] sharp no disponible'); process.exit(1); }
 const png = await sharp(Buffer.from(svg)).png().toBuffer();
 await fs.writeFile(OUT, png);
 console.log(`[gen-login-bg] ✓ ${path.relative(ROOT, OUT)} (${W}x${H}, ${(png.length / 1024).toFixed(0)} KB)`);
+
+const BTN_OUT = path.join(ROOT, 'assets', 'login-btn.png');
+const btnPng = await sharp(Buffer.from(btnSvg)).png().toBuffer();
+await fs.writeFile(BTN_OUT, btnPng);
+console.log(`[gen-login-bg] ✓ ${path.relative(ROOT, BTN_OUT)} (${BW}x${BH}, ${(btnPng.length / 1024).toFixed(0)} KB)`);
