@@ -65,12 +65,12 @@ uniform float uRefract;
 uniform float uSpec;
 
 vec3 bgColor(vec2 uv){
-  vec3 a = vec3(0.039, 0.094, 0.188);
-  vec3 b = vec3(0.169, 0.267, 0.455);
-  float t = clamp(uv.x * 0.4 + (1.0 - uv.y) * 0.6, 0.0, 1.0);
+  vec3 a = vec3(0.07, 0.14, 0.27);    // navy más claro (más iluminado)
+  vec3 b = vec3(0.26, 0.38, 0.58);    // azul más claro
+  float t = clamp(uv.x * 0.4 + uv.y * 0.6, 0.0, 1.0);   // navy arriba-izq → azul abajo-der
   vec3 col = mix(a, b, t);
-  float g = smoothstep(0.95, 0.0, distance(uv, vec2(0.85, 0.92)));
-  col += vec3(0.20, 0.27, 0.40) * g * 0.5;
+  float g = smoothstep(0.95, 0.0, distance(uv, vec2(0.85, 0.08)));  // glow arriba-derecha
+  col += vec3(0.22, 0.30, 0.45) * g * 0.55;
   return col;
 }
 
@@ -117,7 +117,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
   useImperativeHandle(ref, () => ({
     drop(xNorm: number, yNorm: number, isMove = false) {
-      const x = xNorm, y = 1 - yNorm;             // flip Y (toque arriba-izq → uv abajo-izq)
+      const x = xNorm, y = yNorm;                 // expo-gl: uv.y=0 arriba → coincide con el toque (sin flip)
       if (isMove) {
         // Interpola entre el último punto y el actual → rastro fluido (sin saltos).
         const d = Math.hypot(x - lastUv.current.x, y - lastUv.current.y);
@@ -208,8 +208,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.06);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.42);
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.035);  // olas más chicas
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.3);   // más suaves
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         const tmp = a; a = b; b = tmp;
 
@@ -222,9 +222,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.bindTexture(gl.TEXTURE_2D, a.tex);
         gl.uniform1i(gl.getUniformLocation(renP, 'uState'), 0);
         gl.uniform2f(gl.getUniformLocation(renP, 'uTexel'), texel[0], texel[1]);
-        gl.uniform1f(gl.getUniformLocation(renP, 'uNormalZ'), 0.14);   // normales más planas → menos sombra
-        gl.uniform1f(gl.getUniformLocation(renP, 'uRefract'), 0.45);   // menos distorsión → menos sombra
-        gl.uniform1f(gl.getUniformLocation(renP, 'uSpec'), 0.45);      // brillo más sutil
+        gl.uniform1f(gl.getUniformLocation(renP, 'uNormalZ'), 0.20);   // más planas → menos sombra
+        gl.uniform1f(gl.getUniformLocation(renP, 'uRefract'), 0.28);   // menos distorsión → menos sombra
+        gl.uniform1f(gl.getUniformLocation(renP, 'uSpec'), 0.5);       // un poco más de brillo (luz)
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
         gl.flush();
