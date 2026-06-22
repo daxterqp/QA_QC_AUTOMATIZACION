@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Image, ImageBackground, Animated, Easing, Pressable, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFonts, Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
 } from '@expo-google-fonts/montserrat';
@@ -17,6 +18,7 @@ const FF_BOLD = 'Montserrat_700Bold';
  */
 export default function BiometricLockScreen() {
   const { unlockBiometric, logout, currentUser } = useAuth();
+  const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
   const [busy, setBusy] = useState(false);
   const triedRef = useRef(false);
@@ -66,11 +68,11 @@ export default function BiometricLockScreen() {
           )}
         </Pressable>
 
-        <Animated.Text style={[styles.hint, fontsLoaded && { fontFamily: FF_SEMI }, { opacity: hintOpacity }]}>
+        <Animated.Text style={[styles.hint, fontsLoaded && { fontFamily: FF_SEMI }, { opacity: hintOpacity, bottom: 96 + insets.bottom }]}>
           Toca para desbloquear
         </Animated.Text>
 
-        <TouchableOpacity style={styles.otherBtn} onPress={() => logout()}>
+        <TouchableOpacity style={[styles.otherBtn, { bottom: 52 + insets.bottom }]} onPress={() => logout()}>
           <Text style={[styles.otherText, fontsLoaded && { fontFamily: FF_SEMI }]}>Usar otra cuenta</Text>
         </TouchableOpacity>
       </WaterRipples>

@@ -5,6 +5,7 @@ import {
   ImageBackground, ActivityIndicator, Animated, Dimensions, Pressable, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFonts,
   Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
@@ -24,6 +25,7 @@ const FF_XBOLD = 'Montserrat_800ExtraBold';
 
 export default function LoginScreen() {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { login, loginWithGoogle, signUp, resetPassword } = useAuth();
   const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
 
@@ -57,6 +59,7 @@ export default function LoginScreen() {
   const enterAnim = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
   const hintPulse = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current; // difuminado "cambiante"
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -67,7 +70,11 @@ export default function LoginScreen() {
       Animated.timing(hintPulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
       Animated.timing(hintPulse, { toValue: 0, duration: 1100, useNativeDriver: true }),
     ])).start();
-  }, [breathe, hintPulse]);
+    Animated.loop(Animated.sequence([
+      Animated.timing(glowAnim, { toValue: 1, duration: 13000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      Animated.timing(glowAnim, { toValue: 0, duration: 13000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    ])).start();
+  }, [breathe, hintPulse, glowAnim]);
 
   const resetIdle = () => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
@@ -149,13 +156,23 @@ export default function LoginScreen() {
   const introOpacity = enterAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' });
   const cardOpacity = enterAnim.interpolate({ inputRange: [0.35, 1], outputRange: [0, 1], extrapolate: 'clamp' });
   const cardTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
-  const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const bgScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] });
   const hintOpacity = hintPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] });
+  const glowX = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [-40, 70] });
+  const glowY = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [-30, 80] });
+  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.35, 0.8, 0.35] });
 
-  // Fondo siempre presente (también mientras cargan las fuentes).
+  // Fondo siempre presente (también mientras cargan las fuentes) + glow que se
+  // desplaza lento (difuminado "cambiante", sin deps nativas).
   const Background = (
     <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: bgScale }] }]}>
-      <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover" />
+      <ImageBackground source={require('../../assets/login-bg.png')} style={styles.flex} resizeMode="cover">
+        <Animated.Image
+          source={require('../../assets/login-glow.png')}
+          resizeMode="contain"
+          style={[styles.glow, { opacity: glowOpacity, transform: [{ translateX: glowX }, { translateY: glowY }] }]}
+        />
+      </ImageBackground>
     </Animated.View>
   );
 
@@ -169,7 +186,7 @@ export default function LoginScreen() {
 
       <WaterRipples onInteract={resetIdle}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" scrollEnabled={entered}>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 24 + insets.bottom, paddingTop: insets.top + SCREEN_H * 0.05 }]} keyboardShouldPersistTaps="handled" scrollEnabled={entered}>
 
           <Animated.View style={[styles.logoWrap, { transform: [{ translateY: logoTranslateY }, { scale: logoScale }] }]}>
             <Image source={require('../../assets/logo-login.png')} style={styles.logo} resizeMode="contain" />
@@ -415,13 +432,15 @@ const styles = StyleSheet.create({
     fontFamily: FF_SEMI, fontSize: 12, color: Colors.white, letterSpacing: 2, textTransform: 'uppercase',
   },
 
+  glow: { position: 'absolute', top: -120, left: -60, width: 700, height: 700 },
+
   // Tarjeta translúcida compacta
   card: {
     backgroundColor: CARD_BG,
     borderRadius: Radius.lg,
-    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 18,
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 14,
     marginTop: -10,
-    gap: 12,
+    gap: 9,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
     ...Shadow.card, shadowOpacity: 0.35, shadowRadius: 24, elevation: 12,
   },
@@ -429,7 +448,7 @@ const styles = StyleSheet.create({
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: 24,
-    paddingVertical: 13, backgroundColor: Colors.white,
+    paddingVertical: 11, backgroundColor: Colors.white,
   },
   googleBtnText: { fontFamily: FF_BOLD, fontSize: 14, color: Colors.textPrimary },
   createBtn: { alignItems: 'center', paddingVertical: 2 },
@@ -448,7 +467,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18, backgroundColor: Colors.white,
   },
   fieldBoxFocused: { borderColor: Colors.primary },
-  fieldInput: { flex: 1, paddingVertical: 13, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
+  fieldInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
 
   recentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -4 },
   recentChip: {
@@ -467,7 +486,7 @@ const styles = StyleSheet.create({
     ...Shadow.card, shadowColor: Colors.navy, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
   btnWrapDisabled: { opacity: 0.5 },
-  btnBg: { minHeight: 56, alignItems: 'center', justifyContent: 'center' },
+  btnBg: { minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   btnBgImg: { borderRadius: 26 },
   btnContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   btnText: { fontFamily: FF_XBOLD, color: Colors.white, fontSize: 15, letterSpacing: 2.5 },
