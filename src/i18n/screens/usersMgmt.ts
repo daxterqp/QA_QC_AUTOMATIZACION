@@ -11,6 +11,7 @@ const usersMgmt: Record<string, { es: string; en: string; pt: string }> = {
   'usersMgmt.role.resident': { es: 'Jefe', en: 'Manager', pt: 'Chefe' },
   'usersMgmt.role.supervisor': { es: 'Supervisor', en: 'Supervisor', pt: 'Supervisor' },
   'usersMgmt.role.operator': { es: 'Técnico', en: 'Technician', pt: 'Técnico' },
+  'usersMgmt.role.viewer': { es: 'Visualizador', en: 'Viewer', pt: 'Visualizador' },
 
   // Barra superior (acciones del Creador)
   'usersMgmt.addUser': { es: 'Añadir usuario', en: 'Add user', pt: 'Adicionar usuário' },

@@ -55,11 +55,39 @@ const login: Record<string, { es: string; en: string; pt: string }> = {
     en: 'Could not sign in with Google. If it was just set up, the app may need a rebuild.',
     pt: 'Não foi possível entrar com Google. Se foi configurado agora, o app pode precisar ser recompilado.',
   },
-  'login.signupSoonTitle': { es: 'Crear cuenta', en: 'Create account', pt: 'Criar conta' },
-  'login.signupSoonMsg': {
-    es: 'El registro de cuenta se activa en el siguiente paso.',
-    en: 'Account sign-up will be enabled in the next step.',
-    pt: 'O cadastro de conta será ativado na próxima etapa.',
+  // Modal de registro (crear cuenta)
+  'login.signupTitle': { es: 'Crear una cuenta', en: 'Create an account', pt: 'Criar uma conta' },
+  'login.signupSubtitle': {
+    es: 'Tu cuenta se crea como Visualizador. Un administrador te asignará acceso a proyectos.',
+    en: 'Your account is created as Viewer. An administrator will grant you project access.',
+    pt: 'Sua conta é criada como Visualizador. Um administrador concederá acesso aos projetos.',
+  },
+  'login.signupName': { es: 'Nombre y apellido', en: 'Full name', pt: 'Nome completo' },
+  'login.signupCreate': { es: 'Crear cuenta', en: 'Create account', pt: 'Criar conta' },
+  'login.signupCreating': { es: 'Creando...', en: 'Creating...', pt: 'Criando...' },
+  'login.signupOkTitle': { es: 'Cuenta creada', en: 'Account created', pt: 'Conta criada' },
+  'login.signupOkMsg': {
+    es: 'Listo. Aún no tenés acceso a proyectos: pedile a un administrador que te los asigne.',
+    en: 'Done. You have no project access yet: ask an administrator to assign them.',
+    pt: 'Pronto. Você ainda não tem acesso a projetos: peça a um administrador para atribuí-los.',
+  },
+  'login.signupConfirmTitle': { es: 'Confirma tu correo', en: 'Confirm your email', pt: 'Confirme seu e-mail' },
+  'login.signupConfirmMsg': {
+    es: 'Te enviamos un correo para confirmar tu cuenta. Confírmalo y luego inicia sesión.',
+    en: 'We sent you an email to confirm your account. Confirm it and then sign in.',
+    pt: 'Enviamos um e-mail para confirmar sua conta. Confirme e depois entre.',
+  },
+  'login.signupExistsTitle': { es: 'Correo ya registrado', en: 'Email already registered', pt: 'E-mail já registrado' },
+  'login.signupExistsMsg': {
+    es: 'Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.',
+    en: 'That email already has an account. Sign in or reset your password.',
+    pt: 'Esse e-mail já tem uma conta. Entre ou recupere sua senha.',
+  },
+  'login.signupErrorTitle': { es: 'No se pudo crear', en: 'Could not create', pt: 'Não foi possível criar' },
+  'login.signupErrorMsg': {
+    es: 'Revisa los datos (contraseña mínima 6) e intenta de nuevo.',
+    en: 'Check the details (password min 6) and try again.',
+    pt: 'Verifique os dados (senha mínima 6) e tente novamente.',
   },
 
   // Modal "olvidé mi contraseña"

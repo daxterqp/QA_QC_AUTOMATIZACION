@@ -1,7 +1,7 @@
 // ─── Tipos centrales de S-CUA Web ────────────────────────────────────────────
 // Mapeados 1:1 con las tablas de Supabase (y los modelos WatermelonDB del APK)
 
-export type UserRole = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR';
+export type UserRole = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR' | 'VIEWER';
 
 export interface User {
   id: string;

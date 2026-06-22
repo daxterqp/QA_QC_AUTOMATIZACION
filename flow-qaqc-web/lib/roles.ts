@@ -9,6 +9,7 @@ export const ROLE_LABEL: Record<UserRole, string> = {
   RESIDENT: 'Jefe',
   SUPERVISOR: 'Supervisor',
   OPERATOR: 'Técnico',
+  VIEWER: 'Visualizador',
 };
 
 export function roleLabel(role?: string | null): string {

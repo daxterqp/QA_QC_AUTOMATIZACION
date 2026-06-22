@@ -19,6 +19,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
   /** Inicia sesión con Google (flujo OAuth de Supabase en el navegador del sistema). */
   loginWithGoogle: () => Promise<'ok' | 'cancelled' | 'error' | 'no_account'>;
+  /** Auto-registro por email. El trigger crea la fila como VIEWER sin acceso. */
+  signUp: (email: string, password: string, name: string) => Promise<'ok' | 'confirm_email' | 'exists' | 'error'>;
   loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
@@ -250,6 +252,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const signUp = useCallback(async (
+    email: string, password: string, name: string,
+  ): Promise<'ok' | 'confirm_email' | 'exists' | 'error'> => {
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: { data: { full_name: name.trim() } },
+    });
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) return 'exists';
+      return 'error';
+    }
+    // El trigger handle_new_user crea la fila en `users` como VIEWER (sin acceso).
+    if (data.session && data.user) {
+      // Auto-confirm activo → entra directo (verá el estado "sin proyectos asignados").
+      const user = await resolveAppUserByAuthId(data.user.id);
+      if (user) { setCurrentUser(user); registerPushToken(user.id).catch(() => {}); }
+      return 'ok';
+    }
+    // Sin sesión → Supabase requiere confirmación por correo.
+    return 'confirm_email';
+  }, []);
+
   const loginDemo = useCallback(() => {
     const demoUser = {
       id: 'demo-user',
@@ -322,7 +348,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser, isDemo]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginWithGoogle, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginWithGoogle, signUp, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

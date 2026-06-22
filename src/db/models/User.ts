@@ -1,7 +1,7 @@
 import { Model } from '@nozbe/watermelondb';
 import { field, date, readonly } from '@nozbe/watermelondb/decorators';
 
-export type UserRole = 'CREATOR' | 'OPERATOR' | 'SUPERVISOR' | 'RESIDENT';
+export type UserRole = 'CREATOR' | 'OPERATOR' | 'SUPERVISOR' | 'RESIDENT' | 'VIEWER';
 
 export default class User extends Model {
   static table = 'users';

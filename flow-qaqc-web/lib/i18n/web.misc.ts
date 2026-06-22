@@ -9,6 +9,7 @@ export const STRINGS_WEB_MISC: Record<string, { es: string; en: string; pt: stri
   'webMisc.roleResident': { es: 'Jefe', en: 'Chief', pt: 'Chefe' },
   'webMisc.roleSupervisor': { es: 'Supervisor', en: 'Supervisor', pt: 'Supervisor' },
   'webMisc.roleOperator': { es: 'Técnico', en: 'Technician', pt: 'Técnico' },
+  'webMisc.roleViewer': { es: 'Visualizador', en: 'Viewer', pt: 'Visualizador' },
   'webMisc.noAccess': { es: 'Sin acceso', en: 'No access', pt: 'Sem acesso' },
   'webMisc.creatorsOnly': {
     es: 'Sólo los usuarios con rol CREADOR pueden gestionar usuarios.',

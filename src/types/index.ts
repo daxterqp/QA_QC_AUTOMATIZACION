@@ -10,7 +10,7 @@ export type UploadStatus = 'PENDING' | 'SYNCED';
 
 // ─── Roles de usuario (para integracion con Cognito en Fase 4) ──────────────
 
-export type UserRole = 'OPERATOR' | 'SUPERVISOR' | 'RESIDENT';
+export type UserRole = 'OPERATOR' | 'SUPERVISOR' | 'RESIDENT' | 'VIEWER';
 
 // ─── DTOs para sincronizacion con el backend ─────────────────────────────────
 

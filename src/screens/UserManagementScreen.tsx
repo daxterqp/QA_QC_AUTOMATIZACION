@@ -20,16 +20,17 @@ import { useTour } from '@context/TourContext';
 import { useTourStep } from '@hooks/useTourStep';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserManagement'>;
-type Role = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR';
+type Role = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR' | 'VIEWER';
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   CREATOR:    { label: tx('usersMgmt.role.creator'),    color: '#5b2d8e' },
   RESIDENT:   { label: tx('usersMgmt.role.resident'),       color: Colors.primary },
   SUPERVISOR: { label: tx('usersMgmt.role.supervisor'), color: Colors.secondary },
   OPERATOR:   { label: tx('usersMgmt.role.operator'),    color: Colors.warning },
+  VIEWER:     { label: tx('usersMgmt.role.viewer'),     color: Colors.textMuted },
 };
 // El Creador puede asignar estos roles (no puede crear otros Creadores desde aquí).
-const ASSIGNABLE_ROLES: Role[] = ['RESIDENT', 'SUPERVISOR', 'OPERATOR'];
+const ASSIGNABLE_ROLES: Role[] = ['RESIDENT', 'SUPERVISOR', 'OPERATOR', 'VIEWER'];
 
 /**
  * Mensaje real de un error de `supabase.functions.invoke`. Cuando la Edge

@@ -21,9 +21,10 @@ const ROLE_META: Record<UserRole, { labelKey: string; cls: string }> = {
   RESIDENT:   { labelKey: 'webMisc.roleResident',   cls: 'bg-primary/10 text-primary' },
   SUPERVISOR: { labelKey: 'webMisc.roleSupervisor', cls: 'bg-blue-100 text-blue-700' },
   OPERATOR:   { labelKey: 'webMisc.roleOperator',   cls: 'bg-amber-100 text-amber-700' },
+  VIEWER:     { labelKey: 'webMisc.roleViewer',     cls: 'bg-gray-100 text-gray-600' },
 };
 
-const ROLES: UserRole[] = ['CREATOR', 'RESIDENT', 'SUPERVISOR', 'OPERATOR'];
+const ROLES: UserRole[] = ['CREATOR', 'RESIDENT', 'SUPERVISOR', 'OPERATOR', 'VIEWER'];
 
 export default function UsersPage() {
   const router = useRouter();

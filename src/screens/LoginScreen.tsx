@@ -22,7 +22,7 @@ const FF_XBOLD = 'Montserrat_800ExtraBold';
 
 export default function LoginScreen() {
   const { t } = useI18n();
-  const { login, loginWithGoogle, resetPassword } = useAuth();
+  const { login, loginWithGoogle, signUp, resetPassword } = useAuth();
   const [fontsLoaded] = useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
 
   const [email, setEmail] = useState('');
@@ -36,6 +36,13 @@ export default function LoginScreen() {
   const [resetEmail, setResetEmail] = useState('');
   const [resetting, setResetting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Modal "crear cuenta"
+  const [showSignup, setShowSignup] = useState(false);
+  const [suName, setSuName] = useState('');
+  const [suEmail, setSuEmail] = useState('');
+  const [suPassword, setSuPassword] = useState('');
+  const [signingUp, setSigningUp] = useState(false);
 
   const enterAnim = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
@@ -94,7 +101,21 @@ export default function LoginScreen() {
       Alert.alert(t('login.googleErrorTitle'), t('login.googleErrorMsg'));
     }
   };
-  const handleCreateAccount = () => Alert.alert(t('login.signupSoonTitle'), t('login.signupSoonMsg'));
+  const suValid = suName.trim().length >= 2 && /\S+@\S+\.\S+/.test(suEmail.trim()) && suPassword.length >= 6;
+  const handleCreateAccount = () => {
+    setSuName(''); setSuEmail(email.trim()); setSuPassword('');
+    setShowSignup(true);
+  };
+  const handleSignup = async () => {
+    if (!suValid || signingUp) return;
+    setSigningUp(true);
+    const res = await signUp(suEmail.trim(), suPassword, suName.trim());
+    setSigningUp(false);
+    if (res === 'ok') { setShowSignup(false); Alert.alert(t('login.signupOkTitle'), t('login.signupOkMsg')); return; }
+    if (res === 'confirm_email') { setShowSignup(false); Alert.alert(t('login.signupConfirmTitle'), t('login.signupConfirmMsg')); return; }
+    if (res === 'exists') { Alert.alert(t('login.signupExistsTitle'), t('login.signupExistsMsg')); return; }
+    Alert.alert(t('login.signupErrorTitle'), t('login.signupErrorMsg'));
+  };
 
   const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.27, 0] });
   const logoScale = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [1.42, 1] });
@@ -273,6 +294,64 @@ export default function LoginScreen() {
                 disabled={!resetValid || resetting}
               >
                 <Text style={styles.modalConfirmText}>{resetting ? t('login.resetSending') : t('login.resetSend')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: crear cuenta */}
+      <Modal visible={showSignup} transparent animationType="fade" onRequestClose={() => setShowSignup(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('login.signupTitle')}</Text>
+            <Text style={styles.modalSubtitle}>{t('login.signupSubtitle')}</Text>
+            <View style={styles.fieldBox}>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={t('login.signupName')}
+                placeholderTextColor={Colors.textMuted}
+                value={suName}
+                onChangeText={setSuName}
+                autoCapitalize="words"
+                returnKeyType="next"
+              />
+            </View>
+            <View style={styles.fieldBox}>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={t('login.emailPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                value={suEmail}
+                onChangeText={setSuEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+              />
+            </View>
+            <View style={styles.fieldBox}>
+              <TextInput
+                style={styles.fieldInput}
+                placeholder={t('login.passwordPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                value={suPassword}
+                onChangeText={setSuPassword}
+                secureTextEntry
+                returnKeyType="done"
+                onSubmitEditing={handleSignup}
+              />
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setShowSignup(false)}>
+                <Text style={styles.modalCancel}>{t('login.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirm, (!suValid || signingUp) && styles.btnWrapDisabled]}
+                onPress={handleSignup}
+                disabled={!suValid || signingUp}
+              >
+                <Text style={styles.modalConfirmText}>{signingUp ? t('login.signupCreating') : t('login.signupCreate')}</Text>
               </TouchableOpacity>
             </View>
           </View>
