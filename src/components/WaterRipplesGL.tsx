@@ -21,6 +21,10 @@ export type WaterGLHandle = {
 };
 
 const MAX_DROPS = 8; // impactos inyectados por frame (rastro del arrastre)
+// Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
+const AUTO_SPEED = 0.1;   // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_STR = 0.55;    // intensidad del trazo sostenido
+const AUTO_Y = 0.08;      // altura (cerca del borde inferior)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
 const Y_OFFSET = 0.045;
@@ -205,6 +209,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       const EMPTY = new Array(MAX_DROPS * 2).fill(0);
       const EMPTY_STR = new Array(MAX_DROPS).fill(0);
       let ambient = 60;   // cuenta regresiva para la próxima gotita ambiental
+      let autoPhase = 0;  // fase de la animación por defecto (dos dedos abajo)
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
       const simStep = (flat: number[], strs: number[], count: number) => {
@@ -229,6 +234,12 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const loop = () => {
+        // Animación por defecto: dos dedos en la parte baja, borde↔centro, sostenido y en bucle.
+        autoPhase += AUTO_SPEED;
+        const s = (1 - Math.cos(autoPhase)) * 0.5;     // 0→1→0 suave
+        push(0.06 + 0.44 * s, AUTO_Y, AUTO_STR);        // izquierdo: borde izq → centro
+        push(0.94 - 0.44 * s, AUTO_Y, AUTO_STR);        // derecho: borde der → centro
+
         // Movimiento ambiental: gotita suave aleatoria cada ~0.8–2.5 s (agua viva).
         if (--ambient <= 0) {
           push(Math.random(), Math.random(), 0.4);    // más marcadas pero menos que el toque
