@@ -16,8 +16,8 @@ import { GLView } from 'expo-gl';
 
 export type WaterGLHandle = {
   drop: (xNorm: number, yNorm: number, isMove?: boolean) => void;
-  /** Ola fuerte que sube desde abajo (transición intro → login). */
-  bigWave: () => void;
+  /** Arco que recorre la pantalla (transición intro → login). speedMult: 1 = normal. */
+  bigWave: (speedMult?: number) => void;
 };
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
@@ -140,7 +140,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
   const lastUv = useRef({ x: 0.5, y: 0.5 });
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
-  const barridoRef = useRef({ active: false, y: 0 });   // una onda ancha que sube lento (entrada)
+  const barridoRef = useRef({ active: false, y: 0, speed: 1 });   // arco que sube (entrada). speed = multiplicador
 
   const push = (x: number, y: number, str: number) => {
     queue.current.push(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)), str);
@@ -163,9 +163,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       }
       lastUv.current = { x, y };
     },
-    bigWave() {
-      // Una ÚNICA onda ancha que sube lento desde abajo.
-      barridoRef.current = { active: true, y: 0.06 };
+    bigWave(speedMult = 1) {
+      // Arco que sube desde abajo. speedMult permite calibrar la velocidad en vivo.
+      barridoRef.current = { active: true, y: 0.06, speed: speedMult };
     },
   }));
 
@@ -272,7 +272,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
             push(x, yArc, 0.85);                             // masa repartida (no revienta)
           }
           const p = Math.min(1, by / 0.667);               // 0 abajo → 1 en 2/3
-          const v = 0.0011 + 0.0132 * p;                   // lento al inicio, acelera (+10%)
+          const v = (0.0011 + 0.0132 * p) * barridoRef.current.speed;  // × multiplicador en vivo
           barridoRef.current.y += v;
           if (barridoRef.current.y > 0.667) barridoRef.current.active = false;
         } else if (em.length > 0) {

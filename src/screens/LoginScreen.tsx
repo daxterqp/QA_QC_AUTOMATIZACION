@@ -82,7 +82,7 @@ export default function LoginScreen() {
     enteredRef.current = true;
     Animated.timing(enterAnim, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     resetIdle();
-    glRef.current?.bigWave();   // ola fuerte que sube al pasar al login
+    glRef.current?.bigWave(barridoSpeed);   // arco que sube al pasar al login
   };
 
   const goToIntro = () => {
@@ -101,6 +101,9 @@ export default function LoginScreen() {
   const layoutRef = useRef({ w: 1, h: 1 });
   const lastMove = useRef({ x: 0, y: 0 });
   const useGL = USE_GL_WATER && glSupported;
+
+  // Velocidad del barrido (arco) — calibrable en vivo desde el panel debug.
+  const [barridoSpeed, setBarridoSpeed] = useState(1);
 
   // ── Grabador de input del agua (debug) ──
   const recRef = useRef<{ t: number; x: number; y: number; m: number }[]>([]);
@@ -378,6 +381,22 @@ export default function LoginScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.recBtn} onPress={clearLog}>
             <Text style={styles.recBtnTxt}>Limpiar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Switch de velocidad del barrido (debug): ± y replay */}
+      {DEBUG_RECORD && (
+        <View style={[styles.recBox, { top: insets.top + 48 }]}>
+          <TouchableOpacity style={styles.recBtn} onPress={() => setBarridoSpeed(s => Math.max(0.25, +(s - 0.25).toFixed(2)))}>
+            <Text style={styles.recBtnTxt}>−</Text>
+          </TouchableOpacity>
+          <Text style={styles.recText}>v {barridoSpeed.toFixed(2)}×</Text>
+          <TouchableOpacity style={styles.recBtn} onPress={() => setBarridoSpeed(s => Math.min(6, +(s + 0.25).toFixed(2)))}>
+            <Text style={styles.recBtnTxt}>+</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.recBtn} onPress={() => glRef.current?.bigWave(barridoSpeed)}>
+            <Text style={styles.recBtnTxt}>▶ Barrido</Text>
           </TouchableOpacity>
         </View>
       )}
