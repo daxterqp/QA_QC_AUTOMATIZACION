@@ -119,8 +119,17 @@ export default function LoginScreen() {
       dropAt(locationX, locationY, true);
     }
   };
+  // Captura el toque en fase de captura SIN robar el responder (return false) →
+  // el rastro del agua sigue aunque el dedo pase por inputs/botones.
   const renderContent = (inner: React.ReactNode) => useGL
-    ? <View style={styles.flex} onLayout={onWrapLayout} onTouchStartCapture={onTouchGL} onTouchMoveCapture={onTouchGLMove}>{inner}</View>
+    ? (
+      <View
+        style={styles.flex}
+        onLayout={onWrapLayout}
+        onStartShouldSetResponderCapture={(e) => { onTouchGL(e); return false; }}
+        onMoveShouldSetResponderCapture={(e) => { onTouchGLMove(e); return false; }}
+      >{inner}</View>
+    )
     : <WaterRipples onInteract={resetIdle}>{inner}</WaterRipples>;
 
   const canContinue = /\S+@\S+\.\S+/.test(email.trim()) && password.length >= 1;
