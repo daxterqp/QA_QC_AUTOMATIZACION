@@ -260,14 +260,14 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
           emittersRef.current = em.filter(f => f.life > 0);
         } else {
-          // Dos dedos en la base. El recorrido avanza con VELOCIDAD VARIABLE (acelera/frena)
-          // → más creíble; el derecho un poco más lento → se desfasan solos.
-          autoPhaseL += AUTO_SPEED * (0.5 + Math.abs(Math.sin(autoPhaseL * 0.5)));
-          autoPhaseR += AUTO_SPEED * 0.78 * (0.5 + Math.abs(Math.sin(autoPhaseR * 0.65)));
+          // Dos dedos en la base que recorren TODA la pantalla (no solo su mitad), con
+          // velocidad MUY variable (dos armónicos) → más creíble; el der. un poco más lento.
+          autoPhaseL += AUTO_SPEED * (0.3 + 0.7 * Math.abs(Math.sin(autoPhaseL * 0.6)) + 0.35 * Math.abs(Math.sin(autoPhaseL * 1.7)));
+          autoPhaseR += AUTO_SPEED * 0.78 * (0.3 + 0.7 * Math.abs(Math.sin(autoPhaseR * 0.55)) + 0.35 * Math.abs(Math.sin(autoPhaseR * 1.9)));
           const sL = (1 - Math.cos(autoPhaseL)) * 0.5;
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
-          const lx = 0.06 + 0.44 * sL;
-          const rx = 0.94 - 0.44 * sR;
+          const lx = 0.06 + 0.88 * sL;        // recorre toda la pantalla
+          const rx = 0.94 - 0.88 * sR;        // arranca del otro borde
           // Vaivén en Y muy sutil (apenas perceptible).
           const lyy = AUTO_Y + 0.01 * Math.sin(autoPhaseL * 1.6);
           const ryy = AUTO_Y + 0.01 * Math.sin(autoPhaseR * 1.15 + 0.8);
