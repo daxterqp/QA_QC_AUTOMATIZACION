@@ -67,9 +67,9 @@ uniform float uSpec;
 vec3 bgColor(vec2 uv){
   vec3 a = vec3(0.07, 0.14, 0.27);    // navy más claro (más iluminado)
   vec3 b = vec3(0.26, 0.38, 0.58);    // azul más claro
-  float t = clamp(uv.x * 0.4 + uv.y * 0.6, 0.0, 1.0);   // navy arriba-izq → azul abajo-der
+  float t = clamp(uv.x * 0.4 + (1.0 - uv.y) * 0.6, 0.0, 1.0);   // navy arriba-izq → azul abajo-der
   vec3 col = mix(a, b, t);
-  float g = smoothstep(0.95, 0.0, distance(uv, vec2(0.85, 0.08)));  // glow arriba-derecha
+  float g = smoothstep(0.95, 0.0, distance(uv, vec2(0.85, 0.92)));  // glow arriba-derecha
   col += vec3(0.22, 0.30, 0.45) * g * 0.55;
   return col;
 }
@@ -80,12 +80,17 @@ void main(){
   float hD = texture2D(uState, vUv - vec2(0.0, uTexel.y)).r;
   float hU = texture2D(uState, vUv + vec2(0.0, uTexel.y)).r;
   vec3 normal = normalize(vec3(hL - hR, hD - hU, uNormalZ));
+  // Refracción sutil (se ve a través, como agua, no como pintura).
   vec2 ruv = vUv + normal.xy * uRefract;
   vec3 col = bgColor(ruv);
+  // Specular nítido (destellos en las crestas) — aspecto líquido.
   vec3 lightDir = normalize(vec3(0.5, 0.8, 1.0));
   vec3 refl = reflect(-lightDir, normal);
-  float spec = pow(max(dot(refl, vec3(0.0, 0.0, 1.0)), 0.0), 80.0);
-  col += vec3(spec) * uSpec;
+  float spec = pow(max(dot(refl, vec3(0.0, 0.0, 1.0)), 0.0), 220.0);
+  col += vec3(0.85, 0.92, 1.0) * spec * uSpec;
+  // Fresnel: brillo glassy donde la onda se inclina (bordes húmedos).
+  float fres = pow(1.0 - clamp(normal.z, 0.0, 1.0), 4.0);
+  col += vec3(0.45, 0.6, 0.85) * fres * 0.35;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -117,7 +122,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
   useImperativeHandle(ref, () => ({
     drop(xNorm: number, yNorm: number, isMove = false) {
-      const x = xNorm, y = yNorm;                 // expo-gl: uv.y=0 arriba → coincide con el toque (sin flip)
+      const x = xNorm, y = 1 - yNorm;             // flip-Y (uv.y=0 abajo en GL ↔ toque arriba-izq)
       if (isMove) {
         // Interpola entre el último punto y el actual → rastro fluido (sin saltos).
         const d = Math.hypot(x - lastUv.current.x, y - lastUv.current.y);
@@ -150,7 +155,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
       // Grilla isotrópica: celdas cuadradas en pantalla (propagación pareja en x/y).
       const aspectHW = gl.drawingBufferHeight / Math.max(1, gl.drawingBufferWidth);
-      const SIM_W = 240;
+      const SIM_W = 320;   // más resolución → ondas más finas (agua, no pintura)
       const SIM_H = Math.max(120, Math.min(700, Math.round(SIM_W * aspectHW)));
       const texel: [number, number] = [1 / SIM_W, 1 / SIM_H];
 
@@ -184,17 +189,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       };
 
-      const loop = () => {
-        // Toma hasta MAX_DROPS de la cola para inyectar este frame.
-        const flat: number[] = [];
-        let count = 0;
-        while (count < MAX_DROPS && queue.current.length >= 2) {
-          flat.push(queue.current.shift()!, queue.current.shift()!);
-          count++;
-        }
-        while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
+      const EMPTY = new Array(MAX_DROPS * 2).fill(0);
 
-        // ── Simulación: lee `a`, escribe `b` ──
+      // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
+      const simStep = (flat: number[], count: number) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
         gl.viewport(0, 0, SIM_W, SIM_H);
         gl.useProgram(simP);
@@ -204,14 +202,28 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1i(gl.getUniformLocation(simP, 'uState'), 0);
         gl.uniform2f(gl.getUniformLocation(simP, 'uTexel'), texel[0], texel[1]);
         gl.uniform1f(gl.getUniformLocation(simP, 'uC2'), 0.5);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDamp'), 0.985);
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDamp'), 0.99);   // ondas vibran más (agua)
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.035);  // olas más chicas
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.3);   // más suaves
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.03);   // olas chicas
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.28);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         const tmp = a; a = b; b = tmp;
+      };
+
+      const loop = () => {
+        const flat: number[] = [];
+        let count = 0;
+        while (count < MAX_DROPS && queue.current.length >= 2) {
+          flat.push(queue.current.shift()!, queue.current.shift()!);
+          count++;
+        }
+        while (flat.length < MAX_DROPS * 2) flat.push(0, 0);
+
+        // 2 sub-pasos por frame → las ondas viajan más rápido (baja viscosidad).
+        simStep(flat, count);
+        simStep(EMPTY, 0);
 
         // ── Render a pantalla desde `a` ──
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -222,9 +234,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.bindTexture(gl.TEXTURE_2D, a.tex);
         gl.uniform1i(gl.getUniformLocation(renP, 'uState'), 0);
         gl.uniform2f(gl.getUniformLocation(renP, 'uTexel'), texel[0], texel[1]);
-        gl.uniform1f(gl.getUniformLocation(renP, 'uNormalZ'), 0.20);   // más planas → menos sombra
-        gl.uniform1f(gl.getUniformLocation(renP, 'uRefract'), 0.28);   // menos distorsión → menos sombra
-        gl.uniform1f(gl.getUniformLocation(renP, 'uSpec'), 0.5);       // un poco más de brillo (luz)
+        gl.uniform1f(gl.getUniformLocation(renP, 'uNormalZ'), 0.16);
+        gl.uniform1f(gl.getUniformLocation(renP, 'uRefract'), 0.18);   // refracción sutil → ve a través (agua)
+        gl.uniform1f(gl.getUniformLocation(renP, 'uSpec'), 0.9);       // destellos nítidos
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
         gl.flush();
