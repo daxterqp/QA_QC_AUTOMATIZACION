@@ -42,3 +42,21 @@ jobs:
         run: |
           aws s3 cp "flowqc-$STAMP.dump" "s3://$AWS_BUCKET/backups/db/flowqc-$STAMP.dump"
           echo "Backup subido: s3://$AWS_BUCKET/backups/db/flowqc-$STAMP.dump"
+
+      - name: Conservar solo las últimas 15 copias (borrar las más viejas)
+        run: |
+          KEEP=15
+          # Lista las copias ordenadas de más VIEJA a más nueva (una por línea)
+          aws s3api list-objects-v2 --bucket "$AWS_BUCKET" --prefix "backups/db/" \
+            --query 'sort_by(Contents,&LastModified)[].Key' --output text \
+            | tr '\t' '\n' | sed '/^$/d' > all_keys.txt
+          TOTAL=$(grep -c . all_keys.txt || echo 0)
+          DELETE=$(( TOTAL - KEEP ))
+          echo "Copias totales: $TOTAL · a conservar: $KEEP · a borrar: $DELETE"
+          if [ "$DELETE" -gt 0 ]; then
+            head -n "$DELETE" all_keys.txt | while read -r key; do
+              [ -n "$key" ] && aws s3 rm "s3://$AWS_BUCKET/$key" && echo "Borrada: $key"
+            done
+          else
+            echo "Nada que borrar (todavía no hay más de $KEEP copias)."
+          fi
