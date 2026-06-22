@@ -17,6 +17,9 @@ import { GLView } from 'expo-gl';
 export type WaterGLHandle = { drop: (xNorm: number, yNorm: number, isMove?: boolean) => void };
 
 const MAX_DROPS = 8; // impactos inyectados por frame (rastro del arrastre)
+// Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
+// Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
+const Y_OFFSET = 0.03;
 
 const QUAD_VS = `
 attribute vec2 aPos;
@@ -122,7 +125,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
 
   useImperativeHandle(ref, () => ({
     drop(xNorm: number, yNorm: number, isMove = false) {
-      const x = xNorm, y = 1 - yNorm;             // flip-Y (uv.y=0 abajo en GL ↔ toque arriba-izq)
+      const x = xNorm, y = (1 - yNorm) - Y_OFFSET; // flip-Y + bajamos un poco el impacto
       if (isMove) {
         // Interpola entre el último punto y el actual → rastro fluido (sin saltos).
         const d = Math.hypot(x - lastUv.current.x, y - lastUv.current.y);
