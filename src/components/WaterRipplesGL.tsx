@@ -209,8 +209,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
         gl.uniform1f(gl.getUniformLocation(simP, 'uAspect'), aspectHW);
         gl.uniform2fv(gl.getUniformLocation(simP, 'uDrops'), flat);
         gl.uniform1i(gl.getUniformLocation(simP, 'uDropCount'), count);
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.035);  // ~15% más grande
-        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.32);  // ~15% más fuerte
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropRadius'), 0.04);
+        gl.uniform1f(gl.getUniformLocation(simP, 'uDropStrength'), 0.44);  // más masa en la ola
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         const tmp = a; a = b; b = tmp;
       };
