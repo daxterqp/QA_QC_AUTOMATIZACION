@@ -12,12 +12,12 @@ export default function LoginScreen() {
   const { login, loginDemo } = useAuth();
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [demoPassword, setDemoPassword] = useState('');
-  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const canContinue = name.trim().length >= 2 && password.length >= 1;
+  const canContinue = /\S+@\S+\.\S+/.test(email.trim()) && password.length >= 1;
 
   const demoExpired = new Date() > new Date('2026-04-30T23:59:59');
 
@@ -34,7 +34,7 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!canContinue) return;
     setLoading(true);
-    const result = await login(name.trim(), password);
+    const result = await login(email.trim(), password);
     setLoading(false);
 
     if (result !== 'ok') {
@@ -71,14 +71,18 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>{t('login.nameLabel')}</Text>
+            <Text style={styles.label}>{t('login.emailLabel')}</Text>
             <TextInput
               style={styles.input}
-              placeholder={t('login.namePlaceholder')}
+              placeholder={t('login.emailPlaceholder')}
               placeholderTextColor={Colors.textMuted}
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
               returnKeyType="next"
             />
           </View>

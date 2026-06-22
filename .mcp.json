@@ -1,11 +1,8 @@
 {
   "mcpServers": {
-    "firecrawl-mcp-server": {
-      "command": "npx",
-      "args": ["-y", "firecrawl-mcp-server"],
-      "env": {
-        "FIRECRAWL_API_KEY": "fc-21410ba1b6d449c284528c7f496c6b0f"
-      }
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=uimlobhczjctoytejkgh"
     }
   }
 }

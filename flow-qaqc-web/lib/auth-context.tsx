@@ -6,23 +6,6 @@ import {
 import { createClient } from '@lib/supabase/client';
 import type { User } from '@/types';
 
-const COOKIE_KEY = 'scua_user_id';
-
-function getCookieUserId(): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp('(?:^|; )' + COOKIE_KEY + '=([^;]*)'));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-export function setCookieUserId(userId: string) {
-  const maxAge = 60 * 60 * 24 * 30; // 30 días
-  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(userId)}; path=/; max-age=${maxAge}; SameSite=Lax`;
-}
-
-function clearCookieUserId() {
-  document.cookie = `${COOKIE_KEY}=; path=/; max-age=0`;
-}
-
 interface AuthContextValue {
   currentUser: User | null;
   loading: boolean;
@@ -41,30 +24,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading]         = useState(true);
 
   useEffect(() => {
-    const userId = getCookieUserId();
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-    (async () => {
+    let active = true;
+
+    // Reconstruye la fila de `users` a partir del auth.uid() del JWT de Supabase.
+    const loadUser = async (authId: string | undefined | null) => {
+      if (!authId) {
+        if (active) setCurrentUser(null);
+        return;
+      }
       try {
         const { data } = await supabase
           .from('users')
           .select('*')
-          .eq('id', userId)
+          .eq('auth_id', authId)
           .single();
-        if (data) setCurrentUser(data as User);
-        else clearCookieUserId();
+        if (active) setCurrentUser(data ? (data as User) : null);
       } catch {
-        clearCookieUserId();
-      } finally {
-        setLoading(false);
+        if (active) setCurrentUser(null);
       }
+    };
+
+    // 1) Sesión inicial.
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      await loadUser(session?.user?.id);
+      if (active) setLoading(false);
     })();
+
+    // 2) Cambios de sesión (login / logout / refresh de token).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        void loadUser(session?.user?.id);
+      },
+    );
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signOut = async () => {
-    clearCookieUserId();
+    await supabase.auth.signOut();
     setCurrentUser(null);
   };
 

@@ -3,23 +3,20 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useRef,
   useCallback,
   type ReactNode,
 } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database, usersCollection } from '@db/index';
 import type User from '@models/User';
-import { pushUserToSupabase } from '@services/SupabaseSyncService';
 import { supabase } from '@config/supabase';
 import { registerPushToken, unregisterPushToken } from '@services/NotificationService';
-
-const STORAGE_KEY = '@scua_current_user_id';
 
 interface AuthContextValue {
   currentUser: User | null;
   isLoading: boolean;
   isDemo: boolean;
-  login: (name: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
+  login: (email: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
   loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
@@ -28,10 +25,57 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/**
+ * Resuelve la fila de la app (`public.users`) a partir del `auth_id` (uid del JWT
+ * de Supabase Auth), la materializa en WatermelonDB y devuelve la INSTANCIA del
+ * modelo `User` (misma forma que consume el resto de la app: id, name, apellido,
+ * role, signatureUri, isActive, fullName, etc.).
+ *
+ * Devuelve null si no hay fila asociada o si la cuenta está inactiva (is_active=false).
+ */
+async function resolveAppUserByAuthId(authId: string): Promise<User | null> {
+  const { data: remote, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('auth_id', authId)
+    .single();
+
+  if (error || !remote) return null;
+  // v43 — cuenta inactiva (soft-delete): sin acceso.
+  if (remote.is_active === false) return null;
+
+  // Materializar / actualizar la fila en WatermelonDB para devolver la instancia
+  // del modelo con EXACTAMENTE la misma forma de siempre.
+  let local: User | null = null;
+  try {
+    local = await usersCollection.find(remote.id);
+  } catch {
+    local = null;
+  }
+
+  await database.write(async () => {
+    if (local) {
+      await (local as any).update((u: any) => {
+        Object.assign(u._raw, remote);
+      });
+    } else {
+      await usersCollection.create((u) => {
+        (u as any)._raw.id = remote.id;
+        Object.assign((u as any)._raw, remote);
+      });
+    }
+  });
+
+  return await usersCollection.find(remote.id);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  // Espejo de `isDemo` accesible dentro de callbacks de Auth sin re-suscribir.
+  const isDemoRef = useRef(false);
+  useEffect(() => { isDemoRef.current = isDemo; }, [isDemo]);
 
   useEffect(() => {
     (async () => {
@@ -78,77 +122,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch { /* sin internet, usar caché local */ }
 
-        // Restaurar sesión guardada
-        const userId = await AsyncStorage.getItem(STORAGE_KEY);
-        if (userId) {
-          try {
-            const user = await usersCollection.find(userId);
-            setCurrentUser(user);
-            registerPushToken(userId).catch(() => {});
-          } catch {
-            await AsyncStorage.removeItem(STORAGE_KEY);
+        // Restaurar sesión de Supabase Auth (persistida por supabase-js en
+        // AsyncStorage). Si hay sesión, reconstruimos `currentUser` desde
+        // `users` por `auth_id`.
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const authId = session?.user?.id;
+          if (authId) {
+            const user = await resolveAppUserByAuthId(authId);
+            if (user) {
+              setCurrentUser(user);
+              registerPushToken(user.id).catch(() => {});
+            } else {
+              // Sesión válida pero sin fila de app activa: cerrar para no dejar
+              // un JWT colgado sin usuario.
+              await supabase.auth.signOut();
+            }
           }
-        }
+        } catch { /* sin internet: sin sesión restaurada hasta reconectar */ }
       } finally {
         setIsLoading(false);
       }
     })();
+
+    // Mantener `currentUser` en sync con los cambios de sesión de Auth
+    // (refresh de token, signOut desde otro punto, expiración, etc.).
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        setCurrentUser((prev) => (isDemoRef.current ? prev : null));
+      }
+    });
+    return () => { sub.subscription.unsubscribe(); };
   }, []);
 
   const login = useCallback(async (
-    name: string,
+    email: string,
     password: string
   ): Promise<'ok' | 'not_found' | 'wrong_password'> => {
-    // 1. Buscar localmente
-    const all = await usersCollection.query().fetch();
-    let user: User | null = all.find(
-      (u) => u.name.toLowerCase() === name.trim().toLowerCase()
-    ) ?? null;
+    // 1. Autenticar contra Supabase Auth (email + password). Requiere red la
+    //    primera vez; supabase-js persiste la sesión luego.
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
 
-    // 2. Si no existe localmente, buscar en Supabase (puede que aún no se haya sincronizado)
-    if (!user) {
-      try {
-        const { data } = await supabase
-          .from('users')
-          .select('*')
-          .ilike('name', name.trim())
-          .order('created_at', { ascending: true })
-          .limit(1);
-
-        if (data && data.length > 0) {
-          const remote = data[0];
-          if (remote.is_active === false) return 'not_found';   // v43 — cuenta inactiva
-          const remotePassword = remote.password ?? remote.name;
-          if (remotePassword !== password) return 'wrong_password';
-
-          await database.write(async () => {
-            await usersCollection.create((u) => {
-              (u as any)._raw.id = remote.id;
-              Object.assign((u as any)._raw, remote);
-            });
-          });
-          user = await usersCollection.find(remote.id);
-          await AsyncStorage.setItem(STORAGE_KEY, user.id);
-          setCurrentUser(user);
-          registerPushToken(user.id).catch(() => {});
-          return 'ok';
-        }
-      } catch { /* sin internet */ }
+    if (authError) {
+      // Supabase devuelve "Invalid login credentials" sin distinguir entre
+      // email inexistente y contraseña incorrecta. Mantenemos el contrato del
+      // contexto (mismos códigos de error que consume LoginScreen).
+      const msg = (authError.message || '').toLowerCase();
+      if (msg.includes('invalid') || msg.includes('credentials') || msg.includes('password')) {
+        return 'wrong_password';
+      }
       return 'not_found';
     }
 
-    // v43 — Cuenta inactiva (soft-delete): pierde el acceso. Sus firmas y
-    // aprobaciones históricas se conservan, pero no puede iniciar sesión.
-    if ((user as any).isActive === false) return 'not_found';
+    // 2. Resolver la fila de la app por `auth_id` (uid del JWT).
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const authId = authUser?.id;
+    if (!authId) {
+      await supabase.auth.signOut();
+      return 'not_found';
+    }
 
-    // 3. Verificar contraseña
-    const storedPassword = user.password ?? user.name;
-    if (storedPassword !== password) return 'wrong_password';
+    const user = await resolveAppUserByAuthId(authId);
+    if (!user) {
+      // No hay fila de app asociada o la cuenta está inactiva (is_active=false):
+      // pierde el acceso. Cerramos la sesión de Auth para no dejarla colgada.
+      await supabase.auth.signOut();
+      return 'not_found';
+    }
 
-    // 4. Sincronizar cambios de contraseña a Supabase
-    try { await pushUserToSupabase(user.id); } catch { /* offline */ }
-
-    await AsyncStorage.setItem(STORAGE_KEY, user.id);
     setCurrentUser(user);
     registerPushToken(user.id).catch(() => {});
     return 'ok';
@@ -179,19 +223,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsDemo(false);
       return;
     }
-    const userId = await AsyncStorage.getItem(STORAGE_KEY);
+    const userId = currentUser?.id;
     if (userId) unregisterPushToken(userId).catch(() => {});
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    // Cierra la sesión de Auth y borra el token persistido por supabase-js.
+    try { await supabase.auth.signOut(); } catch { /* offline */ }
     setCurrentUser(null);
-  }, [isDemo]);
+  }, [isDemo, currentUser]);
 
-  const changePassword = useCallback(async (userId: string, newPassword: string) => {
-    const user = await usersCollection.find(userId);
-    await database.write(async () => {
-      await user.update((u) => {
-        u.password = newPassword;
-      });
-    });
+  const changePassword = useCallback(async (_userId: string, newPassword: string) => {
+    // Migrado a Supabase Auth: la contraseña vive en auth.users, ya NO en la
+    // tabla `users`. Cambia la del usuario autenticado (requiere sesión activa).
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
   }, []);
 
   const deleteAccount = useCallback(async () => {
@@ -212,8 +255,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = await usersCollection.find(userId);
       await database.write(async () => { await (user as any).update((u: any) => { u.isActive = false; }); });
     } catch { /* no local */ }
-    // 3. Cerrar sesión (pierde el acceso). El registro permanece, inactivo.
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    // 3. Cerrar sesión de Auth (pierde el acceso). El registro permanece, inactivo.
+    try { await supabase.auth.signOut(); } catch { /* offline */ }
     setCurrentUser(null);
   }, [currentUser, isDemo]);
 

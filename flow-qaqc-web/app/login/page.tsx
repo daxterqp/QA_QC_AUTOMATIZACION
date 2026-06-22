@@ -5,20 +5,19 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@lib/supabase/client';
-import { setCookieUserId } from '@lib/auth-context';
 import SkylineBackground from '@components/SkylineBackground';
 
 export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = name.trim().length >= 2 && password.length >= 1;
+  const canSubmit = email.trim().length >= 3 && password.length >= 1;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,26 +26,18 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const { data: users, error: fetchErr } = await supabase
-        .from('users')
-        .select('*')
-        .ilike('name', name.trim())
-        .order('created_at', { ascending: true })
-        .limit(1);
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-      if (fetchErr || !users || users.length === 0) {
-        setError('No existe un usuario con ese nombre.');
+      if (signInErr) {
+        setError('Email o contraseña incorrectos.');
         return;
       }
 
-      const user = users[0];
-      const storedPassword: string = user.password ?? user.name;
-      if (storedPassword !== password) {
-        setError('Contraseña incorrecta. Si es su primera vez, use su nombre.');
-        return;
-      }
-
-      setCookieUserId(user.id);
+      // La sesión queda en cookies (@supabase/ssr). Navegación dura para que
+      // el middleware lea las cookies recién escritas.
       window.location.href = '/app/projects';
     } finally {
       setLoading(false);
@@ -80,14 +71,14 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-semibold text-white/40 tracking-[0.15em] uppercase">
-                Nombre
+                Email
               </label>
               <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Ingrese su nombre"
-                autoComplete="username"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Ingrese su email"
+                autoComplete="email"
                 className="bg-white/[0.07] border border-white/10 rounded-lg px-3.5 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition"
               />
             </div>
@@ -115,10 +106,6 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-
-            <p className="text-[11px] text-white/25 italic text-center -mt-1">
-              Primera vez: su contraseña es su nombre
-            </p>
 
             {error && (
               <div className="bg-red-500/15 border border-red-400/30 rounded-lg px-3.5 py-2.5 text-sm text-red-300">
