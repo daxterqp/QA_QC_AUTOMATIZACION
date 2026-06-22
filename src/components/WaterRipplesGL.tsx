@@ -26,10 +26,12 @@ const AUTO_SPEED = 0.15;    // rad/frame (más alto = más rápido). Regular a g
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
-// "Twin": dos puntos cercanos sostenidos ~1 s → genera una ola hermosa entre ellos.
+// "Twin": dos puntos cercanos con un pequeño DESFASE temporal → cresta/ola entre ellos.
 const TWIN_EVERY = 180;    // frames base entre apariciones (~3 s a 60fps)
-const TWIN_HOLD = 60;      // frames sostenidos (~1 s)
-const TWIN_STR = 0.85;     // intensidad sostenida de cada punto
+const TWIN_STAGGER = 9;    // frames de desfase entre tocar el punto 1 y el punto 2
+const TWIN_BURST = 6;      // duración de cada "presión" (frames)
+const TWIN_WINDOW = TWIN_STAGGER + TWIN_BURST + 4; // ventana total del evento
+const TWIN_STR = 0.95;     // intensidad de cada presión
 const TWIN_GAP = 0.07;     // media separación entre los dos puntos (no muy separados)
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
@@ -274,17 +276,18 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           if (sweep.current.y > 1.2) sweep.current.active = false;
         }
 
-        // Twin: dos puntos cercanos sostenidos ~1 s → ola hermosa entre ellos (cada ~3 s).
+        // Twin: presiona A y, con un pequeño DESFASE, presiona B → cresta/ola entre ambos.
         if (twinHold > 0) {
-          push(twinA.x, twinA.y, TWIN_STR);
-          push(twinB.x, twinB.y, TWIN_STR);
+          const e = TWIN_WINDOW - twinHold;                  // frames transcurridos del evento
+          if (e < TWIN_BURST) push(twinA.x, twinA.y, TWIN_STR);
+          if (e >= TWIN_STAGGER && e < TWIN_STAGGER + TWIN_BURST) push(twinB.x, twinB.y, TWIN_STR);
           twinHold--;
         } else if (--twinTimer <= 0) {
           const cx = 0.22 + Math.random() * 0.56;   // centro (evita bordes)
           const cy = 0.30 + Math.random() * 0.45;   // zona media
           twinA = { x: cx - TWIN_GAP, y: cy };
           twinB = { x: cx + TWIN_GAP, y: cy };
-          twinHold = TWIN_HOLD;
+          twinHold = TWIN_WINDOW;
           twinTimer = TWIN_EVERY + Math.floor(Math.random() * 90);
         }
 
