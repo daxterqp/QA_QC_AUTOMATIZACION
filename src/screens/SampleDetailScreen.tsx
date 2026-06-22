@@ -28,6 +28,8 @@ import { todayEnsayoDate } from '@utils/protocolCode';
 import { escapeHtml } from '@utils/htmlEscape';
 import QrCodeView from '@components/QrCodeView';
 import { buildSampleDeepLink, generateSampleQr } from '@utils/qrCode';
+import { useTour } from '@context/TourContext';
+import { useTourStep } from '@hooks/useTourStep';
 import { useI18n, tx } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SampleDetail'>;
@@ -39,6 +41,12 @@ const STATUS_COLOR: Record<string, string> = { DRAFT: Colors.warning, IN_PROGRES
 export default function SampleDetailScreen({ route, navigation }: Props) {
   const { t } = useI18n();
   const { projectId, projectName, sampleId } = route.params;
+
+  // Tour contextual (botón ? en el encabezado)
+  const { jumpToStep } = useTour();
+  const detailHeaderRef = useTourStep('sample_detail_header');
+  const detailAddTestRef = useTourStep('sample_detail_add_test');
+
   const [loading, setLoading] = useState(true);
   const [sample, setSample] = useState<any | null>(null);
   const [placeName, setPlaceName] = useState<string>('—');
@@ -163,13 +171,18 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <AppHeader title={sample.sampleCode} subtitle={projectName} onBack={() => navigation.goBack()}
         rightContent={
-          <TouchableOpacity onPress={exportPdf} disabled={exporting} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name={exporting ? 'hourglass-outline' : 'share-outline'} size={20} color={Colors.white} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <TouchableOpacity onPress={exportPdf} disabled={exporting} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name={exporting ? 'hourglass-outline' : 'share-outline'} size={20} color={Colors.white} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => jumpToStep('sample_detail_header')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
         } />
       <ScrollView contentContainerStyle={{ padding: 12, gap: 12 }}>
         {/* Datos generales — MISMO formato/estilo del Audit Page (título + QR + grid). */}
-        <View style={styles.dossierHeader}>
+        <View ref={detailHeaderRef} style={styles.dossierHeader}>
           <View style={styles.dossierTopBar}>
             <View style={{ flex: 1 }}>
               <Text style={styles.dossierTitle}>{sample.sampleCode}</Text>
@@ -209,7 +222,7 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
 
         {/* Ensayos */}
         <Text style={styles.sectionTitle}>{t('sampleDetail.tests', { count: protos.length })}</Text>
-        <TouchableOpacity style={styles.ghostBtn} onPress={() => setShowAdd(true)} activeOpacity={0.7}>
+        <TouchableOpacity ref={detailAddTestRef} style={styles.ghostBtn} onPress={() => setShowAdd(true)} activeOpacity={0.7}>
           <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
           <Text style={styles.ghostBtnText}>{t('sampleDetail.addTest')}</Text>
         </TouchableOpacity>

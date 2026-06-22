@@ -55,14 +55,12 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const mainScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   // Tour refs
-  const pdfAreaRef = useTourStep('plan_viewer_pdf_area');
   const drawToggleRef = useTourStep('plan_viewer_draw_toggle');
   const { ref: annotationListRef, onLayout: annotationListLayout } = useTourStepWithLayout('plan_viewer_annotation_list');
   const { ref: zoomBarRef, onLayout: zoomBarLayout } = useTourStepWithLayout('plan_zoom_options');
   const dwgBtnRef = useTourStep('plan_dwg_btn');
   const measurementBtnRef = useTourStep('plan_measurement_btn');
   const planSelectorRef = useTourStep('plan_selector');
-  const annotationExpandRef = useTourStep('plan_annotation_expand');
   const { ref: planHeaderRef, onLayout: planHeaderLayout } = useTourStepWithLayout('plan_header_info');
   const { ref: replyBtnRef, onLayout: replyBtnLayout } = useTourStepWithLayout('plan_reply_btn');
   const { ref: replyFormRef, onLayout: replyFormLayout } = useTourStepWithLayout('plan_reply_form');
@@ -947,7 +945,7 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         {/* PDF */}
         <View style={styles.pdfSection}>
           <ScrollView ref={hScrollViewRef} horizontal scrollEnabled={!isDrawing && zoom > 1} showsHorizontalScrollIndicator={zoom > 1} style={{ borderRadius: Radius.md }} onScroll={(e) => { hScrollRef.current = e.nativeEvent.contentOffset.x; }} scrollEventThrottle={16}>
-            <View ref={pdfAreaRef} style={[styles.pdfContainer, { width: pdfW, height: pdfH }]}>
+            <View style={[styles.pdfContainer, { width: pdfW, height: pdfH }]}>
               {pdfSource ? (
                 // key incluye zoom para forzar re-render a la resolución correcta
                 Array.from({ length: Math.max(totalPages, 1) }, (_, i) => i + 1).map((pg) => (
@@ -1084,7 +1082,6 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
                 <View key={ann.id} style={[styles.annItem, ann.isOk && styles.annItemOk, highlightAnnotationId === ann.id && styles.annItemHighlight]}>
                   {/* Cabecera: tap para desplegar/contraer */}
                   <TouchableOpacity
-                    ref={groupIdx === 0 && annIdx === 0 ? annotationExpandRef : undefined}
                     style={styles.annHeaderRow}
                     onPress={() => toggleExpand(ann)}
                     onLongPress={() => {

@@ -16,6 +16,8 @@ import { supabase } from '@config/supabase';
 import { loadAccessSnapshot, grantAccess, revokeAccess } from '@services/UserAccessService';
 import type User from '@models/User';
 import { useI18n, tx } from '@i18n/index';
+import { useTour } from '@context/TourContext';
+import { useTourStep } from '@hooks/useTourStep';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserManagement'>;
 type Role = 'CREATOR' | 'RESIDENT' | 'SUPERVISOR' | 'OPERATOR';
@@ -51,7 +53,14 @@ export default function UserManagementScreen({ navigation }: Props) {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const { isOnline } = useNetwork();
+  const { jumpToStep } = useTour();
   const isCreator = currentUser?.role === 'CREATOR';
+
+  // Tour contextual (users_*) — refs sobre los controles clave.
+  const usersAddRef = useTourStep('users_add');
+  const usersAssignRef = useTourStep('users_assign');
+  const usersImportRef = useTourStep('users_import');
+  const usersRoleTagRef = useTourStep('users_role');
   const [users, setUsers] = useState<User[]>([]);
   const [importing, setImporting] = useState(false);
 
@@ -305,26 +314,42 @@ export default function UserManagementScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <AppHeader title={t('usersMgmt.title')} onBack={() => navigation.goBack()} />
+      <AppHeader
+        title={t('usersMgmt.title')}
+        onBack={() => navigation.goBack()}
+        rightContent={
+          isCreator ? (
+            <TouchableOpacity onPress={() => jumpToStep('users_add')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+            </TouchableOpacity>
+          ) : undefined
+        }
+      />
 
       {isCreator && (
         <View style={styles.importBar}>
           {/* v44 — Botón principal "Añadir usuario" (reemplaza el + del encabezado), encima de Importar. */}
-          <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
-            <Ionicons name="person-add-outline" size={18} color={Colors.white} />
-            <Text style={styles.addBtnText}>{t('usersMgmt.addUser')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.importBtn, importing && styles.btnDisabled]} onPress={handleImport} disabled={importing} activeOpacity={0.85}>
-            {importing ? <ActivityIndicator color="#fff" size="small" /> : <><Ionicons name="document-attach-outline" size={16} color={Colors.white} /><Text style={styles.importBtnText}>{t('usersMgmt.importFromExcel')}</Text></>}
-          </TouchableOpacity>
+          <View ref={usersAddRef} collapsable={false}>
+            <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
+              <Ionicons name="person-add-outline" size={18} color={Colors.white} />
+              <Text style={styles.addBtnText}>{t('usersMgmt.addUser')}</Text>
+            </TouchableOpacity>
+          </View>
+          <View ref={usersImportRef} collapsable={false}>
+            <TouchableOpacity style={[styles.importBtn, importing && styles.btnDisabled]} onPress={handleImport} disabled={importing} activeOpacity={0.85}>
+              {importing ? <ActivityIndicator color="#fff" size="small" /> : <><Ionicons name="document-attach-outline" size={16} color={Colors.white} /><Text style={styles.importBtnText}>{t('usersMgmt.importFromExcel')}</Text></>}
+            </TouchableOpacity>
+          </View>
           <Text style={styles.importHint}>{t('usersMgmt.importHint')}</Text>
 
           {/* v44 — Gestión de accesos en lote */}
           <View style={styles.accessRow}>
-            <TouchableOpacity style={styles.accessBtn} onPress={() => { setSelUsers(new Set()); setSelProjects(new Set()); setShowAssign(true); }} activeOpacity={0.85}>
-              <Ionicons name="person-add-outline" size={15} color={Colors.primary} />
-              <Text style={styles.accessBtnText}>{t('usersMgmt.enterProject')}</Text>
-            </TouchableOpacity>
+            <View ref={usersAssignRef} collapsable={false}>
+              <TouchableOpacity style={styles.accessBtn} onPress={() => { setSelUsers(new Set()); setSelProjects(new Set()); setShowAssign(true); }} activeOpacity={0.85}>
+                <Ionicons name="person-add-outline" size={15} color={Colors.primary} />
+                <Text style={styles.accessBtnText}>{t('usersMgmt.enterProject')}</Text>
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity style={styles.accessBtn} onPress={() => { setSelUsers(new Set()); setRemoveProjectId(null); setShowRemove(true); }} activeOpacity={0.85}>
               <Ionicons name="person-remove-outline" size={15} color={Colors.danger} />
               <Text style={[styles.accessBtnText, { color: Colors.danger }]}>{t('usersMgmt.removeAccess')}</Text>
@@ -338,7 +363,7 @@ export default function UserManagementScreen({ navigation }: Props) {
         keyExtractor={(u) => u.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={<Text style={styles.empty}>{t('usersMgmt.empty')}</Text>}
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const roleInfo = ROLE_LABELS[item.role] ?? { label: item.role, color: '#666' };
           const isMe = item.id === currentUser?.id;
           const inactive = (item as any).isActive === false;
@@ -348,14 +373,16 @@ export default function UserManagementScreen({ navigation }: Props) {
           return (
             <View style={[styles.card, isMe && styles.cardMe, inactive && styles.cardInactive]}>
               <View style={styles.cardTopRow}>
-                <TouchableOpacity
-                  style={[styles.roleTag, { backgroundColor: roleInfo.color }]}
-                  disabled={!isCreator || item.role === 'CREATOR' || isMe}
-                  onPress={() => setRoleEditUser(item)}
-                >
-                  <Text style={styles.roleTagText}>{roleInfo.label}</Text>
-                  {isCreator && item.role !== 'CREATOR' && !isMe ? <Ionicons name="chevron-down" size={10} color="#fff" /> : null}
-                </TouchableOpacity>
+                <View ref={index === 0 ? usersRoleTagRef : undefined} collapsable={false}>
+                  <TouchableOpacity
+                    style={[styles.roleTag, { backgroundColor: roleInfo.color }]}
+                    disabled={!isCreator || item.role === 'CREATOR' || isMe}
+                    onPress={() => setRoleEditUser(item)}
+                  >
+                    <Text style={styles.roleTagText}>{roleInfo.label}</Text>
+                    {isCreator && item.role !== 'CREATOR' && !isMe ? <Ionicons name="chevron-down" size={10} color="#fff" /> : null}
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.cardInfo}>
                   <Text style={[styles.userName, inactive && styles.userNameInactive]}>{item.name} {item.apellido}</Text>
                   {isMe ? <Text style={styles.meTag}>{t('usersMgmt.you')}</Text> : inactive ? <Text style={styles.inactiveTag}>{t('usersMgmt.inactive')}</Text> : null}

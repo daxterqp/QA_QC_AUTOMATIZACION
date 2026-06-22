@@ -18,6 +18,8 @@ import { Colors, Radius } from '../theme/colors';
 import { recycleBinCollection, labAuxTablesCollection } from '@db/index';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { isNumericProtocol } from '@utils/numericProtocol';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
 import { useI18n, tx } from '@i18n/index';
 import type { AuxTables } from '@utils/formulaEval';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -65,6 +67,11 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState<Entry | null>(null);
 
+  // Tour refs
+  const { jumpToStep } = useTour();
+  const recycleBannerRef = useTourStep('recycle_banner');
+  const recycleCardRef = useTourStep('recycle_card');
+
   useEffect(() => {
     // v43 — Robustez: además del observe, un fallback de 5s limpia el "cargando"
     // si la suscripción nunca emite (p. ej. tabla recién migrada en un dispositivo).
@@ -105,7 +112,16 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <AppHeader title={t('recycle.title')} subtitle={projectName} onBack={() => navigation.goBack()} />
+      <AppHeader
+        title={t('recycle.title')}
+        subtitle={projectName}
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('recycle_banner')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
       ) : (
@@ -113,7 +129,7 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={Colors.primary} />}
         >
-          <View style={styles.banner}>
+          <View ref={recycleBannerRef} collapsable={false} style={styles.banner}>
             <Ionicons name="information-circle-outline" size={16} color={Colors.textSecondary} />
             <Text style={styles.bannerText}>
               {t('recycle.banner')}
@@ -125,8 +141,13 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
               <Ionicons name="trash-outline" size={40} color={Colors.textMuted} />
               <Text style={styles.empty}>{t('recycle.empty')}</Text>
             </View>
-          ) : entries.map(e => (
-            <View key={e.id} style={styles.card}>
+          ) : entries.map((e, idx) => (
+            <View
+              key={e.id}
+              ref={idx === 0 ? recycleCardRef : undefined}
+              collapsable={idx === 0 ? false : undefined}
+              style={styles.card}
+            >
               <TouchableOpacity style={styles.cardHead} activeOpacity={0.8} onPress={() => setPreview(e)}>
                 <View style={styles.iconWrap}>
                   <Ionicons name="document-text-outline" size={18} color={Colors.textSecondary} />

@@ -1,14 +1,17 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   Alert, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { database, nonConformitiesCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NonConformity'>;
@@ -17,8 +20,21 @@ export default function NonConformityScreen({ navigation, route }: Props) {
   const { protocolId, projectId } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
+  const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Tour refs
+  const infoRef = useTourStep('ncr_info');
+  const descriptionRef = useTourStep('ncr_description');
+  const submitRef = useTourStep('ncr_submit');
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
 
   const canSave = description.trim().length >= 10;
 
@@ -52,10 +68,18 @@ export default function NonConformityScreen({ navigation, route }: Props) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <AppHeader title={t('nonConf.headerTitle')} onBack={() => navigation.goBack()} />
+      <AppHeader
+        title={t('nonConf.headerTitle')}
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('ncr_info')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.body}>
-        <View style={styles.infoBox}>
+        <View ref={infoRef} collapsable={false} style={styles.infoBox}>
           <Text style={styles.infoTitle}>{t('nonConf.infoTitle')}</Text>
           <Text style={styles.infoText}>
             {t('nonConf.infoText')}
@@ -63,27 +87,31 @@ export default function NonConformityScreen({ navigation, route }: Props) {
         </View>
 
         <Text style={styles.label}>{t('nonConf.descriptionLabel')}</Text>
-        <TextInput
-          style={styles.textArea}
-          placeholder={t('nonConf.descriptionPlaceholder')}
-          value={description}
-          onChangeText={setDescription}
-          multiline
-          numberOfLines={6}
-          textAlignVertical="top"
-        />
+        <View ref={descriptionRef} collapsable={false}>
+          <TextInput
+            style={styles.textArea}
+            placeholder={t('nonConf.descriptionPlaceholder')}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            numberOfLines={6}
+            textAlignVertical="top"
+          />
+        </View>
         <Text style={styles.charCount}>{t('nonConf.charCount', { count: description.length })}</Text>
 
-        <TouchableOpacity
-          style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-          onPress={handleSave}
-          disabled={!canSave || saving}
-        >
-          {saving
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.saveBtnText}>{t('nonConf.submit')}</Text>
-          }
-        </TouchableOpacity>
+        <View ref={submitRef} collapsable={false}>
+          <TouchableOpacity
+            style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={!canSave || saving}
+          >
+            {saving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.saveBtnText}>{t('nonConf.submit')}</Text>
+            }
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -23,7 +23,7 @@ import { useAuth } from '@context/AuthContext';
 import { GPSCaptureBar } from '@components/GPSCaptureBar';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import { useTour } from '@context/TourContext';
-import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
+import { useTourStepWithLayout } from '@hooks/useTourStep';
 import type Protocol from '@models/Protocol';
 import type Location from '@models/Location';
 import type Evidence from '@models/Evidence';
@@ -102,8 +102,6 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const { t } = useI18n();
 
   // Tour refs
-  const auditItemsListRef = useTourStep('audit_items_list');
-  const auditActionBtnsRef = useTourStep('audit_action_buttons');
   const { ref: headerRef, onLayout: headerLayout } = useTourStepWithLayout('dossier_protocol_header');
   const { ref: backBtnRef, onLayout: backBtnLayout } = useTourStepWithLayout('dossier_protocol_back_btn');
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep } = useTour();
@@ -710,7 +708,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
 
         {/* Modo numérico: NumericTable en lugar de la tabla clásica */}
         {numericMode ? (
-          <View style={{ gap: 12 }} ref={auditItemsListRef}>
+          <View style={{ gap: 12 }}>
             <NumericTable
               protocolCode={(protocol as any)?.protocolCode ?? null}
               items={items.map(it => ({
@@ -734,7 +732,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
           </View>
         ) : (
         /* Tabla de items (formato tipo Dossier PDF) */
-        <View style={styles.itemsTable} ref={auditItemsListRef}>
+        <View style={styles.itemsTable}>
           <View style={styles.tableHeader}>
             <Text style={[styles.th, styles.thNum]}>#</Text>
             <Text style={[styles.th, styles.thDesc]}>{t('protoAudit.table.description')}</Text>
@@ -875,7 +873,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
 
         {/* Acciones del Jefe — Aprobar (solo si canApprove) y Rechazar */}
         {isJefe && p.status === 'SUBMITTED' && (
-          <View ref={auditActionBtnsRef} style={styles.actions}>
+          <View style={styles.actions}>
             {/* v33 — El botón Aprobar SIEMPRE está disponible; si el ensayo no
                 cumple, el modal exige un motivo de aprobación. */}
             <TouchableOpacity

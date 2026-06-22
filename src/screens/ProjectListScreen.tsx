@@ -65,12 +65,11 @@ export default function ProjectListScreen({ navigation }: Props) {
   // Tour refs
   const tourHelpRef = useTourStep('tour_help_button');
   const projectCardRef = useTourStep('project_card');
-  const actionChipsRef = useTourStep('project_action_chips');
+  const langSelectorRef = useTourStep('lang_selector');
   const observacionesChipRef = useTourStep('project_observaciones_chip');
   const dosierChipRef = useTourStep('project_dosier_chip');
   // v29 — cargarChipRef y planosChipRef eliminados: esos botones se movieron
   // al menú interno del proyecto; el tour debe re-anclarse ahí cuando aplique.
-  const { ref: bottomNavRef, onLayout: bottomNavLayout } = useTourStepWithLayout('bottom_nav');
   const { ref: joinBtnRef, onLayout: joinBtnLayout } = useTourStepWithLayout('nav_join_btn');
   const { ref: newBtnRef, onLayout: newBtnLayout } = useTourStepWithLayout('nav_new_btn');
   const { ref: dashboardBtnRef, onLayout: dashboardBtnLayout } = useTourStepWithLayout('nav_dashboard_btn');
@@ -482,6 +481,7 @@ export default function ProjectListScreen({ navigation }: Props) {
               <Ionicons name="school-outline" size={23} color={Colors.white} />
             </TouchableOpacity>
             <TouchableOpacity
+              ref={langSelectorRef}
               style={styles.iconBtn}
               onPress={() => setShowDrawer(true)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -536,7 +536,7 @@ export default function ProjectListScreen({ navigation }: Props) {
               <Ionicons name="chevron-forward" size={20} color={Colors.light} />
             </TouchableOpacity>
 
-            <View ref={index === 0 ? actionChipsRef : undefined} style={styles.actionsRow}>
+            <View style={styles.actionsRow}>
               <TouchableOpacity
                 ref={index === 0 ? observacionesChipRef : undefined}
                 style={styles.actionChipCompact}
@@ -590,8 +590,7 @@ export default function ProjectListScreen({ navigation }: Props) {
       />
 
       {/* Bottom navigation bar */}
-      <View ref={bottomNavRef} onLayout={bottomNavLayout}
-        style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 8) + 8 }]}>
+      <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 8) + 8 }]}>
         <View style={[styles.navItem, styles.navItemActive]}>
           <Ionicons name="folder-open" size={24} color={Colors.primary} />
           <Text style={[styles.navLabel, styles.navLabelActive]}>Proyectos</Text>

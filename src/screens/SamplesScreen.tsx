@@ -27,6 +27,8 @@ import {
 } from '@db/index';
 import type SampleModel from '@db/models/Sample';
 import { useAuth } from '@context/AuthContext';
+import { useTour } from '@context/TourContext';
+import { useTourStep } from '@hooks/useTourStep';
 import { buildSampleCode, nextSampleSeq, todaySampleDate } from '@utils/sampleCode';
 import { parseFeatureFlagsJson, type CoordinateSystem } from '@utils/featureFlags';
 import { wgs84ToUtm, wgs84ToPsad56Utm, wgs84ToPsad56LatLng, findSectorByPoint } from '@utils/CoordinateSystem';
@@ -67,6 +69,12 @@ export default function SamplesScreen({ route, navigation }: Props) {
   const { projectId, projectName } = route.params;
   const { currentUser } = useAuth();
   const canConfig = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
+
+  // Tour contextual (botón ? en el encabezado)
+  const { jumpToStep } = useTour();
+  const samplesFiltersRef = useTourStep('samples_filters');
+  const samplesAddRef = useTourStep('samples_add');
+  const samplesCardRef = useTourStep('samples_card');
 
   const [loading, setLoading] = useState(true);
   const [samples, setSamples] = useState<SampleModel[]>([]);
@@ -303,7 +311,7 @@ export default function SamplesScreen({ route, navigation }: Props) {
   const ListHeader = (
     <View style={styles.listHeader}>
       {/* Toggle: oculta/revela TODOS los filtros (mismo patrón del Dosier) */}
-      <TouchableOpacity style={[styles.filterToggle, hasActiveFilter && styles.filterToggleActive]} onPress={() => setShowFilters(v => !v)} activeOpacity={0.8}>
+      <TouchableOpacity ref={samplesFiltersRef} style={[styles.filterToggle, hasActiveFilter && styles.filterToggleActive]} onPress={() => setShowFilters(v => !v)} activeOpacity={0.8}>
         <Ionicons name={hasActiveFilter ? 'funnel' : 'funnel-outline'} size={15} color={hasActiveFilter ? Colors.primary : Colors.textSecondary} />
         <Text style={[styles.filterToggleText, hasActiveFilter && { color: Colors.primary }]}>{hasActiveFilter ? t('samples.filtersActive') : t('samples.filters')}</Text>
         <View style={{ flex: 1 }} />
@@ -349,7 +357,7 @@ export default function SamplesScreen({ route, navigation }: Props) {
       ) : null}
 
       {/* Botón añadir muestra: full-width tipo ghost */}
-      <TouchableOpacity style={styles.ghostBtn} onPress={() => { resetForm(); setShowAdd(true); }} activeOpacity={0.7}>
+      <TouchableOpacity ref={samplesAddRef} style={styles.ghostBtn} onPress={() => { resetForm(); setShowAdd(true); }} activeOpacity={0.7}>
         <Ionicons name="add-circle-outline" size={18} color={Colors.primary} />
         <Text style={styles.ghostBtnText}>{t('samples.addSample')}</Text>
       </TouchableOpacity>
@@ -363,16 +371,23 @@ export default function SamplesScreen({ route, navigation }: Props) {
         title={t('samples.title')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
-        rightContent={canConfig ? (
+        rightContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity onPress={() => { if (selectMode) exitSelectMode(); else setSelectMode(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name={selectMode ? 'close' : 'checkbox-outline'} size={20} color={Colors.white} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowFormConfig(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="settings-outline" size={20} color={Colors.white} />
+            {canConfig ? (
+              <>
+                <TouchableOpacity onPress={() => { if (selectMode) exitSelectMode(); else setSelectMode(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name={selectMode ? 'close' : 'checkbox-outline'} size={20} color={Colors.white} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowFormConfig(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="settings-outline" size={20} color={Colors.white} />
+                </TouchableOpacity>
+              </>
+            ) : null}
+            <TouchableOpacity onPress={() => jumpToStep('samples_filters')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
             </TouchableOpacity>
           </View>
-        ) : undefined}
+        }
       />
 
       {loading ? (
@@ -388,10 +403,10 @@ export default function SamplesScreen({ route, navigation }: Props) {
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={<View style={styles.empty}><Ionicons name="cube-outline" size={40} color={Colors.light} /><Text style={styles.emptyText}>{t('samples.empty')}</Text></View>}
-          renderItem={({ item }: { item: any }) => {
+          renderItem={({ item, index }: { item: any; index: number }) => {
             const sel = selectedIds.has(item.id);
             return (
-            <TouchableOpacity style={[styles.dateCard, selectMode && sel && styles.dateCardSel]} activeOpacity={0.85}
+            <TouchableOpacity ref={index === 0 ? samplesCardRef : undefined} style={[styles.dateCard, selectMode && sel && styles.dateCardSel]} activeOpacity={0.85}
               onPress={() => selectMode ? toggleSelected(item.id) : navigation.navigate('SampleDetail', { projectId, projectName, sampleId: item.id })}>
               {selectMode ? (
                 <Ionicons name={sel ? 'checkbox' : 'square-outline'} size={22} color={sel ? Colors.primary : Colors.textMuted} style={{ marginRight: 10 }} />

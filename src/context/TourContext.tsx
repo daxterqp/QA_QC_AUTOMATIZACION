@@ -686,180 +686,398 @@ const TOUR_STEPS: TourStep[] = [
   {
     id: 'ens_search', screen: 'Ensayos', elementId: 'ens_search', contextOnly: true,
     title: 'Buscar ensayos',
-    message: 'Filtra al instante por código (ej. PR-260001), tipo de ensayo o referencia. Útil cuando un sector o una fecha acumulan muchos ensayos.',
+    message: 'Escribe el código (ej. PR-260001), el tipo o la referencia y la lista se filtra al instante: solo quedan los grupos con coincidencias. Ideal cuando un sector o una fecha acumulan muchos ensayos.',
+    waitingHint: 'Escribe en el buscador para filtrar la lista',
   },
   {
     id: 'ens_filters', screen: 'Ensayos', elementId: 'ens_filters', contextOnly: true,
     title: 'Filtros cruzados',
-    message: 'Acota por rango de fechas y por uno o varios tipos o sectores a la vez. Por defecto se muestran todos.',
+    message: 'Toca un chip para acotar por rango de fechas o por uno o varios tipos y sectores a la vez; se combinan con el buscador. Por defecto se muestran todos. Limpia un chip con la × para volver a verlo todo.',
+    waitingHint: 'Toca un chip para elegir tipos, sectores o fechas',
   },
   {
     id: 'ens_group', screen: 'Ensayos', elementId: 'ens_group', contextOnly: true, contextEnd: true,
     title: 'Grupos desplegables',
-    message: 'Cada tarjeta agrupa los ensayos. Tócala para desplegarla: dentro podrás "Adicionar ensayo" y, manteniendo presionado un ensayo, editar su fecha/hora o eliminarlo.',
-    waitingHint: 'Abre una pestaña de Ensayos para verlo',
+    message: 'Cada tarjeta agrupa ensayos; los badges muestran cuántos están aprobados y en revisión. Tócala para desplegarla: dentro aparece "Adicionar ensayo" y, manteniendo presionado un ensayo, podrás editar su fecha/hora o eliminarlo.',
+    waitingHint: 'Toca una tarjeta para desplegar sus ensayos',
   },
 
   // ── Geolocalización · Mapa del proyecto ─────────────────────────────────────
   {
     id: 'map_filters', screen: 'ProjectMap', elementId: 'map_filters', contextOnly: true,
-    title: 'Filtrar por estado',
-    message: 'Muestra u oculta los ensayos según su estado (aprobado, en revisión, etc.). Sirve también de leyenda de colores.',
+    title: 'Filtrar y ubicar ensayos',
+    message: 'Acota lo que ves en el mapa por fecha, estado, tipo de ensayo o sector. El filtro de estado funciona además como leyenda de colores de los pines. Un punto naranja sobre un botón indica que ese filtro está activo.',
+    waitingHint: 'Toca un botón de filtro para acotar los pines del mapa',
+    waitingElementId: 'map_view',
+    showHandCursor: true,
   },
   {
     id: 'map_view', screen: 'ProjectMap', elementId: 'map_view', contextOnly: true,
     title: 'Mapa del proyecto',
-    message: 'Cada pin es un ensayo georreferenciado y cada polígono un sector. Toca un pin para abrir su ensayo.',
+    message: 'Cada pin es un ensayo georreferenciado (su color = estado) y cada polígono un sector con su geometría. Toca un pin para abrir el callout y luego su ensayo; toca un sector para ver su resumen de protocolos.',
+    waitingHint: 'Toca un pin para abrir su ensayo, o el botón Capa para cambiar el mapa',
+    waitingElementId: 'map_layer_toggle',
+    showHandCursor: true,
   },
   {
     id: 'map_layer_toggle', screen: 'ProjectMap', elementId: 'map_layer_toggle', contextOnly: true, contextEnd: true,
     title: 'Capa del mapa',
-    message: 'Alterna entre Google Maps y la ortofoto del cliente (si el proyecto la tiene configurada).',
-    waitingHint: 'Abre el mapa para verlo',
+    message: 'Toca "Capa" para elegir el mapa base (estándar, satélite, híbrido o relieve) y activar la ortofoto del cliente, si el proyecto la tiene configurada. Así superpones tus ensayos sobre la foto real del terreno.',
+    waitingHint: 'Toca "Capa" para cambiar el mapa base o mostrar la ortofoto',
+    waitingElementId: 'map_layer_toggle',
+    showHandCursor: true,
   },
 
   // ── Geolocalización · Sectores ──────────────────────────────────────────────
   {
     id: 'sectors_import', screen: 'ProjectSectors', elementId: 'sectors_import', contextOnly: true,
     title: 'Importar sectores',
-    message: 'Carga los sectores del proyecto desde Excel/CSV: solo nombres, o con coordenadas para dibujar su polígono en el mapa.',
+    message: 'Carga los sectores del proyecto desde un Excel o CSV: solo nombres, o con coordenadas para dibujar su polígono en el mapa. Al elegir el archivo verás una vista previa con el formato detectado antes de confirmar.',
+    waitingHint: 'Tocá "Importar Excel/CSV" para elegir el archivo',
+    waitingElementId: 'sectors_import',
+    showHandCursor: true,
   },
   {
     id: 'sectors_card', screen: 'ProjectSectors', elementId: 'sectors_card', contextOnly: true,
     title: 'Sectores cargados',
-    message: 'Cada sector con su color y geometría. Edita su nombre/color o elimínalo desde los iconos de la tarjeta.',
-    waitingHint: 'Importa sectores para verlos aquí',
+    message: 'Cada sector aparece con su color y geometría. Tocá la fila para desplegar su croquis, o usá los iconos para editar nombre/color (lápiz) o eliminarlo (papelera). Los sectores con polígono ya pueden contener ensayos en el mapa.',
+    waitingHint: 'Importá sectores para verlos aquí',
   },
   {
     id: 'sectors_recalc', screen: 'ProjectSectors', elementId: 'sectors_recalc', contextOnly: true, contextEnd: true,
     title: 'Recalcular asignaciones',
-    message: 'Reasigna cada ensayo con coordenadas al sector cuyo polígono lo contiene (point-in-polygon).',
+    message: 'Reasigna cada ensayo con coordenadas al sector cuyo polígono lo contiene (point-in-polygon). Usalo después de importar o editar geometrías para que el mapa refleje la distribución actual. Respeta las asignaciones hechas a mano.',
+    waitingHint: 'Tocá "Recalcular asignaciones" para aplicar los sectores',
+    waitingElementId: 'sectors_recalc',
+    showHandCursor: true,
   },
 
   // ── Configurar módulos ──────────────────────────────────────────────────────
   {
     id: 'config_protocols', screen: 'ProjectConfig', elementId: 'config_protocols', contextOnly: true,
     title: 'Configuración de protocolos',
-    message: 'Activa protocolos clásicos/numéricos, plantillas paramétricas, carga de históricos, aprobación multinivel y los modos de llenado por sector/tipo/fecha con codificación correlativa.',
+    message: 'Solo el Creador edita esta pantalla. Activá protocolos clásicos/numéricos, plantillas paramétricas, históricos, aprobación multinivel y los modos de llenado (por ubicación, muestra, sector, tipo o fecha). La codificación correlativa arma el código de cada ensayo con una máscara de tokens ({TIPO}, {AA}, {SEQ:4}…) y vista previa en vivo; podés elegir cuándo reinicia el secuencial (año, año+sector o año+mes) y definir una máscara distinta por tipo de ensayo.',
   },
   {
     id: 'config_traceability', screen: 'ProjectConfig', elementId: 'config_traceability', contextOnly: true,
     title: 'Módulo de Trazabilidad',
-    message: 'Habilita el seguimiento de actividades de equipos con cronómetro y GPS, y sus vistas analíticas.',
+    message: 'Esta sección solo la configura el Creador. Activá el módulo padre para habilitar el seguimiento de actividades de equipos con cronómetro y GPS; sus hijos (catálogo de equipos, modo de rastreo GPS e intervalo) quedan en gris hasta que prendés el padre.',
   },
   {
     id: 'config_geo', screen: 'ProjectConfig', elementId: 'config_geo', contextOnly: true,
     title: 'Módulo de Geolocalización',
-    message: 'Activa el mapa del proyecto, los sectores GIS y la captura de coordenadas en los ensayos.',
+    message: 'Solo el Creador la edita. Encendé el mapa del proyecto para habilitar la captura de coordenadas (subjetiva/numérica) en los ensayos, el sistema de coordenadas (WGS84/PSAD56, lat-lng o UTM) y la URL de la ortofoto; los hijos quedan deshabilitados si el módulo está apagado.',
   },
   {
     id: 'config_save', screen: 'ProjectConfig', elementId: 'config_save', contextOnly: true, contextEnd: true,
     title: 'Guardar cambios',
-    message: 'Aplica la configuración: se sincroniza a la nube y a todos los celulares del proyecto.',
+    message: 'Guarda y sincroniza la configuración a la nube y a todos los celulares del proyecto. Si alguna máscara de codificación es inválida, el guardado se bloquea hasta corregirla.',
+    waitingHint: 'Tocá «Guardar» para aplicar la configuración',
+    waitingElementId: 'config_save',
+    showHandCursor: true,
   },
 
   // ── Contactos ───────────────────────────────────────────────────────────────
   {
     id: 'contacts_card', screen: 'PhoneContacts', elementId: 'contacts_card', contextOnly: true,
     title: 'Directorio del equipo',
-    message: 'Los contactos del proyecto. Toca el icono de teléfono de una tarjeta para llamar directamente.',
-    waitingHint: 'Aún no hay contactos cargados',
+    message: 'Cada tarjeta es un contacto del proyecto con su nombre, rol y teléfono. El icono de teléfono te permite llamar directamente desde la app.',
+    waitingHint: 'Toca el icono de teléfono de una tarjeta para llamar',
   },
   {
     id: 'contacts_add', screen: 'PhoneContacts', elementId: 'contacts_add', contextOnly: true, contextEnd: true,
     title: 'Agregar contacto',
-    message: 'Con el botón + del encabezado registras un nuevo contacto (nombre, rol, teléfono). Disponible para el Jefe de Obra.',
-    waitingHint: 'Disponible para el Jefe de Obra',
+    message: 'Con el botón + del encabezado registras un nuevo contacto (nombre, rol y teléfono). Solo el Jefe de Obra puede agregar, editar e importar contactos.',
+    waitingHint: 'Toca el botón + para registrar un contacto',
+    showHandCursor: true,
   },
 
   // ── Trazabilidad · Inicio ───────────────────────────────────────────────────
   {
     id: 'trace_home_new', screen: 'TraceabilityHome', elementId: 'trace_home_new', contextOnly: true,
     title: 'Nueva actividad',
-    message: 'Inicia una sesión de trabajo: eliges equipo, actividad y sector, y arranca el cronómetro.',
+    message: 'Aquí inicias una sesión de trabajo: eliges equipo, actividad y sector. Al tocar este botón se abre el asistente de captura.',
+    waitingHint: 'Tocá "Nueva actividad" para abrir el asistente',
+    waitingElementId: 'trace_home_new',
+    showHandCursor: true,
   },
   {
     id: 'trace_home_analytics', screen: 'TraceabilityHome', elementId: 'trace_home_analytics', contextOnly: true,
     title: 'Análisis de resultados',
-    message: 'Reportes por sector, equipo y cronología, con exportación del PDF de trazabilidad (jefatura).',
-    waitingHint: 'Disponible para el Jefe de Obra',
+    message: 'Reportes por sector, equipo y cronología, con exportación del PDF de trazabilidad. Disponible solo para el Jefe de Obra.',
+    waitingHint: 'Tocá "Análisis" para ver los reportes',
+    waitingElementId: 'trace_home_analytics',
+    showHandCursor: true,
   },
   {
     id: 'trace_home_session', screen: 'TraceabilityHome', elementId: 'trace_home_session', contextOnly: true, contextEnd: true,
     title: 'Tus sesiones',
-    message: 'Aquí ves la sesión activa (con cronómetro en vivo) y el historial de sesiones cerradas. Tócalas para ver el detalle.',
-    waitingHint: 'Inicia una actividad para verla aquí',
+    message: 'Aquí ves la sesión activa con su cronómetro en vivo y el historial de sesiones cerradas. Tocá una tarjeta para abrir su detalle.',
+    waitingHint: 'Iniciá una actividad para verla listada aquí',
   },
 
   // ── Trazabilidad · Nueva sesión ─────────────────────────────────────────────
   {
     id: 'trace_cap_equipo', screen: 'TraceabilityCapture', elementId: 'trace_cap_equipo', contextOnly: true,
     title: 'Elige el equipo',
-    message: 'Selecciona la máquina o equipo sobre el que registrarás la actividad.',
+    message: 'Selecciona en el catálogo la máquina o equipo sobre el que registrarás la actividad. Al elegirlo se habilita el campo de actividad.',
+    waitingHint: 'Tocá el selector y elegí un equipo',
+    waitingElementId: 'trace_cap_equipo',
+    showHandCursor: true,
   },
   {
     id: 'trace_cap_actividad', screen: 'TraceabilityCapture', elementId: 'trace_cap_actividad', contextOnly: true,
     title: 'Elige la actividad',
-    message: 'Se habilita tras elegir el equipo: indica qué se está haciendo (productiva, mantenimiento, etc.).',
+    message: 'Indica qué se está haciendo con el equipo (productiva, mantenimiento, etc.). Solo se listan las actividades válidas para el equipo elegido.',
+    waitingHint: 'Primero elegí un equipo para habilitar este campo',
+    waitingElementId: 'trace_cap_equipo',
+    showHandCursor: true,
   },
   {
     id: 'trace_cap_start', screen: 'TraceabilityCapture', elementId: 'trace_cap_start', contextOnly: true, contextEnd: true,
     title: 'Iniciar la sesión',
-    message: 'Desliza para comenzar. Si la actividad tiene checklist, lo completas antes de arrancar el cronómetro.',
+    message: 'Desliza para comenzar. Si la actividad tiene checklist, lo completas antes de que arranque el cronómetro.',
+    waitingHint: 'Deslizá el control para iniciar',
+    waitingElementId: 'trace_cap_start',
+    showHandCursor: true,
   },
 
   // ── Trazabilidad · Checklist previo ─────────────────────────────────────────
   {
     id: 'trace_chk_item', screen: 'TraceabilityChecklist', elementId: 'trace_chk_item', contextOnly: true,
     title: 'Verificaciones previas',
-    message: 'Responde cada punto (Sí/No/N.A.) y agrega comentario o foto si aplica, antes de iniciar la sesión.',
+    message: 'Responde cada punto (Sí/No/N.A.) y agrega comentario o foto si aplica. Debes completarlos antes de iniciar la sesión.',
+    waitingHint: 'Respondé cada punto del checklist',
+    waitingElementId: 'trace_chk_item',
+    showHandCursor: true,
   },
   {
     id: 'trace_chk_start', screen: 'TraceabilityChecklist', elementId: 'trace_chk_start', contextOnly: true, contextEnd: true,
     title: 'Iniciar la sesión',
-    message: 'Con el checklist completo, desliza para arrancar el cronómetro de la actividad.',
+    message: 'Con el checklist respondido, desliza para arrancar el cronómetro de la actividad.',
+    waitingHint: 'Deslizá el control para arrancar el cronómetro',
+    waitingElementId: 'trace_chk_start',
+    showHandCursor: true,
   },
 
   // ── Trazabilidad · Sesión activa ────────────────────────────────────────────
   {
     id: 'trace_run_timer', screen: 'TraceabilityRunning', elementId: 'trace_run_timer', contextOnly: true,
     title: 'Cronómetro de la sesión',
-    message: 'Muestra el tiempo efectivo trabajado. Las pausas no cuentan en el total.',
+    message: 'Muestra el tiempo efectivo trabajado y avanza en vivo. Las pausas no suman al total. Más abajo controlas la sesión.',
   },
   {
     id: 'trace_run_actions', screen: 'TraceabilityRunning', elementId: 'trace_run_actions', contextOnly: true, contextEnd: true,
-    title: 'Pausar / Reanudar / Finalizar',
-    message: 'Desliza el control para pausar la actividad, reanudarla o finalizar la sesión cuando termines.',
+    title: 'Pausar, reanudar y finalizar',
+    message: 'Desliza cada control para pausar la actividad, reanudarla o finalizar la sesión al terminar. Al finalizar se cierra y queda en el historial.',
+    waitingHint: 'Deslizá un control para pausar o finalizar',
+    waitingElementId: 'trace_run_actions',
+    showHandCursor: true,
   },
 
   // ── Trazabilidad · Análisis ─────────────────────────────────────────────────
   {
     id: 'trace_an_tabs', screen: 'TraceabilityAnalytics', elementId: 'trace_an_tabs', contextOnly: true,
     title: 'Vistas de análisis',
-    message: 'Cambia entre análisis por sector, por equipo, checklists y el resumen exportable a PDF.',
+    message: 'Cambia entre análisis por sector, por equipo, checklists y el resumen exportable a PDF. Cada pestaña recalcula sus indicadores.',
+    waitingHint: 'Tocá una pestaña para cambiar de vista',
+    waitingElementId: 'trace_an_tabs',
+    showHandCursor: true,
   },
   {
     id: 'trace_an_filters', screen: 'TraceabilityAnalytics', elementId: 'trace_an_filters', contextOnly: true, contextEnd: true,
     title: 'Rango de fechas',
-    message: 'Acota los datos a un periodo; cada vista recalcula sus indicadores al cambiarlo.',
+    message: 'Acota los datos a un periodo eligiendo fecha desde y hasta. Cada vista vuelve a calcular sus indicadores al cambiarlo.',
+    waitingHint: 'Tocá las fechas para acotar el periodo',
+    waitingElementId: 'trace_an_filters',
+    showHandCursor: true,
   },
 
   // ── Trazabilidad · Detalle de sesión cerrada ────────────────────────────────
   {
     id: 'wsd_summary', screen: 'WorkSessionDetail', elementId: 'wsd_summary', contextOnly: true,
     title: 'Resumen de la sesión',
-    message: 'Duración efectiva y tiempo en pausa de esta sesión cerrada.',
+    message: 'El cronómetro grande es el tiempo EFECTIVO trabajado (sin contar pausas). Si hubo pausas, se muestra abajo el tiempo total detenido. Bajemos a ver los datos registrados.',
   },
   {
     id: 'wsd_info', screen: 'WorkSessionDetail', elementId: 'wsd_info', contextOnly: true,
     title: 'Datos de la sesión',
-    message: 'Equipo, actividad, sector y fechas registradas.',
+    message: 'Ficha de la sesión: equipo, actividad, sector, turno, inicio/fin y cantidad de puntos GPS capturados durante el trabajo. Más abajo están las notas de cierre.',
   },
   {
     id: 'wsd_notes', screen: 'WorkSessionDetail', elementId: 'wsd_notes', contextOnly: true, contextEnd: true,
-    title: 'Notas administrativas',
-    message: 'El Jefe de Obra puede agregar observaciones de cierre a la sesión.',
-    waitingHint: 'Disponible para el Jefe de Obra',
+    title: 'Notas de cierre',
+    message: 'Observaciones de cierre de la sesión. Solo el Jefe de Obra puede editarlas y guardarlas; el resto del equipo las ve como lectura.',
+  },
+
+  // ── Muestras ────────────────────────────────────────────────────────────────
+  {
+    id: 'samples_filters', screen: 'Samples', elementId: 'samples_filters', contextOnly: true,
+    title: 'Filtrar muestras',
+    message: 'Toca para desplegar los filtros: busca por código o material, acota por rango de fechas, rango de correlativo, sector o capa. Por defecto se muestran todas.',
+    waitingHint: 'Abre el módulo de Muestras para verlo',
+  },
+  {
+    id: 'samples_add', screen: 'Samples', elementId: 'samples_add', contextOnly: true,
+    title: 'Añadir muestra',
+    message: 'Crea una muestra nueva. Se le asigna un código automático (M-proyecto-fecha-correlativo) y solo verás las filas que el Jefe de Obra dejó activas en la configuración.',
+    waitingHint: 'Toca "Añadir muestra" para crear una',
+    waitingElementId: 'samples_add',
+    showHandCursor: true,
+  },
+  {
+    id: 'samples_card', screen: 'Samples', elementId: 'samples_card', contextOnly: true, contextEnd: true,
+    title: 'Tarjeta de muestra',
+    message: 'Cada tarjeta muestra el código, la fecha y el material; el número a la derecha son los ensayos vinculados. Tócala para abrir el detalle de la muestra y su código QR.',
+    waitingHint: 'Crea una muestra para verla en la lista',
+  },
+
+  // ── Detalle de muestra ──────────────────────────────────────────────────────
+  {
+    id: 'sample_detail_header', screen: 'SampleDetail', elementId: 'sample_detail_header', contextOnly: true,
+    title: 'Datos de la muestra',
+    message: 'Reúne el código, la fecha, ubicación/sector, material y coordenadas de la muestra. El código QR identifica la muestra física en campo: escanéalo para abrirla al instante.',
+    waitingHint: 'Abre una muestra para ver su detalle',
+  },
+  {
+    id: 'sample_detail_add_test', screen: 'SampleDetail', elementId: 'sample_detail_add_test', contextOnly: true,
+    title: 'Añadir ensayo',
+    message: 'Vincula uno o varios ensayos a esta muestra. Heredan su fecha, sector y ubicación, y aparecen abajo con su estado (en progreso, en revisión o aprobado).',
+    waitingHint: 'Toca "Añadir ensayo" para vincular ensayos',
+    waitingElementId: 'sample_detail_add_test',
+    showHandCursor: true,
+  },
+  {
+    id: 'sample_detail_export', screen: 'SampleDetail', elementId: 'sample_detail_export', contextOnly: true, contextEnd: true,
+    title: 'Exportar muestra',
+    message: 'El icono de compartir del encabezado genera un PDF con los datos generales de la muestra, su QR y la lista de ensayos vinculados, listo para enviar.',
+    waitingHint: 'Abre una muestra para ver esta opción',
+  },
+
+  // ── Tablas Resumen ──────────────────────────────────────────────────────────
+  {
+    id: 'summary_test_type', screen: 'SummaryTables', elementId: 'summary_test_type', contextOnly: true,
+    title: 'Elegí el tipo de ensayo',
+    message: 'Cada tarjeta consolida en una sola tabla todos los ensayos de ese tipo (una fila por ensayo). Tócala para abrir su tabla resumen con columnas, filtros y KPIs.',
+    waitingHint: 'Tocá un tipo de ensayo para abrir su tabla',
+    showHandCursor: true,
+  },
+  {
+    id: 'summary_filters', screen: 'SummaryTables', elementId: 'summary_filters', contextOnly: true,
+    title: 'Filtros de la tabla',
+    message: 'Acotá los ensayos por estado (aprobado/en revisión/rechazado), sector y rango de fechas. También elegís acá qué columna queda congelada como primera.',
+    waitingHint: 'Tocá un tipo de ensayo para ver sus filtros',
+    waitingElementId: 'summary_test_type',
+  },
+  {
+    id: 'summary_chart_export', screen: 'SummaryTables', elementId: 'summary_chart_export', contextOnly: true,
+    title: 'Gráfico y exportar',
+    message: 'El botón Gráfico genera un dispersión del parámetro elegido contra el tiempo, con línea de tendencia. CSV exporta la tabla filtrada en Excel (UTF-8).',
+    waitingHint: 'Permanecé en la tabla para ver estas opciones',
+  },
+  {
+    id: 'summary_measures', screen: 'SummaryTables', elementId: 'summary_measures', contextOnly: true, contextEnd: true, noPreMeasure: true,
+    title: 'Medidas (KPIs)',
+    message: 'Agregá filas de resumen al pie de la tabla: promedio, desviación estándar, máximo y mínimo de cada columna numérica. Tu selección queda guardada por tipo de ensayo.',
+    waitingHint: 'Desplazá la tabla hacia abajo para ver las medidas',
+  },
+
+  // ── Papelera de Reciclaje ───────────────────────────────────────────────────
+  {
+    id: 'recycle_banner', screen: 'RecycleBin', elementId: 'recycle_banner', contextOnly: true,
+    title: 'Papelera de Reciclaje',
+    message: 'Es tu red de seguridad: cada ensayo eliminado del proyecto se respalda aquí en solo lectura, ordenado por fecha de borrado. Si algo se eliminó por error, lo recuperás desde acá. Recordá que el borrado definitivo de un ensayo es irreversible.',
+    waitingHint: 'Abre la Papelera del proyecto para verla',
+  },
+  {
+    id: 'recycle_card', screen: 'RecycleBin', elementId: 'recycle_card', contextOnly: true, contextEnd: true,
+    title: 'Ensayo eliminado',
+    message: 'Cada tarjeta es un ensayo borrado, con su código, ubicación y quién lo eliminó. Tócala para ver la ficha completa (solo lectura, sin QR) y confirmar si necesitás restaurarlo en el proyecto.',
+    waitingHint: 'Tocá una tarjeta para ver el ensayo eliminado',
+    waitingElementId: 'recycle_card',
+    showHandCursor: true,
+  },
+
+  // ── Gestión de Usuarios ─────────────────────────────────────────────────────
+  {
+    id: 'users_add', screen: 'UserManagement', elementId: 'users_add', contextOnly: true,
+    roles: ['CREATOR'],
+    title: 'Añadir usuario',
+    message: 'Solo el Creador da de alta usuarios. Cada cuenta se crea con email y contraseña: con esos datos el usuario inicia sesión. Tócalo para abrir el formulario de alta.',
+    waitingHint: 'Tocá "Añadir usuario" para crear una cuenta',
+    waitingElementId: 'users_add',
+    showHandCursor: true,
+  },
+  {
+    id: 'users_role', screen: 'UserManagement', elementId: 'users_role', contextOnly: true,
+    roles: ['CREATOR'],
+    title: 'Rol del usuario',
+    message: 'La etiqueta de color marca el rol: Residente, Supervisor QC o Técnico. Define qué puede hacer cada uno. Tócala para cambiar el rol de un usuario existente.',
+    waitingHint: 'Cargá usuarios para ver y editar su rol',
+  },
+  {
+    id: 'users_assign', screen: 'UserManagement', elementId: 'users_assign', contextOnly: true,
+    roles: ['CREATOR'],
+    title: 'Accesos a proyectos',
+    message: 'Cada usuario solo ve los proyectos que le asignás. Con "Ingresar a proyecto" das acceso a varios usuarios y proyectos a la vez (y "Quitar acceso" lo revoca).',
+    waitingHint: 'Tocá "Ingresar a proyecto" para asignar accesos',
+    waitingElementId: 'users_assign',
+    showHandCursor: true,
+  },
+  {
+    id: 'users_import', screen: 'UserManagement', elementId: 'users_import', contextOnly: true, contextEnd: true,
+    roles: ['CREATOR'],
+    title: 'Importar desde Excel',
+    message: 'Da de alta muchos usuarios de una vez desde una planilla (nombre, email, contraseña, rol). La columna "Proyectos" asigna sus accesos automáticamente.',
+    waitingHint: 'Tocá "Importar" para cargar usuarios en lote',
+    waitingElementId: 'users_import',
+    showHandCursor: true,
+  },
+
+  // ── Lista de Protocolos ─────────────────────────────────────────────────────
+  {
+    id: 'protolist_search', screen: 'ProtocolList', elementId: 'protolist_search', contextOnly: true,
+    title: 'Buscar protocolos',
+    message: 'Escribe el número de protocolo o el nombre de la ubicación para encontrar al instante el ensayo que buscas dentro de la lista del proyecto.',
+  },
+  {
+    id: 'protolist_filter', screen: 'ProtocolList', elementId: 'protolist_filter', contextOnly: true,
+    title: 'Filtrar por estado',
+    message: 'Acota la lista según el estado del protocolo: en proceso, en revisión, aprobado o rechazado. Toca "Todos" para volver a verlos todos.',
+  },
+  {
+    id: 'protolist_card', screen: 'ProtocolList', elementId: 'protolist_card', contextOnly: true, contextEnd: true,
+    title: 'Tarjeta de protocolo',
+    message: 'Cada tarjeta es un protocolo con su código, ubicación y estado de color. Tócala para llenarlo si está pendiente, o para revisarlo si ya fue enviado.',
+    waitingHint: 'Abre la lista de protocolos del proyecto para verlas',
+  },
+
+  // ── No Conformidad ──────────────────────────────────────────────────────────
+  {
+    id: 'ncr_info', screen: 'NonConformity', elementId: 'ncr_info', contextOnly: true,
+    title: 'Registrar una No Conformidad',
+    message: 'Una No Conformidad documenta una desviación de calidad detectada en este protocolo. Queda vinculada al protocolo y al proyecto para su seguimiento formal.',
+  },
+  {
+    id: 'ncr_description', screen: 'NonConformity', elementId: 'ncr_description', contextOnly: true,
+    title: 'Describir el hallazgo',
+    message: 'Detalla qué se incumplió, dónde y por qué (mínimo 10 caracteres). Una buena descripción agiliza la revisión y la acción correctiva.',
+    waitingHint: 'Escribe la descripción para habilitar el registro',
+  },
+  {
+    id: 'ncr_submit', screen: 'NonConformity', elementId: 'ncr_submit', contextOnly: true, contextEnd: true,
+    title: 'Registrar y dar seguimiento',
+    message: 'Al registrar, la No Conformidad nace en estado ABIERTA y queda asociada al protocolo. El Jefe de Obra podrá darle seguimiento y cerrarla con sus notas de resolución.',
+    waitingHint: 'Toca Registrar para guardar la No Conformidad',
+    showHandCursor: true,
+  },
+
+  // ── Selector de idioma ──────────────────────────────────────────────────────
+  {
+    id: 'lang_selector', screen: 'ProjectList', elementId: 'lang_selector', contextOnly: true, contextEnd: true,
+    title: 'Idioma de la app',
+    message: 'Abre el menú lateral y, en Preferencias, toca Idioma para cambiar entre Español, English y Português. El cambio es por dispositivo y se aplica al instante en toda la app.',
+    showHandCursor: true,
   },
 ];
 

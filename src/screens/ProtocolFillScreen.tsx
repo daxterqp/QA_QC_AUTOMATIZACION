@@ -58,7 +58,6 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   const protocolItemRowRef = useTourStep('protocol_item_row');
   const protocolCameraBtnRef = useTourStep('protocol_camera_btn');
   const protocolSubmitBtnRef = useTourStep('protocol_submit_btn');
-  const protocolPlanosBtnRef = useTourStep('protocol_planos_btn');
   const { currentStep, isActive: tourActive, jumpToStep, isContextual, dismissTour, unregisterMeasure } = useTour();
 
   useEffect(() => {
@@ -859,7 +858,6 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
                     <Text style={styles.dgValue} numberOfLines={2}>{location.name}</Text>
                   </View>
                   <TouchableOpacity
-                    ref={protocolPlanosBtnRef}
                     style={[styles.planBtn, locationPlans.length === 0 && planSearchDone && { opacity: 0.5 }]}
                     onPress={() => {
                       if (locationPlans.length > 0) {

@@ -27,6 +27,8 @@ import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Tex
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useI18n, tx } from '@i18n/index';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SummaryTables'>;
 
@@ -114,6 +116,20 @@ const polyval = (coef: number[], x: number) => coef.reduce((acc, c, i) => acc + 
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
   const { projectId, projectName } = route.params;
+
+  // Tour contextual (botón de ayuda ?)
+  const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
+  const summaryTestTypeRef = useTourStep('summary_test_type');
+  const summaryChartExportRef = useTourStep('summary_chart_export');
+  const summaryFiltersRef = useTourStep('summary_filters');
+  const summaryMeasuresRef = useTourStep('summary_measures');
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
+
   const [allRows, setAllRows] = useState<Row[]>([]);
   const [configByTpl, setConfigByTpl] = useState<Record<string, ReturnType<typeof parseSummaryConfig>>>({});
   const [labelByTpl, setLabelByTpl] = useState<Record<string, string>>({});
@@ -323,7 +339,16 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <AppHeader title={t('summary.title')} subtitle={projectName} onBack={() => navigation.goBack()} />
+      <AppHeader
+        title={t('summary.title')}
+        subtitle={projectName}
+        onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('summary_test_type')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
+      />
 
       {!templateId ? (
         <ScrollView contentContainerStyle={styles.list}>
@@ -332,8 +357,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
           ) : (
             <>
               <Text style={styles.hint}>{t('summary.pickTestType')}</Text>
-              {templates.map(t => (
-                <TouchableOpacity key={t.id} style={styles.tplCard} onPress={() => setTemplateId(t.id)} activeOpacity={0.8}>
+              {templates.map((t, i) => (
+                <TouchableOpacity ref={i === 0 ? summaryTestTypeRef : undefined} key={t.id} style={styles.tplCard} onPress={() => setTemplateId(t.id)} activeOpacity={0.8}>
                   <View style={styles.tplIcon}><Ionicons name="grid" size={20} color={Colors.secondary} /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.tplTitle}>{t.label}</Text>
@@ -348,7 +373,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       ) : (
         <View style={{ flex: 1 }}>
           {/* Barra superior */}
-          <View style={styles.topBar}>
+          <View ref={summaryChartExportRef} style={styles.topBar}>
             <TouchableOpacity onPress={() => setTemplateId(null)} style={styles.backChip}><Ionicons name="chevron-back" size={14} color={Colors.primary} /><Text style={styles.backChipText}>{t('summary.types')}</Text></TouchableOpacity>
             <Text style={styles.topTitle} numberOfLines={1}>{labelByTpl[templateId] ?? ''}</Text>
             <TouchableOpacity onPress={() => { setChartForm({ yKey: yOptions[0]?.key ?? '', trend: 'linear' }); setShowChart(true); }} disabled={yOptions.length === 0} style={[styles.chartBtn, yOptions.length === 0 && { opacity: 0.4 }]}>
@@ -360,7 +385,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
           </View>
 
           {/* Filtros */}
-          <View style={styles.filters}>
+          <View ref={summaryFiltersRef} style={styles.filters}>
             <Text style={styles.filterLabel}>{t('summary.status')} · {filtered.length}/{rows.length}</Text>
             <View style={styles.chipRow}>
               {[['APPROVED', t('summary.statusApproved'), '#1e8e3e'], ['SUBMITTED', t('summary.statusInReview'), '#394e7d'], ['REJECTED', t('summary.statusRejected'), '#d93025']].map(([k, l, col]) => {
@@ -425,7 +450,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                 </ScrollView>
 
                 {/* + Nueva medida */}
-                <View style={styles.measureBar}>
+                <View ref={summaryMeasuresRef} style={styles.measureBar}>
                   {(['avg', 'std', 'max', 'min'] as MeasureOp[]).map(op => {
                     const on = measures.includes(op);
                     return (

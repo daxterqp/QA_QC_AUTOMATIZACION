@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -12,6 +13,8 @@ import type Protocol from '@models/Protocol';
 import type Location from '@models/Location';
 import type { ProtocolStatus } from '@models/Protocol';
 import { Colors, Radius, Shadow } from '../theme/colors';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProtocolList'>;
@@ -36,6 +39,20 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
+  const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
+
+  // Tour refs
+  const protoSearchRef = useTourStep('protolist_search');
+  const protoFilterRef = useTourStep('protolist_filter');
+  const protoCardRef = useTourStep('protolist_card');
+
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [locations, setLocations] = useState<Map<string, Location>>(new Map());
   const [search, setSearch] = useState('');
@@ -97,10 +114,15 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
         title={projectName}
         subtitle={t(filtered.length !== 1 ? 'protoList.subtitle.other' : 'protoList.subtitle.one', { count: filtered.length })}
         onBack={() => navigation.goBack()}
+        rightContent={
+          <TouchableOpacity onPress={() => jumpToStep('protolist_search')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        }
       />
 
       {/* Buscador */}
-      <View style={styles.searchBar}>
+      <View ref={protoSearchRef} style={styles.searchBar}>
         <TextInput
           style={styles.searchInput}
           placeholder={t('protoList.searchPlaceholder')}
@@ -111,7 +133,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
       </View>
 
       {/* Filtro por estado */}
-      <View style={styles.filterRow}>
+      <View ref={protoFilterRef} style={styles.filterRow}>
         {FILTER_OPTIONS.map((status) => (
           <TouchableOpacity
             key={status}
@@ -138,7 +160,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
         ListEmptyComponent={
           <Text style={styles.empty}>{t('protoList.empty')}</Text>
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const loc = item.locationId ? locations.get(item.locationId) : null;
           const canFill =
             (isSupervisor || isCreator || isJefe) &&
@@ -146,7 +168,7 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
               (item.status === 'REJECTED' && item.correctionsAllowed));
 
           return (
-            <TouchableOpacity style={styles.card} onPress={() => handlePress(item)}>
+            <TouchableOpacity ref={index === 0 ? protoCardRef : undefined} style={styles.card} onPress={() => handlePress(item)}>
               <View style={styles.cardTop}>
                 <Text style={styles.cardNumber}>{(item as any).protocolCode ? `${(item as any).protocolCode} · ` : ''}{item.protocolNumber}</Text>
                 <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.status] }]}>

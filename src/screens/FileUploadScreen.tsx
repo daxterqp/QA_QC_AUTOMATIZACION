@@ -85,8 +85,6 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   }, [navigation, tourActive, isContextual, dismissTour]);
 
   // Tour refs
-  const tabBarRef = useTourStep('fileupload_tab_bar');
-  const actionBtnRef = useTourStep('fileupload_action_btn');
   const tabActivitiesRef = useTourStep('fileupload_tab_activities');
   const tabLocationsRef = useTourStep('fileupload_tab_locations');
   const tabPdfRef = useTourStep('fileupload_tab_pdf');
@@ -602,7 +600,6 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     <ScrollView contentContainerStyle={styles.tabContent}>
       <View style={styles.actionCard}>
         <TouchableOpacity
-          ref={actionBtnRef}
           style={[
             styles.importBtn,
             (actState.status === 'picking' || actState.status === 'importing') && styles.btnDisabled,
@@ -1054,7 +1051,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         }
       />
 
-      <View ref={tabBarRef} style={styles.tabBar}>
+      <View style={styles.tabBar}>
         {tabs.map((t) => (
           <TouchableOpacity
             key={t.key}

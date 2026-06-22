@@ -17,6 +17,8 @@ import type PhoneContact from '@models/PhoneContact';
 import { useAuth } from '@context/AuthContext';
 import { pushPhoneContact, deletePhoneContactRemote, pullPhoneContacts } from '@services/SupabaseSyncService';
 import { useI18n } from '@i18n/index';
+import { useTourStep } from '@hooks/useTourStep';
+import { useTour } from '@context/TourContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhoneContacts'>;
 
@@ -33,6 +35,18 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+
+  // Tour
+  const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
+  const contactsCardRef = useTourStep('contacts_card');
+  const contactsAddRef = useTourStep('contacts_add');
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      if (tourActive && isContextual) dismissTour();
+    });
+    return unsub;
+  }, [navigation, tourActive, isContextual, dismissTour]);
 
   const [contacts, setContacts] = useState<PhoneContact[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -214,23 +228,30 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
-          isJefe ? (
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                onPress={handleImportExcel}
-                disabled={importing}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                {importing
-                  ? <ActivityIndicator size="small" color={Colors.white} />
-                  : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
-                }
-              </TouchableOpacity>
-              <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
-              </TouchableOpacity>
-            </View>
-          ) : undefined
+          <View style={styles.headerActions}>
+            {isJefe && (
+              <>
+                <TouchableOpacity
+                  onPress={handleImportExcel}
+                  disabled={importing}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  {importing
+                    ? <ActivityIndicator size="small" color={Colors.white} />
+                    : <Ionicons name="document-text-outline" size={24} color={Colors.white} />
+                  }
+                </TouchableOpacity>
+                <View ref={contactsAddRef} collapsable={false}>
+                  <TouchableOpacity onPress={openAdd} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="add-circle-outline" size={26} color={Colors.white} />
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            <TouchableOpacity onPress={() => jumpToStep('contacts_card')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -256,8 +277,8 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
             <Text style={styles.excelFormat}>{t('contacts.empty.excelFormat')}</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
+        renderItem={({ item, index }) => (
+          <View ref={index === 0 ? contactsCardRef : undefined} collapsable={false} style={styles.card}>
             <View style={styles.cardBody}>
               <Text style={styles.cardName}>{item.name}</Text>
               {item.role ? <Text style={styles.cardRole}>{item.role}</Text> : null}
