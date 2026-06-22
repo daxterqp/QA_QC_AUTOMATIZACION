@@ -27,7 +27,7 @@ const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
 // Orbital "círculos" en la esquina superior derecha (gesto grabado por el usuario).
-const CIRCLE_SPEED = 0.22;   // rad/frame (período ≈ 2π/este). Subir = más rápido.
+const CIRCLE_SPEED = 0.32;   // rad/frame base (más veloz). Velocidad VARIABLE (acelera/frena).
 const CIRCLE_CX = 0.85;      // centro X de la elipse
 const CIRCLE_CY = 0.91;      // centro Y en espacio de sim (1 = arriba) → esquina superior
 const CIRCLE_RX = 0.075;     // radio horizontal
@@ -296,7 +296,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           prevLX = lx; prevRX = rx;   // sigue avanzando aunque esté apagado (reaparece más adelante)
 
           // Orbital "círculos" en la esquina superior derecha (re-emitido cada frame → trazo continuo).
-          circAngle += CIRCLE_SPEED;
+          circAngle += CIRCLE_SPEED * (0.55 + 0.6 * Math.abs(Math.sin(circAngle * 1.3)) + 0.25 * Math.abs(Math.sin(circAngle * 2.7)));
           const cgx = CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle);
           const cgy = CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle);
           pushSeg2(prevCX, prevCY, cgx, cgy, CIRCLE_STR);
