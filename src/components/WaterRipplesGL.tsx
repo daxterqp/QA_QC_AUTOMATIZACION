@@ -26,6 +26,10 @@ const AUTO_SPEED = 0.08;    // rad/frame (más alto = más rápido). Regular a g
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
+// PRUEBA temporal: espejar arriba los mismos dos dedos de la base y apagar el dash elíptico.
+const TOP_FINGERS = true;   // replicar los 2 dedos también arriba (misma trayectoria)
+const TOP_DASH = false;     // dash elíptico sup-derecha (apagado por ahora)
+const AUTO_Y_TOP = 0.92;    // altura espejo (cerca del borde superior)
 // Orbital "círculos" en la esquina superior derecha (gesto grabado por el usuario).
 const CIRCLE_SPEED = 0.32;   // rad/frame base (más veloz). Velocidad VARIABLE (acelera/frena).
 const CIRCLE_CX = 0.85;      // centro X de la elipse
@@ -262,10 +266,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           // acelerando, recorriendo solo de abajo hasta la MITAD de la pantalla (y=0.5).
           push(0.5, barridoRef.current.y, 2.2);
           const by = barridoRef.current.y;
-          const p = Math.min(1, (by - 0.06) / 0.44);       // 0 abajo → 1 en la mitad
-          const v = 0.0010 + 0.012 * p;                    // lento al inicio, acelera al subir
+          const p = Math.min(1, (by - 0.06) / 0.607);      // 0 abajo → 1 en 2/3 (y≈0.667)
+          const v = 0.0011 + 0.0132 * p;                   // lento al inicio, acelera (+10%)
           barridoRef.current.y += v;
-          if (barridoRef.current.y > 0.5) barridoRef.current.active = false;
+          if (barridoRef.current.y > 0.667) barridoRef.current.active = false;
         } else if (em.length > 0) {
           // Twin: puntos sostenidos re-emitidos cada frame.
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
@@ -287,14 +291,21 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           if (--tR <= 0) { onR = !onR; tR = 50 + Math.floor(Math.random() * 30); }
           if (onL) pushSeg(prevLX, lx, lyy, AUTO_STR);
           if (onR) pushSeg(prevRX, rx, ryy, AUTO_STR);
+          // PRUEBA: los MISMOS dos dedos espejados arriba (misma X/encendido, Y cerca del borde superior).
+          if (TOP_FINGERS) {
+            if (onL) pushSeg(prevLX, lx, AUTO_Y_TOP + 0.035 * Math.sin(autoPhaseL * 1.6), AUTO_STR);
+            if (onR) pushSeg(prevRX, rx, AUTO_Y_TOP + 0.035 * Math.sin(autoPhaseR * 1.15 + 0.8), AUTO_STR);
+          }
           prevLX = lx; prevRX = rx;   // sigue avanzando aunque esté apagado (reaparece más adelante)
 
           // Dashes en la elipse sup-derecha: 1 punto/frame (lo más ligero) con velocidad variable.
           // Intermitencia RÁPIDA (prende pocos frames → dash corto) + el ángulo avanza también
           // apagado, así cada reaparición cae en otro punto de la elipse → muchos dashes dispersos.
-          circAngle += CIRCLE_SPEED * (0.55 + 0.6 * Math.abs(Math.sin(circAngle * 1.3)) + 0.25 * Math.abs(Math.sin(circAngle * 2.7)));
-          if (--tC <= 0) { onC = !onC; tC = onC ? 3 + Math.floor(Math.random() * 7) : 8 + Math.floor(Math.random() * 16); }
-          if (onC) push(CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle), CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle), CIRCLE_STR);
+          if (TOP_DASH) {
+            circAngle += CIRCLE_SPEED * (0.55 + 0.6 * Math.abs(Math.sin(circAngle * 1.3)) + 0.25 * Math.abs(Math.sin(circAngle * 2.7)));
+            if (--tC <= 0) { onC = !onC; tC = onC ? 3 + Math.floor(Math.random() * 7) : 8 + Math.floor(Math.random() * 16); }
+            if (onC) push(CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle), CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle), CIRCLE_STR);
+          }
 
           // Gotita ambiental aleatoria.
           if (--ambient <= 0) {
