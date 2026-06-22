@@ -219,10 +219,6 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={handleCreateAccount} style={styles.createBtn}>
-              <Text style={styles.createText}>{t('login.createAccount')}</Text>
-            </TouchableOpacity>
-
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>{t('login.or')}</Text>
@@ -299,11 +295,14 @@ export default function LoginScreen() {
                   )}
               </ImageBackground>
             </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleCreateAccount} style={styles.createBtn}>
+              <Text style={styles.createText}>{t('login.createAccount')}</Text>
+            </TouchableOpacity>
           </Animated.View>
 
           {entered && (
             <Animated.View style={{ opacity: cardOpacity }}>
-              <Text style={styles.footer}>{t('login.footer')}</Text>
               <TouchableOpacity onPress={() => {
                 const { Linking } = require('react-native');
                 Linking.openURL('https://docs.google.com/document/d/e/2PACX-1vSFl7nP_Va4GvTQsMAdTaQ_85f_UEYZjQk7R7VrYskfprVCjUTHuKceMQTFyuuXcA/pub');
@@ -512,7 +511,7 @@ const styles = StyleSheet.create({
   btnText: { fontFamily: FF_XBOLD, color: Colors.white, fontSize: 15, letterSpacing: 2.5 },
 
   footer: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, paddingTop: 20, paddingHorizontal: 12, lineHeight: 18 },
-  privacyLink: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, textDecorationLine: 'underline', paddingTop: 8 },
+  privacyLink: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, textDecorationLine: 'underline', paddingTop: 22 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.78)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, width: '100%', gap: 14 },
