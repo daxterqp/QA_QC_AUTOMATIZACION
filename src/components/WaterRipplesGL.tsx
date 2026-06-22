@@ -22,7 +22,7 @@ export type WaterGLHandle = {
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
 // Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
-const AUTO_SPEED = 0.3;     // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_SPEED = 0.22;    // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 1.1; // desfase entre los dos dedos (no van en lockstep)
