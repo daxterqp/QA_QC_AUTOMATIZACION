@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   KeyboardAvoidingView, Platform, ScrollView, Alert, Image, Modal,
-  ImageBackground, ActivityIndicator, Animated, Dimensions, Pressable, Easing,
+  ImageBackground, ActivityIndicator, Animated, Dimensions, Pressable, Easing, Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,8 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const CARD_BG = '#f7f9fb';
 // Agua por shaders (expo-gl). Para SACARLO y volver al ripple JS: poner false.
 const USE_GL_WATER = true;
+// Grabador de input del agua (debug): muestra recuadro REC arriba con botón Copiar.
+const DEBUG_RECORD = true;
 const FF_REG = 'Montserrat_400Regular';
 const FF_SEMI = 'Montserrat_600SemiBold';
 const FF_BOLD = 'Montserrat_700Bold';
@@ -100,6 +102,23 @@ export default function LoginScreen() {
   const lastMove = useRef({ x: 0, y: 0 });
   const useGL = USE_GL_WATER && glSupported;
 
+  // ── Grabador de input del agua (debug) ──
+  const recRef = useRef<{ t: number; x: number; y: number; m: number }[]>([]);
+  const recStart = useRef(0);
+  const [recCount, setRecCount] = useState(0);
+  const rec = (px: number, py: number, m: number) => {
+    if (!DEBUG_RECORD) return;
+    const w = layoutRef.current.w, h = layoutRef.current.h;
+    if (recRef.current.length === 0) recStart.current = Date.now();
+    recRef.current.push({ t: Date.now() - recStart.current, x: +(px / w).toFixed(4), y: +(py / h).toFixed(4), m });
+    if (recRef.current.length % 6 === 0) setRecCount(recRef.current.length);
+  };
+  const copyLog = async () => {
+    setRecCount(recRef.current.length);
+    try { await Share.share({ message: JSON.stringify(recRef.current) }); } catch { /* cancelado */ }
+  };
+  const clearLog = () => { recRef.current = []; setRecCount(0); };
+
   const onWrapLayout = (e: any) => {
     const { width, height } = e.nativeEvent.layout;
     layoutRef.current = { w: width || 1, h: height || 1 };
@@ -112,6 +131,7 @@ export default function LoginScreen() {
     const { pageX, pageY } = e.nativeEvent;
     lastMove.current = { x: pageX, y: pageY };
     dropAt(pageX, pageY, false);
+    rec(pageX, pageY, 0);
     resetIdle();
   };
   const onTouchGLMove = (e: any) => {
@@ -119,6 +139,7 @@ export default function LoginScreen() {
     if (Math.hypot(pageX - lastMove.current.x, pageY - lastMove.current.y) > 8) {
       lastMove.current = { x: pageX, y: pageY };
       dropAt(pageX, pageY, true);
+      rec(pageX, pageY, 1);
     }
   };
   // Captura el toque en fase de captura SIN robar el responder (return false) →
@@ -348,6 +369,19 @@ export default function LoginScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Grabador de input del agua (debug) */}
+      {DEBUG_RECORD && (
+        <View style={[styles.recBox, { top: insets.top + 6 }]}>
+          <Text style={styles.recText}>REC · {recCount}</Text>
+          <TouchableOpacity style={styles.recBtn} onPress={copyLog}>
+            <Text style={styles.recBtnTxt}>Copiar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.recBtn} onPress={clearLog}>
+            <Text style={styles.recBtnTxt}>Limpiar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Modal: olvidé mi contraseña */}
       <Modal visible={showReset} transparent animationType="fade" onRequestClose={() => setShowReset(false)}>
         <View style={styles.modalOverlay}>
@@ -459,6 +493,17 @@ const styles = StyleSheet.create({
     position: 'absolute', bottom: 70, left: 0, right: 0, textAlign: 'center',
     fontFamily: FF_SEMI, fontSize: 12, color: Colors.white, letterSpacing: 2, textTransform: 'uppercase',
   },
+
+  recBox: {
+    position: 'absolute', right: 12, zIndex: 30,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  recText: {
+    color: Colors.white, fontSize: 11, fontWeight: '700',
+    backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8,
+  },
+  recBtn: { backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  recBtnTxt: { color: Colors.navy, fontSize: 11, fontWeight: '700' },
 
   backBtn: {
     position: 'absolute', left: 14, zIndex: 20,
