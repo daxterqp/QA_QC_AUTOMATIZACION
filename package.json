@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "ts:check": "tsc --noEmit"
+    "ts:check": "tsc --noEmit",
+    "sync:logo": "node scripts/sync-brand.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1011.0",

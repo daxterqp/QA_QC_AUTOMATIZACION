@@ -27,6 +27,36 @@ const login: Record<string, { es: string; en: string; pt: string }> = {
   'login.verifying': { es: 'Verificando...', en: 'Verifying...', pt: 'Verificando...' },
   'login.submit': { es: 'INGRESAR', en: 'SIGN IN', pt: 'ENTRAR' },
 
+  'login.subtitle': {
+    es: 'Control de calidad en obra, en tu bolsillo.',
+    en: 'Quality control on site, in your pocket.',
+    pt: 'Controle de qualidade na obra, no seu bolso.',
+  },
+  'login.forgotPassword': { es: '¿Olvidaste tu contraseña?', en: 'Forgot your password?', pt: 'Esqueceu sua senha?' },
+
+  // Modal "olvidé mi contraseña"
+  'login.resetTitle': { es: 'Recuperar contraseña', en: 'Reset password', pt: 'Recuperar senha' },
+  'login.resetSubtitle': {
+    es: 'Te enviaremos un correo con un enlace para crear una nueva contraseña.',
+    en: 'We will send you an email with a link to set a new password.',
+    pt: 'Enviaremos um e-mail com um link para criar uma nova senha.',
+  },
+  'login.resetEmailPlaceholder': { es: 'Tu correo', en: 'Your email', pt: 'Seu e-mail' },
+  'login.resetSend': { es: 'Enviar enlace', en: 'Send link', pt: 'Enviar link' },
+  'login.resetSending': { es: 'Enviando...', en: 'Sending...', pt: 'Enviando...' },
+  'login.resetSentTitle': { es: 'Revisa tu correo', en: 'Check your email', pt: 'Verifique seu e-mail' },
+  'login.resetSentMsg': {
+    es: 'Si el correo está registrado, te llegará un enlace para restablecer tu contraseña.',
+    en: 'If the email is registered, you will receive a link to reset your password.',
+    pt: 'Se o e-mail estiver registrado, você receberá um link para redefinir sua senha.',
+  },
+  'login.resetErrorTitle': { es: 'No se pudo enviar', en: 'Could not send', pt: 'Não foi possível enviar' },
+  'login.resetErrorMsg': {
+    es: 'Revisa el correo e intenta de nuevo.',
+    en: 'Check the email and try again.',
+    pt: 'Verifique o e-mail e tente novamente.',
+  },
+
   'login.footer': {
     es: 'Para solicitar acceso, contacte al administrador del sistema.',
     en: 'To request access, contact the system administrator.',

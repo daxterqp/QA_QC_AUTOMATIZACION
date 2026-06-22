@@ -20,6 +20,8 @@ interface AuthContextValue {
   loginDemo: () => void;
   logout: () => Promise<void>;
   changePassword: (userId: string, newPassword: string) => Promise<void>;
+  /** Envía el correo de recuperación de contraseña (self-service). Lanza si falla. */
+  resetPassword: (email: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
 }
 
@@ -237,6 +239,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
+  const resetPassword = useCallback(async (email: string) => {
+    // Self-service "olvidé mi contraseña": Supabase envía un correo con un link de
+    // recuperación. El destino del link se configura en Supabase → Authentication →
+    // URL Configuration (Site URL / Redirect URLs): en web cae en la página /reset;
+    // en móvil, en el deep link de la app. Acá solo disparamos el envío.
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    if (error) throw error;
+  }, []);
+
   const deleteAccount = useCallback(async () => {
     if (!currentUser || isDemo) return;
     const userId = currentUser.id;
@@ -261,7 +272,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser, isDemo]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword, deleteAccount }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );
