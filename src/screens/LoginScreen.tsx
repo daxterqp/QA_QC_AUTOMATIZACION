@@ -13,11 +13,14 @@ import {
 import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
 import WaterRipples from '@components/WaterRipples';
+import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
 import { getRecentEmails } from '@services/RecentAccountsService';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const CARD_BG = '#f7f9fb';
+// Agua por shaders (expo-gl). Para SACARLO y volver al ripple JS: poner false.
+const USE_GL_WATER = true;
 const FF_REG = 'Montserrat_400Regular';
 const FF_SEMI = 'Montserrat_600SemiBold';
 const FF_BOLD = 'Montserrat_700Bold';
@@ -88,6 +91,35 @@ export default function LoginScreen() {
   };
 
   useEffect(() => () => { if (idleTimer.current) clearTimeout(idleTimer.current); }, []);
+
+  // Agua por shaders (expo-gl): ref + soporte + medición del área para el toque.
+  const glRef = useRef<WaterGLHandle>(null);
+  const [glSupported, setGlSupported] = useState(true);
+  const layoutRef = useRef({ w: 1, h: 1 });
+  const lastMove = useRef({ x: 0, y: 0 });
+  const useGL = USE_GL_WATER && glSupported;
+
+  const onWrapLayout = (e: any) => {
+    const { width, height } = e.nativeEvent.layout;
+    layoutRef.current = { w: width || 1, h: height || 1 };
+  };
+  const dropAt = (x: number, y: number) => glRef.current?.drop(x / layoutRef.current.w, y / layoutRef.current.h);
+  const onTouchGL = (e: any) => {
+    const { locationX, locationY } = e.nativeEvent;
+    lastMove.current = { x: locationX, y: locationY };
+    dropAt(locationX, locationY);
+    resetIdle();
+  };
+  const onTouchGLMove = (e: any) => {
+    const { locationX, locationY } = e.nativeEvent;
+    if (Math.hypot(locationX - lastMove.current.x, locationY - lastMove.current.y) > 30) {
+      lastMove.current = { x: locationX, y: locationY };
+      dropAt(locationX, locationY);
+    }
+  };
+  const renderContent = (inner: React.ReactNode) => useGL
+    ? <View style={styles.flex} onLayout={onWrapLayout} onTouchStart={onTouchGL} onTouchMove={onTouchGLMove}>{inner}</View>
+    : <WaterRipples onInteract={resetIdle}>{inner}</WaterRipples>;
 
   const canContinue = /\S+@\S+\.\S+/.test(email.trim()) && password.length >= 1;
   const resetValid = /\S+@\S+\.\S+/.test(resetEmail.trim());
@@ -161,9 +193,9 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.root}>
-      {Background}
+      {useGL ? <WaterRipplesGL ref={glRef} onUnsupported={() => setGlSupported(false)} /> : Background}
 
-      <WaterRipples onInteract={resetIdle}>
+      {renderContent(<>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 24 + insets.bottom, paddingTop: insets.top + SCREEN_H * 0.05 }]} keyboardShouldPersistTaps="handled" scrollEnabled={entered}>
 
@@ -297,7 +329,7 @@ export default function LoginScreen() {
 
       {/* Capa de toque del intro */}
       {!entered && <Pressable style={StyleSheet.absoluteFill} onPress={enterApp} accessibilityLabel={t('login.tapToStart')} />}
-      </WaterRipples>
+      </>)}
 
       {/* Modal: olvidé mi contraseña */}
       <Modal visible={showReset} transparent animationType="fade" onRequestClose={() => setShowReset(false)}>
