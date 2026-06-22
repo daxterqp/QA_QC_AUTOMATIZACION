@@ -31,6 +31,20 @@ const changePass: Record<string, { es: string; en: string; pt: string }> = {
   'changePass.doneMessage': { es: 'Contraseña actualizada correctamente.', en: 'Password updated successfully.', pt: 'Senha atualizada com sucesso.' },
   'changePass.ok': { es: 'OK', en: 'OK', pt: 'OK' },
 
+  'changePass.bioTitle': { es: 'Ingreso rápido', en: 'Quick sign-in', pt: 'Acesso rápido' },
+  'changePass.bioDesc': {
+    es: 'Desbloquear la app con huella o rostro al abrirla (más rápido y seguro en este dispositivo).',
+    en: 'Unlock the app with fingerprint or face when opening it (faster and safer on this device).',
+    pt: 'Desbloquear o app com impressão digital ou rosto ao abri-lo (mais rápido e seguro neste dispositivo).',
+  },
+  'changePass.bioLabel': { es: 'Huella / rostro', en: 'Fingerprint / face', pt: 'Digital / rosto' },
+  'changePass.bioUnavailableTitle': { es: 'No disponible', en: 'Not available', pt: 'Indisponível' },
+  'changePass.bioUnavailableMsg': {
+    es: 'Este dispositivo no tiene huella o rostro configurados (o falta reconstruir la app).',
+    en: 'This device has no fingerprint or face set up (or the app needs a rebuild).',
+    pt: 'Este dispositivo não tem digital ou rosto configurados (ou o app precisa ser recompilado).',
+  },
+
   'changePass.deleteSectionTitle': { es: 'Eliminar mi cuenta', en: 'Delete my account', pt: 'Excluir minha conta' },
   'changePass.deleteSectionDesc': {
     es: 'Se eliminará tu cuenta, firma, accesos a proyectos y token de notificaciones. Esta acción no se puede deshacer.',

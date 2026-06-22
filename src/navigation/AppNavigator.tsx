@@ -11,6 +11,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import { Q } from '@nozbe/watermelondb';
 import { protocolsCollection, protocolTemplatesCollection } from '@db/index';
 import { OfflineBanner } from '@components/OfflineBanner';
+import BiometricLockScreen from '@components/BiometricLockScreen';
 import { SyncWorker } from '@services/SyncWorker';
 
 // Carga segura de expo-notifications (módulo nativo puede no estar disponible en builds anteriores)
@@ -134,7 +135,7 @@ async function resolveDeepLink(
 }
 
 export default function AppNavigator() {
-  const { currentUser, isLoading } = useAuth();
+  const { currentUser, isLoading, biometricLocked } = useAuth();
   const navigationRef = useRef<NavigationContainerRef<RootStackParamListFull>>(null);
 
   // Solicitar permiso de cámara DESPUÉS del login (no en la pantalla de Login).
@@ -215,6 +216,15 @@ export default function AppNavigator() {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator size="large" color="#1a73e8" />
       </View>
+    );
+  }
+
+  // Ingreso rápido: sesión guardada + biometría activada → exigir huella/rostro.
+  if (currentUser && biometricLocked) {
+    return (
+      <SafeAreaProvider>
+        <BiometricLockScreen />
+      </SafeAreaProvider>
     );
   }
 

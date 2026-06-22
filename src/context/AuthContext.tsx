@@ -11,11 +11,16 @@ import { database, usersCollection } from '@db/index';
 import type User from '@models/User';
 import { supabase } from '@config/supabase';
 import { registerPushToken, unregisterPushToken } from '@services/NotificationService';
+import { shouldLockOnLaunch, authenticateBiometric } from '@services/BiometricService';
 
 interface AuthContextValue {
   currentUser: User | null;
   isLoading: boolean;
   isDemo: boolean;
+  /** true si hay sesión pero está bloqueada esperando huella/rostro (ingreso rápido). */
+  biometricLocked: boolean;
+  /** Lanza el prompt biométrico; desbloquea si autentica. Devuelve true si OK. */
+  unlockBiometric: () => Promise<boolean>;
   login: (email: string, password: string) => Promise<'ok' | 'not_found' | 'wrong_password'>;
   /** Inicia sesión con Google (flujo OAuth de Supabase en el navegador del sistema). */
   loginWithGoogle: () => Promise<'ok' | 'cancelled' | 'error' | 'no_account'>;
@@ -79,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  const [biometricLocked, setBiometricLocked] = useState(false);
   // Espejo de `isDemo` accesible dentro de callbacks de Auth sin re-suscribir.
   const isDemoRef = useRef(false);
   useEffect(() => { isDemoRef.current = isDemo; }, [isDemo]);
@@ -139,6 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (user) {
               setCurrentUser(user);
               registerPushToken(user.id).catch(() => {});
+              // Ingreso rápido: si activó biometría y el equipo la soporta, bloquear
+              // hasta que pase la huella/rostro (solo al reabrir con sesión guardada).
+              try { if (await shouldLockOnLaunch()) setBiometricLocked(true); } catch { /* sin biometría */ }
             } else {
               // Sesión válida pero sin fila de app activa: cerrar para no dejar
               // un JWT colgado sin usuario.
@@ -305,6 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (userId) unregisterPushToken(userId).catch(() => {});
     // Cierra la sesión de Auth y borra el token persistido por supabase-js.
     try { await supabase.auth.signOut(); } catch { /* offline */ }
+    setBiometricLocked(false);
     setCurrentUser(null);
   }, [isDemo, currentUser]);
 
@@ -322,6 +332,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // en móvil, en el deep link de la app. Acá solo disparamos el envío.
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
     if (error) throw error;
+  }, []);
+
+  const unlockBiometric = useCallback(async (): Promise<boolean> => {
+    const ok = await authenticateBiometric('Desbloqueá Flow QA·QC');
+    if (ok) setBiometricLocked(false);
+    return ok;
   }, []);
 
   const deleteAccount = useCallback(async () => {
@@ -348,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [currentUser, isDemo]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, login, loginWithGoogle, signUp, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
+    <AuthContext.Provider value={{ currentUser, isLoading, isDemo, biometricLocked, unlockBiometric, login, loginWithGoogle, signUp, loginDemo, logout, changePassword, resetPassword, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

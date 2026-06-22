@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, Alert,
+  KeyboardAvoidingView, Platform, Alert, Switch,
 } from 'react-native';
+import { isBiometricEnabled, setBiometricEnabled, isBiometricAvailable } from '@services/BiometricService';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -22,6 +23,18 @@ export default function ChangePasswordScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [bioOn, setBioOn] = useState(false);
+
+  useEffect(() => { isBiometricEnabled().then(setBioOn); }, []);
+
+  const toggleBio = async (next: boolean) => {
+    if (next && !(await isBiometricAvailable())) {
+      Alert.alert(t('changePass.bioUnavailableTitle'), t('changePass.bioUnavailableMsg'));
+      return;
+    }
+    await setBiometricEnabled(next);
+    setBioOn(next);
+  };
 
   const canSave = current.length >= 1 && newPass.length >= 4 && newPass === confirm;
 
@@ -126,6 +139,21 @@ export default function ChangePasswordScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
 
+        {/* Ingreso rápido — biometría */}
+        <View style={styles.card}>
+          <Text style={styles.bioTitle}>{t('changePass.bioTitle')}</Text>
+          <View style={styles.bioRow}>
+            <Text style={styles.bioLabel}>{t('changePass.bioLabel')}</Text>
+            <Switch
+              value={bioOn}
+              onValueChange={toggleBio}
+              trackColor={{ true: Colors.primary, false: Colors.border }}
+              thumbColor={Colors.white}
+            />
+          </View>
+          <Text style={styles.bioDesc}>{t('changePass.bioDesc')}</Text>
+        </View>
+
         {/* Eliminar cuenta */}
         <View style={styles.dangerCard}>
           <Text style={styles.dangerTitle}>{t('changePass.deleteSectionTitle')}</Text>
@@ -186,6 +214,10 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { backgroundColor: Colors.light },
   btnText: { color: Colors.white, fontSize: 13, fontWeight: '700', letterSpacing: 1.5 },
+  bioTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  bioRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bioLabel: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  bioDesc: { fontSize: 11, color: Colors.textSecondary, lineHeight: 16 },
   dangerCard: {
     backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, gap: 10,
     borderWidth: 1, borderColor: '#fecaca',
