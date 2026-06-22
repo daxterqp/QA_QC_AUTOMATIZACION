@@ -169,6 +169,9 @@ export default function ProjectsPage() {
             <p className="text-[#8896a5] font-semibold">
               {search ? t('webMisc.noResultsShort') : t('webMisc.noProjectsYet')}
             </p>
+            {!search && currentUser?.role === 'VIEWER' && (
+              <p className="text-[#8896a5] text-sm text-center max-w-xs">{t('webMisc.viewerNoAccess')}</p>
+            )}
           </div>
         ) : (
           <>

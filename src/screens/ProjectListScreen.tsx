@@ -500,11 +500,15 @@ export default function ProjectListScreen({ navigation }: Props) {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>Sin proyectos</Text>
+            <Text style={styles.emptyTitle}>
+              {currentUser?.role === 'VIEWER' ? 'Sin acceso aún' : 'Sin proyectos'}
+            </Text>
             <Text style={styles.emptyDesc}>
               {isJefe
                 ? 'Cree un proyecto con el botón + o ingrese a uno existente.'
-                : 'Ingrese a un proyecto usando su nombre y contraseña.'}
+                : currentUser?.role === 'VIEWER'
+                  ? 'Tu cuenta es de Visualizador. Pedí a un administrador que te asigne proyectos para poder verlos.'
+                  : 'Ingrese a un proyecto usando su nombre y contraseña.'}
             </Text>
           </View>
         }

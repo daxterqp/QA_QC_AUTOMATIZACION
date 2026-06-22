@@ -16,8 +16,22 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const canSubmit = email.trim().length >= 3 && password.length >= 1;
+
+  const handleForgot = async () => {
+    setError(null); setNotice(null);
+    if (!/\S+@\S+\.\S+/.test(email.trim())) {
+      setError('Escribí tu email arriba y volvé a tocar "¿Olvidaste tu contraseña?".');
+      return;
+    }
+    const { error: rErr } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset`,
+    });
+    if (rErr) setError('No se pudo enviar el correo. Intentá de nuevo.');
+    else setNotice('Si el correo está registrado, te llegó un enlace para restablecer la contraseña.');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,9 +121,23 @@ export default function LoginPage() {
               </div>
             </div>
 
+            <button
+              type="button"
+              onClick={handleForgot}
+              className="self-end text-[12px] text-white/55 hover:text-white/90 transition"
+              tabIndex={-1}
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+
             {error && (
               <div className="bg-red-500/15 border border-red-400/30 rounded-lg px-3.5 py-2.5 text-sm text-red-300">
                 {error}
+              </div>
+            )}
+            {notice && (
+              <div className="bg-emerald-500/15 border border-emerald-400/30 rounded-lg px-3.5 py-2.5 text-sm text-emerald-200">
+                {notice}
               </div>
             )}
 

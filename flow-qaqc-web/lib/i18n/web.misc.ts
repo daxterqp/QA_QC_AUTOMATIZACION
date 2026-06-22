@@ -10,6 +10,11 @@ export const STRINGS_WEB_MISC: Record<string, { es: string; en: string; pt: stri
   'webMisc.roleSupervisor': { es: 'Supervisor', en: 'Supervisor', pt: 'Supervisor' },
   'webMisc.roleOperator': { es: 'Técnico', en: 'Technician', pt: 'Técnico' },
   'webMisc.roleViewer': { es: 'Visualizador', en: 'Viewer', pt: 'Visualizador' },
+  'webMisc.viewerNoAccess': {
+    es: 'Tu cuenta es de Visualizador. Pedí a un administrador que te asigne proyectos.',
+    en: 'Your account is Viewer. Ask an administrator to assign you projects.',
+    pt: 'Sua conta é Visualizador. Peça a um administrador para atribuir projetos.',
+  },
   'webMisc.noAccess': { es: 'Sin acceso', en: 'No access', pt: 'Sem acesso' },
   'webMisc.creatorsOnly': {
     es: 'Sólo los usuarios con rol CREADOR pueden gestionar usuarios.',
