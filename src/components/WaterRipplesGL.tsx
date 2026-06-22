@@ -26,6 +26,13 @@ const AUTO_SPEED = 0.08;    // rad/frame (más alto = más rápido). Regular a g
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
+// Orbital "círculos" en la esquina superior derecha (gesto grabado por el usuario).
+const CIRCLE_SPEED = 0.22;   // rad/frame (período ≈ 2π/este). Subir = más rápido.
+const CIRCLE_CX = 0.85;      // centro X de la elipse
+const CIRCLE_CY = 0.09;      // centro Y (cerca del borde superior)
+const CIRCLE_RX = 0.075;     // radio horizontal
+const CIRCLE_RY = 0.05;      // radio vertical
+const CIRCLE_STR = 0.5;      // intensidad del trazo
 // Ajuste fino vertical del impacto (en fracción de pantalla). + = la onda baja.
 // Si la onda aparece ARRIBA del toque, subí este número; si queda abajo, bajalo.
 const Y_OFFSET = 0.045;
@@ -218,10 +225,17 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       // Aparición/desaparición de cada dedo (~1s) ALTERNADA: arrancan en anti-fase
       // (mientras uno está activo el otro descansa) con jitter aleatorio.
       let onL = true, onR = false, tL = 60, tR = 60;
+      let circAngle = 0, prevCX = CIRCLE_CX + CIRCLE_RX, prevCY = CIRCLE_CY;  // orbital sup-derecha
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
         const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
         for (let i = 1; i <= steps; i++) push(x0 + (x1 - x0) * (i / steps), y, str);
+      };
+      // Segmento interpolado en 2D (para el orbital, que se mueve en X e Y a la vez).
+      const pushSeg2 = (x0: number, y0: number, x1: number, y1: number, str: number) => {
+        const d = Math.hypot(x1 - x0, y1 - y0);
+        const steps = Math.min(6, Math.max(1, Math.round(d / 0.02)));
+        for (let i = 1; i <= steps; i++) push(x0 + (x1 - x0) * (i / steps), y0 + (y1 - y0) * (i / steps), str);
       };
 
       // Un paso de simulación: lee `a`, escribe `b`, swap. (Inyecta gotas si count>0.)
@@ -280,6 +294,13 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           if (onL) pushSeg(prevLX, lx, lyy, AUTO_STR);
           if (onR) pushSeg(prevRX, rx, ryy, AUTO_STR);
           prevLX = lx; prevRX = rx;   // sigue avanzando aunque esté apagado (reaparece más adelante)
+
+          // Orbital "círculos" en la esquina superior derecha (re-emitido cada frame → trazo continuo).
+          circAngle += CIRCLE_SPEED;
+          const cgx = CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle);
+          const cgy = CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle);
+          pushSeg2(prevCX, prevCY, cgx, cgy, CIRCLE_STR);
+          prevCX = cgx; prevCY = cgy;
 
           // Gotita ambiental aleatoria.
           if (--ambient <= 0) {
