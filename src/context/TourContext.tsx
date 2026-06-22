@@ -1071,14 +1071,6 @@ const TOUR_STEPS: TourStep[] = [
     waitingHint: 'Toca Registrar para guardar la No Conformidad',
     showHandCursor: true,
   },
-
-  // ── Selector de idioma ──────────────────────────────────────────────────────
-  {
-    id: 'lang_selector', screen: 'ProjectList', elementId: 'lang_selector', contextOnly: true, contextEnd: true,
-    title: 'Idioma de la app',
-    message: 'Abre el menú lateral y, en Preferencias, toca Idioma para cambiar entre Español, English y Português. El cambio es por dispositivo y se aplica al instante en toda la app.',
-    showHandCursor: true,
-  },
 ];
 
 // ── Context ──────────────────────────────────────────────────────────────────

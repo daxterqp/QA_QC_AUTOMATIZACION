@@ -65,7 +65,6 @@ export default function ProjectListScreen({ navigation }: Props) {
   // Tour refs
   const tourHelpRef = useTourStep('tour_help_button');
   const projectCardRef = useTourStep('project_card');
-  const langSelectorRef = useTourStep('lang_selector');
   const observacionesChipRef = useTourStep('project_observaciones_chip');
   const dosierChipRef = useTourStep('project_dosier_chip');
   // v29 — cargarChipRef y planosChipRef eliminados: esos botones se movieron
@@ -481,7 +480,6 @@ export default function ProjectListScreen({ navigation }: Props) {
               <Ionicons name="school-outline" size={23} color={Colors.white} />
             </TouchableOpacity>
             <TouchableOpacity
-              ref={langSelectorRef}
               style={styles.iconBtn}
               onPress={() => setShowDrawer(true)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

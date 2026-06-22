@@ -46,6 +46,7 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
   const { jumpToStep } = useTour();
   const detailHeaderRef = useTourStep('sample_detail_header');
   const detailAddTestRef = useTourStep('sample_detail_add_test');
+  const detailExportRef = useTourStep('sample_detail_export');
 
   const [loading, setLoading] = useState(true);
   const [sample, setSample] = useState<any | null>(null);
@@ -172,9 +173,11 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
       <AppHeader title={sample.sampleCode} subtitle={projectName} onBack={() => navigation.goBack()}
         rightContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity onPress={exportPdf} disabled={exporting} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name={exporting ? 'hourglass-outline' : 'share-outline'} size={20} color={Colors.white} />
-            </TouchableOpacity>
+            <View ref={detailExportRef} collapsable={false}>
+              <TouchableOpacity onPress={exportPdf} disabled={exporting} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name={exporting ? 'hourglass-outline' : 'share-outline'} size={20} color={Colors.white} />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity onPress={() => jumpToStep('sample_detail_header')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
             </TouchableOpacity>

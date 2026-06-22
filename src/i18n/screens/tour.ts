@@ -1021,8 +1021,6 @@ const tour: Record<string, { es: string; en: string; pt: string }> = {
   'tour.ncr_submit.title': { es: 'Registrar y dar seguimiento', en: 'Log and track', pt: 'Registrar e acompanhar' },
   'tour.ncr_submit.message': { es: 'Al registrar, la No Conformidad nace en estado ABIERTA y queda asociada al protocolo. El Jefe de Obra podrá darle seguimiento y cerrarla con sus notas de resolución.', en: 'Once logged, the Non-Conformity starts as OPEN and is tied to the protocol. The Site Manager can track it and close it with resolution notes.', pt: 'Ao registrar, a Não Conformidade nasce em estado ABERTA e fica associada ao protocolo. O Gerente de Obra poderá acompanhá-la e encerrá-la com notas de resolução.' },
   'tour.ncr_submit.waitingHint': { es: 'Toca Registrar para guardar la No Conformidad', en: 'Tap Log to save the Non-Conformity', pt: 'Toque em Registrar para salvar a Não Conformidade' },
-  'tour.lang_selector.title': { es: 'Idioma de la app', en: 'App language', pt: 'Idioma do app' },
-  'tour.lang_selector.message': { es: 'Abre el menú lateral y, en Preferencias, toca Idioma para cambiar entre Español, English y Português. El cambio es por dispositivo y se aplica al instante en toda la app.', en: 'Open the side menu and, under Preferences, tap Language to switch between Spanish, English and Portuguese. The change is per device and applies instantly across the whole app.', pt: 'Abra o menu lateral e, em Preferências, toque em Idioma para alternar entre Espanhol, English e Português. A mudança é por dispositivo e se aplica na hora em todo o app.' },
 
 };
 
