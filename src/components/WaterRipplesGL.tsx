@@ -249,7 +249,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           // BARRIDO: UN punto desde el centro, mucha masa, subiendo con velocidad NO uniforme
           // (acelera y frena) → la ola se forma más creíble.
           push(0.5, barridoRef.current.y, 2.2);
-          const v = 0.0045 * (0.4 + Math.abs(Math.sin(barridoRef.current.y * 9.0)));
+          const by = barridoRef.current.y;
+          // velocidad variable (sine) Y desacelerando hacia arriba (cada vez más lento)
+          const v = 0.006 * (1.0 - 0.7 * Math.min(1, by)) * (0.5 + Math.abs(Math.sin(by * 8.0)));
           barridoRef.current.y += v;
           if (barridoRef.current.y > 1.05) barridoRef.current.active = false;
         } else if (em.length > 0) {
@@ -257,16 +259,17 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
           emittersRef.current = em.filter(f => f.life > 0);
         } else {
-          // Dos dedos en la base: el derecho va MÁS LENTO → se desfasan solos con el tiempo.
-          autoPhaseL += AUTO_SPEED;
-          autoPhaseR += AUTO_SPEED * 0.78;
+          // Dos dedos en la base. El recorrido avanza con VELOCIDAD VARIABLE (acelera/frena)
+          // → más creíble; el derecho un poco más lento → se desfasan solos.
+          autoPhaseL += AUTO_SPEED * (0.5 + Math.abs(Math.sin(autoPhaseL * 0.5)));
+          autoPhaseR += AUTO_SPEED * 0.78 * (0.5 + Math.abs(Math.sin(autoPhaseR * 0.65)));
           const sL = (1 - Math.cos(autoPhaseL)) * 0.5;
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.44 * sL;
           const rx = 0.94 - 0.44 * sR;
-          // Vaivén en Y (frecuencias distintas) → dinamismo, no se nota el patrón.
-          const lyy = AUTO_Y + 0.05 * Math.sin(autoPhaseL * 1.6);
-          const ryy = AUTO_Y + 0.05 * Math.sin(autoPhaseR * 1.15 + 0.8);
+          // Vaivén en Y sutil (no pronunciado).
+          const lyy = AUTO_Y + 0.02 * Math.sin(autoPhaseL * 1.6);
+          const ryy = AUTO_Y + 0.02 * Math.sin(autoPhaseR * 1.15 + 0.8);
           pushSeg(prevLX, lx, lyy, AUTO_STR);
           pushSeg(prevRX, rx, ryy, AUTO_STR);
           prevLX = lx; prevRX = rx;
