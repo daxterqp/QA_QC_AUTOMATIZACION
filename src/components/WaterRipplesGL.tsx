@@ -22,7 +22,7 @@ export type WaterGLHandle = {
 
 const MAX_DROPS = 16; // impactos inyectados por frame (rastro del arrastre/animación)
 // Animación por defecto: dos "dedos" en la parte baja deslizándose borde↔centro en bucle.
-const AUTO_SPEED = 0.15;    // rad/frame (más alto = más rápido). Regular a gusto.
+const AUTO_SPEED = 0.08;    // rad/frame (más alto = más rápido). Regular a gusto.
 const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
@@ -268,9 +268,9 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           const sR = (1 - Math.cos(autoPhaseR)) * 0.5;
           const lx = 0.06 + 0.88 * sL;        // recorre toda la pantalla
           const rx = 0.94 - 0.88 * sR;        // arranca del otro borde
-          // Vaivén en Y muy sutil (apenas perceptible).
-          const lyy = AUTO_Y + 0.01 * Math.sin(autoPhaseL * 1.6);
-          const ryy = AUTO_Y + 0.01 * Math.sin(autoPhaseR * 1.15 + 0.8);
+          // Vaivén en Y (visible) con frecuencias distintas → recorrido más orgánico.
+          const lyy = AUTO_Y + 0.035 * Math.sin(autoPhaseL * 1.6);
+          const ryy = AUTO_Y + 0.035 * Math.sin(autoPhaseR * 1.15 + 0.8);
           pushSeg(prevLX, lx, lyy, AUTO_STR);
           pushSeg(prevRX, rx, ryy, AUTO_STR);
           prevLX = lx; prevRX = rx;
