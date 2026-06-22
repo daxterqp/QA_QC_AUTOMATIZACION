@@ -27,8 +27,8 @@ const AUTO_STR = 0.55;     // intensidad del trazo sostenido
 const AUTO_Y = 0.08;       // altura (cerca del borde inferior)
 const AUTO_PHASE_OFF = 2.4; // desfase entre los dos dedos (no van en lockstep)
 // PRUEBA temporal: espejar arriba los mismos dos dedos de la base y apagar el dash elíptico.
-const TOP_FINGERS = true;   // replicar los 2 dedos también arriba (misma trayectoria)
-const TOP_DASH = false;     // dash elíptico sup-derecha (apagado por ahora)
+const TOP_FINGERS = false;  // (prueba descartada) dedos espejados arriba
+const TOP_DASH = true;      // dash elíptico sup-derecha (la versión que quedó)
 const AUTO_Y_TOP = 0.92;    // altura espejo (cerca del borde superior)
 // Orbital "círculos" en la esquina superior derecha (gesto grabado por el usuario).
 const CIRCLE_SPEED = 0.32;   // rad/frame base (más veloz). Velocidad VARIABLE (acelera/frena).
