@@ -92,6 +92,10 @@ export function useUpdateUser() {
         userId: id,
         ...(input.role !== undefined ? { role: input.role } : {}),
         ...(input.email !== undefined ? { email: input.email?.trim() || undefined } : {}),
+        // name/apellido: la Edge Function los persiste; sin esto la edición de
+        // nombre se perdía en silencio (Ronda 2).
+        ...(input.name !== undefined ? { name: input.name?.trim() } : {}),
+        ...(input.apellido !== undefined ? { apellido: input.apellido?.trim() || null } : {}),
         // password vacío = no resetear; solo enviamos si trae valor.
         ...(input.password?.trim() ? { password: input.password.trim() } : {}),
       });

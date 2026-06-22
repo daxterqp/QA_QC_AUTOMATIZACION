@@ -29,6 +29,24 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
 // El Creador puede asignar estos roles (no puede crear otros Creadores desde aquí).
 const ASSIGNABLE_ROLES: Role[] = ['RESIDENT', 'SUPERVISOR', 'OPERATOR'];
 
+/**
+ * Mensaje real de un error de `supabase.functions.invoke`. Cuando la Edge
+ * Function responde con código no-2xx, supabase-js arroja un `FunctionsHttpError`
+ * cuyo `.message` es genérico ("Edge Function returned a non-2xx status code");
+ * el `{ error }` que devuelve `admin-users` (p.ej. "forbidden: solo CREATOR")
+ * solo está en el body, accesible vía `error.context.json()`. (Ronda 2)
+ */
+async function edgeFnError(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const parsed = await (ctx as Response).json();
+      if (parsed?.error) return String(parsed.error);
+    } catch { /* body no era JSON; usamos el mensaje genérico */ }
+  }
+  return (error as { message?: string })?.message ?? fallback;
+}
+
 export default function UserManagementScreen({ navigation }: Props) {
   const { t } = useI18n();
   const { currentUser } = useAuth();
@@ -85,14 +103,22 @@ export default function UserManagementScreen({ navigation }: Props) {
           })),
         );
       }
-      // Actualizar rol / estado de los existentes (cambio de rol, soft-delete).
+      // Actualizar rol / estado / nombre de los existentes (cambio de rol, soft-delete,
+      // edición de nombre/apellido vía Edge Function). (Ronda 2: antes solo rol/activo →
+      // la lista quedaba con el nombre viejo tras editar.)
       for (const r of rows) {
         const existing = localById.get(r.id);
         if (!existing) continue;
         const remoteActive = r.is_active !== false;
         const localActive = (existing as any).isActive !== false;
-        if (existing.role !== r.role || localActive !== remoteActive) {
-          await existing.update((u: any) => { u.role = r.role; u.isActive = remoteActive; });
+        const nameChanged = existing.name !== r.name || (existing as any).apellido !== (r.apellido ?? null);
+        if (existing.role !== r.role || localActive !== remoteActive || nameChanged) {
+          await existing.update((u: any) => {
+            u.role = r.role;
+            u.isActive = remoteActive;
+            u.name = r.name;
+            u.apellido = r.apellido ?? null;
+          });
         }
       }
     });
@@ -205,7 +231,7 @@ export default function UserManagementScreen({ navigation }: Props) {
         },
       });
       if (error) {
-        Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.createUserFailed'));
+        Alert.alert(t('usersMgmt.alert.error'), await edgeFnError(error, t('usersMgmt.alert.createUserFailed')));
         return;
       }
       await refreshUsersFromCloud().catch(() => {});
@@ -225,7 +251,7 @@ export default function UserManagementScreen({ navigation }: Props) {
     const { error } = await supabase.functions.invoke('admin-users', {
       body: { action: 'update', userId: user.id, role },
     });
-    if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
+    if (error) { Alert.alert(t('usersMgmt.alert.error'), await edgeFnError(error, t('usersMgmt.alert.opFailed'))); return; }
     await refreshUsersFromCloud().catch(() => {});
   };
 
@@ -249,7 +275,7 @@ export default function UserManagementScreen({ navigation }: Props) {
             const { error } = isActive
               ? await supabase.functions.invoke('admin-users', { body: { action: 'delete', userId: user.id } })
               : await supabase.functions.invoke('admin-users', { body: { action: 'update', userId: user.id, isActive: true } });
-            if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
+            if (error) { Alert.alert(t('usersMgmt.alert.error'), await edgeFnError(error, t('usersMgmt.alert.opFailed'))); return; }
             await refreshUsersFromCloud().catch(() => {});
           },
         },
@@ -268,7 +294,7 @@ export default function UserManagementScreen({ navigation }: Props) {
           const { error } = await supabase.functions.invoke('admin-users', {
             body: { action: 'update', userId: user.id, password: user.name },
           });
-          if (error) { Alert.alert(t('usersMgmt.alert.error'), error.message ?? t('usersMgmt.alert.opFailed')); return; }
+          if (error) { Alert.alert(t('usersMgmt.alert.error'), await edgeFnError(error, t('usersMgmt.alert.opFailed'))); return; }
           Alert.alert(t('usersMgmt.alert.done'), t('usersMgmt.alert.passwordReset'));
         },
       },

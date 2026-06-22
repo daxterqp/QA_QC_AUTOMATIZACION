@@ -145,15 +145,29 @@ export async function bulkCreateUsersViaEdgeFunction(
 ): Promise<BulkCreateResult> {
   let created = 0;
   const errors: string[] = [];
+  // Para desambiguar emails placeholder de homónimos (Ronda 2): dos filas sin
+  // Email con el mismo nombre+apellido generaban el MISMO placeholder y la
+  // segunda fallaba ("email already registered"). Añadimos un sufijo numérico.
+  const usedEmails = new Set<string>();
 
-  for (const u of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const u = rows[i];
     const fullName = `${u.name} ${u.apellido}`.trim();
-    // TODO: el usuario debe poner email real — placeholder generado si el Excel no trae columna Email.
-    const email = u.email && u.email.includes('@')
-      ? u.email
-      : `${slugify(u.name)}.${slugify(u.apellido)}@flowqc.local`;
-    // Password temporal = el nombre (el usuario la cambia luego). // TODO: forzar cambio en primer login.
-    const password = u.name;
+    let email: string;
+    if (u.email && u.email.includes('@')) {
+      email = u.email;
+    } else {
+      // Local-part desde nombre.apellido; si ambos slugs quedan vacíos (nombres
+      // no-ASCII), usamos un fallback por fila para no generar `.@flowqc.local`.
+      const localBase = [slugify(u.name), slugify(u.apellido)].filter(Boolean).join('.') || `usuario${i + 1}`;
+      email = `${localBase}@flowqc.local`;
+      // Desambiguar homónimos: si ya generamos ese placeholder, sufijo por fila.
+      if (usedEmails.has(email.toLowerCase())) email = `${localBase}.${i + 1}@flowqc.local`;
+    }
+    usedEmails.add(email.toLowerCase());
+    // Password temporal = el nombre (el usuario la cambia luego). Supabase Auth
+    // exige mínimo 6 chars → rellenamos los nombres cortos. // TODO: forzar cambio en primer login.
+    const password = u.name.length >= 6 ? u.name : u.name.padEnd(6, '0');
     const projectIds = resolveProjectIds(u.projects);
 
     try {
@@ -169,7 +183,7 @@ export async function bulkCreateUsersViaEdgeFunction(
         },
       });
       if (error) {
-        errors.push(`${fullName}: ${error.message ?? 'error'}`);
+        errors.push(`${fullName}: ${await edgeFnErrorMessage(error)}`);
       } else {
         created++;
       }
@@ -179,4 +193,19 @@ export async function bulkCreateUsersViaEdgeFunction(
   }
 
   return { created, errors };
+}
+
+/**
+ * Mensaje real de un error de `functions.invoke`: el `{ error }` de la Edge
+ * Function vive en el body (`error.context.json()`), no en `.message` (genérico).
+ */
+async function edgeFnErrorMessage(error: unknown): Promise<string> {
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const parsed = await (ctx as Response).json();
+      if (parsed?.error) return String(parsed.error);
+    } catch { /* body no era JSON */ }
+  }
+  return (error as { message?: string })?.message ?? 'error';
 }
