@@ -300,10 +300,11 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           circAngle += CIRCLE_SPEED * (0.55 + 0.6 * Math.abs(Math.sin(circAngle * 1.3)) + 0.25 * Math.abs(Math.sin(circAngle * 2.7)));
           const cgx = CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle);
           const cgy = CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle);
-          // Aparece/desaparece a intervalos aleatorios (más tiempo activo que en pausa).
-          if (--tC <= 0) { onC = !onC; tC = onC ? 60 + Math.floor(Math.random() * 90) : 30 + Math.floor(Math.random() * 60); }
+          // Intermitencia RÁPIDA: prende solo unos frames (un pequeño desplazamiento) y se apaga;
+          // como el ángulo sigue avanzando, cada reaparición cae en otro punto → no parece órbita.
+          if (--tC <= 0) { onC = !onC; tC = onC ? 3 + Math.floor(Math.random() * 7) : 8 + Math.floor(Math.random() * 16); }
           if (onC) pushSeg2(prevCX, prevCY, cgx, cgy, CIRCLE_STR);
-          prevCX = cgx; prevCY = cgy;   // sigue orbitando aunque esté apagado (reaparece en otro punto)
+          prevCX = cgx; prevCY = cgy;   // sigue avanzando aunque esté apagado (reaparece en otro punto)
 
           // Gotita ambiental aleatoria.
           if (--ambient <= 0) {
