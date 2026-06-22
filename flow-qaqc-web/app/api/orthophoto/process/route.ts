@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { readGeoTiffGeo, processOrthophotoTiles, readKmlGroundOverlay } from '@lib/orthophotoServer';
+import { getServerUser } from '@lib/serverAuth';
 
 // Procesa la ortofoto EN LA PC: lee la georreferencia del GeoTIFF (si la trae),
 // reescala + recomprime a WebP con sharp (libvips, poca RAM) y deja la versión
@@ -23,6 +24,9 @@ function sanitize(text: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   let body: any;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'JSON inválido' }, { status: 400 }); }
   const srcPath: string = body?.srcPath;

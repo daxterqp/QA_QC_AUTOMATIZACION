@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
+import { getServerUser } from '@lib/serverAuth';
 
 const REGION     = process.env.NEXT_PUBLIC_AWS_REGION!;
 const BUCKET     = process.env.NEXT_PUBLIC_AWS_BUCKET!;
@@ -34,6 +35,9 @@ function findMatchingLocations(
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   const formData    = await req.formData();
   const projectId   = formData.get('projectId')   as string;
   const projectName = formData.get('projectName') as string;
@@ -46,6 +50,10 @@ export async function POST(req: NextRequest) {
 
   const { createClient } = await import('@lib/supabase/server');
   const supabase = await createClient();
+
+  // Ownership: RLS hace que esta fila exista SOLO si el usuario tiene acceso.
+  const { data: proj } = await supabase.from('projects').select('id').eq('id', projectId).maybeSingle();
+  if (!proj) return new Response('Forbidden', { status: 403 });
 
   const { data: locations } = await supabase
     .from('locations')

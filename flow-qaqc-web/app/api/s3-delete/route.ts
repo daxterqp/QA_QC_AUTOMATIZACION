@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getServerUser } from '@lib/serverAuth';
 
 const s3 = new S3Client({
   region: process.env.NEXT_PUBLIC_AWS_REGION!,
@@ -10,6 +11,9 @@ const s3 = new S3Client({
 });
 
 export async function POST(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   const { key } = await req.json();
   if (!key) return NextResponse.json({ error: 'Missing key' }, { status: 400 });
 

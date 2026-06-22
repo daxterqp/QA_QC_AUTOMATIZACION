@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { getServerUser } from '@lib/serverAuth';
 
 export async function GET(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   const key = req.nextUrl.searchParams.get('key');
   if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 });
 

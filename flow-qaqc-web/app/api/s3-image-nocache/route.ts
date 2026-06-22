@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
+import { getServerUser } from '@lib/serverAuth';
 
 const REGION     = process.env.NEXT_PUBLIC_AWS_REGION!;
 const BUCKET     = process.env.NEXT_PUBLIC_AWS_BUCKET!;
@@ -9,9 +10,17 @@ const ACCESS_KEY = process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID!;
 const SECRET_KEY = process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY!;
 const LOCAL_BASE = process.env.LOCAL_PHOTO_CACHE ?? 'D:\\Flow-QAQC';
 
-function s3KeyToLocalPath(s3Key: string): string {
+/**
+ * Mapea s3Key→ruta local. Devuelve null si la key es inválida (path traversal):
+ * contiene `..` o, tras resolver, escapa del directorio base LOCAL_BASE.
+ */
+function s3KeyToLocalPath(s3Key: string): string | null {
+  if (s3Key.includes('..')) return null;
   const relative = s3Key.startsWith('projects/') ? s3Key.slice('projects/'.length) : s3Key;
-  return path.join(LOCAL_BASE, ...relative.split('/'));
+  const resolved = path.resolve(LOCAL_BASE, ...relative.split('/'));
+  const base = path.resolve(LOCAL_BASE);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
+  return resolved;
 }
 
 /**
@@ -19,10 +28,14 @@ function s3KeyToLocalPath(s3Key: string): string {
  * Used for stamping photos where we always need the latest logo.
  */
 export async function GET(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   const key = req.nextUrl.searchParams.get('key');
   if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 });
 
   const localPath = s3KeyToLocalPath(key);
+  if (!localPath) return NextResponse.json({ error: 'invalid key' }, { status: 400 });
 
   // Try local file first
   if (fs.existsSync(localPath)) {

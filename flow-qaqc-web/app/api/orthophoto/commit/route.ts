@@ -3,6 +3,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { getServerUser } from '@lib/serverAuth';
 
 // Sube a S3 la versión LIVIANA ya procesada y confirmada (staging local → S3).
 // Se llama solo después de que el usuario confirma el peso en la ventana. Recibe
@@ -32,6 +33,9 @@ function s3KeyToPhotoPath(s3Key: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   let body: any;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'JSON inválido' }, { status: 400 }); }
   const projectName: string = body?.projectName;

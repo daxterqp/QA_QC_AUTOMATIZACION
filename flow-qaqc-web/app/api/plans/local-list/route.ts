@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getServerUser } from '@lib/serverAuth';
 
 const LOCAL_BASE = process.env.LOCAL_PLANS_CACHE ?? 'D:\\Flow-QAQC';
 
@@ -18,6 +19,9 @@ function sanitize(text: string): string {
 const VALID_EXTENSIONS = /\.(pdf|dwg)$/i;
 
 export async function GET(req: NextRequest) {
+  const user = await getServerUser();
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const projectName = searchParams.get('projectName') ?? '';
   const projectId   = searchParams.get('projectId')   ?? '';
