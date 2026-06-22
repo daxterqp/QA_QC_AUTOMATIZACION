@@ -33,6 +33,22 @@ const login: Record<string, { es: string; en: string; pt: string }> = {
     pt: 'Controle de qualidade na obra, no seu bolso.',
   },
   'login.forgotPassword': { es: '¿Olvidaste tu contraseña?', en: 'Forgot your password?', pt: 'Esqueceu sua senha?' },
+  'login.tapToStart': { es: 'Toca para comenzar', en: 'Tap to start', pt: 'Toque para começar' },
+  'login.or': { es: 'o', en: 'or', pt: 'ou' },
+  'login.continueGoogle': { es: 'Continuar con Google', en: 'Continue with Google', pt: 'Continuar com Google' },
+  'login.createAccount': { es: 'Crear una cuenta', en: 'Create an account', pt: 'Criar uma conta' },
+  'login.googleSetupTitle': { es: 'Google casi listo', en: 'Google almost ready', pt: 'Google quase pronto' },
+  'login.googleSetupMsg': {
+    es: 'El ingreso con Google se activa en el siguiente paso (requiere una reconstrucción de la app y el ID de cliente de Google).',
+    en: 'Google sign-in will be enabled in the next step (requires an app rebuild and the Google client ID).',
+    pt: 'O login com Google será ativado na próxima etapa (requer recompilar o app e o ID de cliente do Google).',
+  },
+  'login.signupSoonTitle': { es: 'Crear cuenta', en: 'Create account', pt: 'Criar conta' },
+  'login.signupSoonMsg': {
+    es: 'El registro de cuenta se activa en el siguiente paso.',
+    en: 'Account sign-up will be enabled in the next step.',
+    pt: 'O cadastro de conta será ativado na próxima etapa.',
+  },
 
   // Modal "olvidé mi contraseña"
   'login.resetTitle': { es: 'Recuperar contraseña', en: 'Reset password', pt: 'Recuperar senha' },
