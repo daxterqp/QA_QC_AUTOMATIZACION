@@ -226,6 +226,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       // (mientras uno está activo el otro descansa) con jitter aleatorio.
       let onL = true, onR = false, tL = 60, tR = 60;
       let circAngle = 0, prevCX = CIRCLE_CX + CIRCLE_RX, prevCY = CIRCLE_CY;  // orbital sup-derecha
+      let onC = true, tC = 90;  // el orbital aparece/desaparece a intervalos aleatorios
       // Empuja un segmento horizontal interpolado (trazo continuo, suave a alta velocidad).
       const pushSeg = (x0: number, x1: number, y: number, str: number) => {
         const steps = Math.min(6, Math.max(1, Math.round(Math.abs(x1 - x0) / 0.02)));
@@ -299,8 +300,10 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           circAngle += CIRCLE_SPEED * (0.55 + 0.6 * Math.abs(Math.sin(circAngle * 1.3)) + 0.25 * Math.abs(Math.sin(circAngle * 2.7)));
           const cgx = CIRCLE_CX + CIRCLE_RX * Math.cos(circAngle);
           const cgy = CIRCLE_CY + CIRCLE_RY * Math.sin(circAngle);
-          pushSeg2(prevCX, prevCY, cgx, cgy, CIRCLE_STR);
-          prevCX = cgx; prevCY = cgy;
+          // Aparece/desaparece a intervalos aleatorios (más tiempo activo que en pausa).
+          if (--tC <= 0) { onC = !onC; tC = onC ? 60 + Math.floor(Math.random() * 90) : 30 + Math.floor(Math.random() * 60); }
+          if (onC) pushSeg2(prevCX, prevCY, cgx, cgy, CIRCLE_STR);
+          prevCX = cgx; prevCY = cgy;   // sigue orbitando aunque esté apagado (reaparece en otro punto)
 
           // Gotita ambiental aleatoria.
           if (--ambient <= 0) {
