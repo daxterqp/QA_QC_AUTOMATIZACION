@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
 import { useProjectMetrics } from '@hooks/useProjectMetrics';
+import { prefetchProjectPreload } from '@hooks/useProjectPreload';
 import { useAuth } from '@lib/auth-context';
 import { cn, formatDate } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
@@ -213,6 +214,7 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
   onToggleHidden: () => void;
 }) {
   const { t } = useI18n();
+  const qc = useQueryClient();
   const { data: metrics } = useProjectMetrics(project.id);
   const isActive = (project.status ?? 'ACTIVE') === 'ACTIVE';
 
@@ -228,6 +230,9 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
         isHidden && 'opacity-60',
       )}
       style={{ borderTopColor: 'var(--color-primary, #00bcb4)' }}
+      // Prefetch: al pasar el mouse, calienta la caché del proyecto (items+evidencias)
+      // para que al entrar la data ya esté lista (sin esqueleto).
+      onMouseEnter={() => prefetchProjectPreload(qc, project.id)}
     >
       {/* Cabecera: nombre + estado + chevron + toggle hidden */}
       <div className="flex items-center gap-2 px-4 pt-4 pb-2.5">

@@ -8,8 +8,10 @@
  * "Geolocalización" (gateado por map_enabled).
  */
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { useProjectFlags, useProjects } from '@hooks/useProjects';
 import { useProjectMetrics } from '@hooks/useProjectMetrics';
 import { useAuth } from '@lib/auth-context';
@@ -19,8 +21,37 @@ import PageHeader from '@components/PageHeader';
 import {
   List, Timer, Map as MapIcon, ChevronRight,
   FolderOpen, FileUp, Phone, FileText, BookOpen,
-  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2,
+  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2, RefreshCw,
 } from 'lucide-react';
+
+/** Botón "Actualizar": re-trae de la nube TODO lo cacheado de este proyecto
+ *  (la pata manual del esquema híbrido). Invalida las queries cuyo key incluye
+ *  el projectId → refetch solo de este proyecto. */
+function ProjectRefreshButton({ projectId }: { projectId: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    setBusy(true);
+    try {
+      await qc.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey.includes(projectId),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button
+      onClick={refresh}
+      disabled={busy}
+      title="Volver a traer los datos de este proyecto desde la nube"
+      className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-white border border-border text-textSecondary hover:border-primary hover:text-primary transition disabled:opacity-50 flex-shrink-0"
+    >
+      <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+      {busy ? 'Actualizando…' : 'Actualizar'}
+    </button>
+  );
+}
 
 interface MenuOption {
   key: string;
@@ -181,6 +212,7 @@ export default function ProjectMenuPage() {
             <h2 className="text-base font-extrabold text-textPrimary">{t('webEnsayos.menu.whatToDo')}</h2>
             <p className="text-sm text-textSecondary mt-1">{t('webEnsayos.menu.chooseOption')}</p>
           </div>
+          <ProjectRefreshButton projectId={projectId} />
         </div>
 
         {/* Opciones */}

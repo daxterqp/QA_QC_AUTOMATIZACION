@@ -9,8 +9,12 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 30 * 1000,    // 30s
-            gcTime: 5 * 60 * 1000,  // 5min
+            // Caché "caliente": las revisitas dentro de la ventana son INSTANTÁNEAS
+            // (sin esqueleto). La frescura ante cambios desde otros dispositivos la
+            // dan: (a) la invalidación tras cada mutación local, (b) el botón
+            // "Actualizar" por proyecto. Sube mucho la fluidez del escritorio.
+            staleTime: 3 * 60 * 1000,   // 3 min fresco
+            gcTime: 30 * 60 * 1000,     // 30 min en memoria (sobrevive navegación)
             retry: false,
             refetchOnWindowFocus: false,
           },

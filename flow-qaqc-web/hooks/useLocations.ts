@@ -59,8 +59,8 @@ export function useLocationProgress(projectId: string) {
       return map;
     },
     enabled: !!projectId,
-    staleTime: 0,            // Siempre fresco al volver a la pantalla
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,       // 1 min; el botón "Actualizar" del proyecto fuerza el refresh
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -126,7 +126,7 @@ export function useLocationProtocols(locationId: string, projectId: string) {
         .filter(row => !row.template.is_hidden || row.instance != null);
     },
     enabled: !!locationId && !!projectId,
-    staleTime: 0,
+    // Hereda el staleTime global (3 min); las mutaciones invalidan esta query.
   });
 }
 

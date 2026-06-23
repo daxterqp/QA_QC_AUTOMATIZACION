@@ -55,7 +55,8 @@ export function useEnsayosData(projectId: string) {
       };
     },
     enabled: !!projectId,
-    staleTime: 0,
+    // Hereda el staleTime global (3 min): revisitas instantáneas. Las mutaciones
+    // invalidan esta query y el botón "Actualizar" del proyecto fuerza el refresh.
   });
 }
 

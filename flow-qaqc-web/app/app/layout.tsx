@@ -57,9 +57,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({ projectId: project.id, projectName: project.name, type }),
         }).catch(() => {});
       }
-      // Refresh logo cache (fresh=1 deletes old local cache and downloads latest from S3)
+      // Pre-cachear el logo SIN fresh=1: si ya está en el caché local, no se re-baja
+      // de S3 (antes fresh=1 borraba y re-descargaba TODOS los logos en cada arranque).
       const logoKey = project.logo_s3_key ?? `logos/project_${project.id}/logo.jpg`;
-      fetch(`/api/s3-image?key=${encodeURIComponent(logoKey)}&fresh=1`).catch(() => {});
+      fetch(`/api/s3-image?key=${encodeURIComponent(logoKey)}`).catch(() => {});
     }
   }, [projects]);
 

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import type { ProtocolItem, Evidence } from '@/types';
 
@@ -9,14 +9,11 @@ export interface PreloadedProjectData {
   evidencesByProtocol: Record<string, Evidence[]>;
 }
 
-/**
- * Preloads ALL protocol items and evidences for a project in a single batch.
- * Called once when user enters a project — data stays in cache for the session.
- */
-export function useProjectPreload(projectId: string) {
-  return useQuery({
-    queryKey: ['project-preload', projectId],
-    queryFn: async (): Promise<PreloadedProjectData> => {
+const PRELOAD_STALE = 10 * 60 * 1000; // 10 min
+const PRELOAD_GC = 30 * 60 * 1000;    // 30 min
+
+/** Núcleo del preload (reutilizado por el hook y por el prefetch al hover). */
+async function fetchProjectPreload(projectId: string): Promise<PreloadedProjectData> {
       // 1. Get all protocol IDs for this project (non-draft)
       const { data: protocols } = await supabase
         .from('protocols')
@@ -77,9 +74,30 @@ export function useProjectPreload(projectId: string) {
       console.log(`[Preload] ${protocolIds.length} protocolos, ${allItems.length} items, ${allEvidences.length} evidencias precargadas`);
 
       return { itemsByProtocol, evidencesByProtocol };
-    },
+}
+
+/**
+ * Preloads ALL protocol items and evidences for a project in a single batch.
+ * Called once when user enters a project — data stays in cache for the session.
+ */
+export function useProjectPreload(projectId: string) {
+  return useQuery({
+    queryKey: ['project-preload', projectId],
+    queryFn: () => fetchProjectPreload(projectId),
     enabled: !!projectId,
-    staleTime: 10 * 60 * 1000, // 10 min — stays fresh for the session
-    gcTime: 30 * 60 * 1000,    // 30 min in memory
+    staleTime: PRELOAD_STALE,
+    gcTime: PRELOAD_GC,
+  });
+}
+
+/** Prefetch del preload (p.ej. al pasar el mouse por la tarjeta del proyecto).
+ *  No-op si ya está en caché y fresco; calienta la caché antes de entrar. */
+export function prefetchProjectPreload(qc: QueryClient, projectId: string): void {
+  if (!projectId) return;
+  qc.prefetchQuery({
+    queryKey: ['project-preload', projectId],
+    queryFn: () => fetchProjectPreload(projectId),
+    staleTime: PRELOAD_STALE,
+    gcTime: PRELOAD_GC,
   });
 }
