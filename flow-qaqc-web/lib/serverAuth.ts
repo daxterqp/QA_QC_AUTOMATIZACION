@@ -35,3 +35,8 @@ export async function getServerUser(): Promise<ServerUser | null> {
 export function canDeleteEnsayos(user: ServerUser | null): boolean {
   return user?.role === 'RESIDENT' || user?.role === 'CREATOR';
 }
+
+/** ¿El usuario puede ELIMINAR/IMPORTAR un proyecto de raíz? SOLO Creador. */
+export function canDeleteProject(user: ServerUser | null): boolean {
+  return user?.role === 'CREATOR';
+}

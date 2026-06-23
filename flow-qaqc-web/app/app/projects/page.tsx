@@ -13,6 +13,7 @@ import { useAuth } from '@lib/auth-context';
 import { cn, formatDate } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 import { ProjectConfigModal } from '@components/project/ProjectConfigModal';
+import { ImportProjectButton, DeleteProjectButton } from '@components/project/ProjectBackupActions';
 import type { Project } from '@/types';
 
 export default function ProjectsPage() {
@@ -112,6 +113,7 @@ export default function ProjectsPage() {
               >
                 <RefreshCw size={14} className={manualRefresh ? 'animate-spin' : ''} />
               </button>
+              {currentUser?.role === 'CREATOR' && <ImportProjectButton />}
               {currentUser?.role === 'CREATOR' && (
                 <Link
                   href="/app/users"
@@ -299,6 +301,8 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
         {/* v40 — Configurar módulos: ícono al costado de Contactos. EXCLUSIVO del
             rol CREATOR (ni el Jefe lo ve). Antes vivía dentro de "Cargar archivos". */}
         {isCreator && <ProjectConfigButton project={project} />}
+        {/* Eliminar proyecto de raíz (con respaldo) — SOLO CREATOR. */}
+        {isCreator && <DeleteProjectButton project={project} />}
       </div>
     </div>
   );

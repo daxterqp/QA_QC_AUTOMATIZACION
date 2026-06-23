@@ -5,6 +5,20 @@ Guía práctica de respaldos de la base **Supabase** (Postgres) y de los archivo
 
 ---
 
+## 0. Los tres respaldos (no confundirlos)
+
+| Respaldo | Qué guarda | Cuándo | Cómo restaurar |
+|---|---|---|---|
+| **Backup diario** (GitHub Actions → S3 `backups/db/`) | **TODA la base** (no los archivos) | Automático ~02:00 Perú · keep-15 | Este documento (`pg_restore`) |
+| **Export de proyecto** | **UN proyecto**: base + sus archivos S3, en un `.zip` local | Manual, al eliminar/archivar un proyecto | Botón **Importar proyecto** (1 clic) — ver `docs/BORRADO_PROYECTO.md` |
+| **S3** | Las fotos/planos en sí | Continuo (es el original) | Ya viven en S3 |
+
+- Para un **desastre grande** (corrupción, borrado masivo, error de migración) → el **backup diario** de abajo.
+- Para **borrar/mover/archivar UN proyecto sin perderlo** → el **export de proyecto** (`docs/BORRADO_PROYECTO.md`).
+- Para borrar **un ensayo puntual** → la **papelera** (`recycle_bin`), no necesitás restore.
+
+---
+
 ## 1. Qué se respalda (y qué no hace falta)
 
 | Dato | Dónde vive | Cómo se respalda |
