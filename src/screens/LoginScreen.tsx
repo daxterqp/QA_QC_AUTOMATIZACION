@@ -14,7 +14,6 @@ import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
 import WaterRipples from '@components/WaterRipples';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
-import { getRecentEmails } from '@services/RecentAccountsService';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -50,10 +49,6 @@ export default function LoginScreen() {
   const [suEmail, setSuEmail] = useState('');
   const [suPassword, setSuPassword] = useState('');
   const [signingUp, setSigningUp] = useState(false);
-
-  // Correos recordados en este dispositivo (acceso rápido en celular compartido).
-  const [recentEmails, setRecentEmails] = useState<string[]>([]);
-  useEffect(() => { getRecentEmails().then(setRecentEmails); }, []);
 
   // Inactividad: tras 1 min en el login, vuelve al intro ("toca para comenzar").
   const enteredRef = useRef(false);
@@ -254,17 +249,6 @@ export default function LoginScreen() {
                 returnKeyType="next"
               />
             </View>
-
-            {recentEmails.length > 0 && email.length === 0 && (
-              <View style={styles.recentRow}>
-                {recentEmails.map(re => (
-                  <TouchableOpacity key={re} style={styles.recentChip} onPress={() => setEmail(re)} activeOpacity={0.8}>
-                    <Ionicons name="person-circle-outline" size={14} color={Colors.primary} />
-                    <Text style={styles.recentChipText} numberOfLines={1}>{re}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
 
             <View style={[styles.fieldBox, focused === 'password' && styles.fieldBoxFocused]}>
               <TextInput
@@ -499,13 +483,6 @@ const styles = StyleSheet.create({
   fieldBoxFocused: { borderColor: Colors.primary, backgroundColor: Colors.white },
   fieldInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
 
-  recentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -4 },
-  recentChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderWidth: 1, borderColor: Colors.border, borderRadius: 14,
-    paddingHorizontal: 9, paddingVertical: 4, backgroundColor: Colors.white,
-  },
-  recentChipText: { fontFamily: FF_REG, fontSize: 11, color: Colors.textSecondary, maxWidth: 200 },
 
   forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
   forgotText: { fontFamily: FF_SEMI, fontSize: 12.5, color: 'rgba(255,255,255,0.9)' },
@@ -519,7 +496,7 @@ const styles = StyleSheet.create({
   btnBg: { minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   btnBgImg: { borderRadius: 26 },
   btnContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  btnText: { fontFamily: FF_XBOLD, color: Colors.white, fontSize: 15, letterSpacing: 2.5 },
+  btnText: { fontFamily: FF_XBOLD, color: Colors.white, fontSize: 15, letterSpacing: 0.5 },
 
   footer: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, paddingTop: 20, paddingHorizontal: 12, lineHeight: 18 },
   privacyLink: { fontFamily: FF_REG, textAlign: 'center', color: Colors.light, fontSize: 11, textDecorationLine: 'underline', paddingTop: 22 },
