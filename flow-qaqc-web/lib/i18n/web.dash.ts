@@ -52,7 +52,7 @@ export const STRINGS_WEB_DASH: Record<string, { es: string; en: string; pt: stri
   'webDash.deleteNoteWarning': { es: 'Esta acción no se puede deshacer.', en: 'This action cannot be undone.', pt: 'Esta ação não pode ser desfeita.' },
 
   // ── Tablas Resumen: cabecera / selector de tipo ──
-  'webDash.summaryTitle': { es: 'Tablas Resumen', en: 'Summary Tables', pt: 'Tabelas Resumo' },
+  'webDash.summaryTitle': { es: 'Dashboard', en: 'Dashboard', pt: 'Painel' },
   'webDash.crumbProjects': { es: 'Proyectos', en: 'Projects', pt: 'Projetos' },
   'webDash.choseTestType': { es: 'Elige un tipo de ensayo para ver su tabla resumen consolidada.', en: 'Choose a test type to view its consolidated summary table.', pt: 'Escolha um tipo de ensaio para ver sua tabela resumo consolidada.' },
   'webDash.noSummaryData': { es: 'Aún no hay datos. Las tablas se construyen al', en: 'No data yet. Tables are built when you', pt: 'Ainda não há dados. As tabelas são criadas ao' },
@@ -109,6 +109,25 @@ export const STRINGS_WEB_DASH: Record<string, { es: string; en: string; pt: stri
   // ── Tablas Resumen: modal 1ª columna ──
   'webDash.firstColModalTitle': { es: 'Primera columna (fija)', en: 'First column (fixed)', pt: 'Primeira coluna (fixa)' },
   'webDash.accept': { es: 'Aceptar', en: 'Accept', pt: 'Aceitar' },
+
+  // ── Dashboard: header condensado / acciones ──
+  'webDash.tutorial': { es: 'Tutorial', en: 'Tutorial', pt: 'Tutorial' },
+  'webDash.chartsConfig': { es: 'Configurar gráficos', en: 'Configure charts', pt: 'Configurar gráficos' },
+  'webDash.openFilters': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },
+
+  // ── Dashboard: modal de filtros ──
+  'webDash.filtersModalTitle': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },
+  'webDash.apply': { es: 'Aplicar', en: 'Apply', pt: 'Aplicar' },
+  'webDash.close': { es: 'Cerrar', en: 'Close', pt: 'Fechar' },
+
+  // ── Dashboard: carrusel + gestión de gráficos ──
+  'webDash.chartsCarouselEmpty': { es: 'Aún no hay gráficos. Abre ⚙ para crear tu dashboard.', en: 'No charts yet. Open ⚙ to build your dashboard.', pt: 'Ainda sem gráficos. Abra ⚙ para criar seu painel.' },
+  'webDash.manageCharts': { es: 'Gestión de gráficos', en: 'Manage charts', pt: 'Gerenciar gráficos' },
+  'webDash.reorderHint': { es: 'Arrastra para reordenar · el orden se refleja en el carrusel', en: 'Drag to reorder · order reflects in the carousel', pt: 'Arraste para reordenar · a ordem reflete no carrossel' },
+  'webDash.addChart': { es: 'Agregar gráfico', en: 'Add chart', pt: 'Adicionar gráfico' },
+  'webDash.noChartsYet': { es: 'Sin gráficos. Agrega uno abajo.', en: 'No charts. Add one below.', pt: 'Sem gráficos. Adicione um abaixo.' },
+  'webDash.deleteChartTitle': { es: 'Eliminar gráfico', en: 'Delete chart', pt: 'Excluir gráfico' },
+  'webDash.done': { es: 'Listo', en: 'Done', pt: 'Pronto' },
 
   // ── Tablas Resumen: gráfico SVG ──
   'webDash.noDataToPlot': { es: 'Sin datos para graficar.', en: 'No data to plot.', pt: 'Sem dados para plotar.' },

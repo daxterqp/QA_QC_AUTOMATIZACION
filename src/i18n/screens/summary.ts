@@ -4,7 +4,24 @@
  */
 const summary: Record<string, { es: string; en: string; pt: string }> = {
   // Cabecera / títulos
-  'summary.title': { es: 'Tablas Resumen', en: 'Summary Tables', pt: 'Tabelas Resumo' },
+  'summary.title': { es: 'Dashboard', en: 'Dashboard', pt: 'Painel' },
+
+  // Header condensado / acciones
+  'summary.tutorial': { es: 'Tutorial', en: 'Tutorial', pt: 'Tutorial' },
+  'summary.chartsConfig': { es: 'Configurar gráficos', en: 'Configure charts', pt: 'Configurar gráficos' },
+  'summary.filters': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },
+
+  // Modal de filtros / carrusel / gestión de gráficos
+  'summary.filtersTitle': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },
+  'summary.apply': { es: 'Aplicar', en: 'Apply', pt: 'Aplicar' },
+  'summary.close': { es: 'Cerrar', en: 'Close', pt: 'Fechar' },
+  'summary.clear': { es: 'Limpiar', en: 'Clear', pt: 'Limpar' },
+  'summary.chartsEmpty': { es: 'Aún no hay gráficos. Toca ⚙ para crear tu dashboard.', en: 'No charts yet. Tap ⚙ to build your dashboard.', pt: 'Ainda sem gráficos. Toque ⚙ para criar seu painel.' },
+  'summary.manageCharts': { es: 'Gestión de gráficos', en: 'Manage charts', pt: 'Gerenciar gráficos' },
+  'summary.reorderHint': { es: 'Mantén y arrastra para reordenar', en: 'Hold & drag to reorder', pt: 'Segure e arraste para reordenar' },
+  'summary.addChart': { es: 'Agregar gráfico', en: 'Add chart', pt: 'Adicionar gráfico' },
+  'summary.noChartsYet': { es: 'Sin gráficos. Agrega uno abajo.', en: 'No charts. Add one below.', pt: 'Sem gráficos. Adicione um abaixo.' },
+  'summary.done': { es: 'Listo', en: 'Done', pt: 'Pronto' },
 
   // Selector de tipo de ensayo
   'summary.emptyNoData': {

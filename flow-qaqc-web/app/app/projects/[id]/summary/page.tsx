@@ -10,7 +10,7 @@
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Table2, Download, ChevronRight, X as XIcon, Loader2, Plus, LineChart } from 'lucide-react';
+import { Table2, Download, ChevronRight, X as XIcon, Loader2, Plus, LineChart, Settings, Filter, Trash2, GripVertical, HelpCircle, ArrowLeft } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
 import { useProjects } from '@hooks/useProjects';
 import { useSummaryTemplates, useSummaryRows, useTemplateItems, type SummaryRowData } from '@hooks/useSummaryRows';
@@ -109,6 +109,10 @@ export default function SummaryTablesPage() {
   return <Suspense fallback={<div className="p-8 text-sm text-muted">{t('common.loading')}</div>}><SummaryTablesInner /></Suspense>;
 }
 
+type Trend = 'linear' | 'quad' | 'cubic';
+type ChartCfg = { id: string; yKey: string; trend: Trend };
+const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+
 function SummaryTablesInner() {
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
@@ -133,9 +137,6 @@ function SummaryTablesInner() {
 
   // KPIs / medidas (filas de estadística). Se GUARDA por tipo de ensayo.
   const [measures, setMeasures] = useState<MeasureOp[]>(['avg']);
-  const [firstColKey, setFirstColKey] = useState('ensayo_date');
-  const [showFirstCol, setShowFirstCol] = useState(false);
-  const [firstColTemp, setFirstColTemp] = useState('ensayo_date');
   const [addingMeasure, setAddingMeasure] = useState(false);
   useEffect(() => {
     if (!templateId) return;
@@ -146,9 +147,26 @@ function SummaryTablesInner() {
     try { localStorage.setItem(`summary_measures_${templateId}`, JSON.stringify(measures)); } catch { /* cuota */ }
   }, [measures, templateId]);
 
-  // Gráfico
-  const [showChart, setShowChart] = useState(false);
-  const [chart, setChart] = useState<{ yKey: string; trend: 'linear' | 'quad' | 'cubic' } | null>(null);
+  // Dashboard de gráficos: ARRAY ordenado, persistido por tipo de ensayo (templateId).
+  const [charts, setCharts] = useState<ChartCfg[]>([]);
+  useEffect(() => {
+    if (!templateId) { setCharts([]); return; }
+    try { const raw = localStorage.getItem(`summary_charts_${templateId}`); setCharts(raw ? JSON.parse(raw) : []); } catch { setCharts([]); }
+  }, [templateId]);
+  useEffect(() => {
+    if (!templateId) return;
+    try { localStorage.setItem(`summary_charts_${templateId}`, JSON.stringify(charts)); } catch { /* cuota */ }
+  }, [charts, templateId]);
+
+  // Modales
+  const [showFilters, setShowFilters] = useState(false);
+  const [showCharts, setShowCharts] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  // Form "agregar gráfico" (dentro del modal ⚙)
+  const [addY, setAddY] = useState('');
+  const [addTrend, setAddTrend] = useState<Trend>('linear');
+  // Drag-reorder (HTML5)
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   const worksBySectors = rows.some(r => r.sector_id);
   const worksByLocations = rows.some(r => r.location_id);
@@ -164,29 +182,22 @@ function SummaryTablesInner() {
   }), [rows, statusFilter, sectorFilter, locFilter, dateFrom, dateTo]);
 
   // Columnas: config de plantilla → auto desde la ficha (ordenado/jerárquico) → fallback datos.
+  // (Sin reordenar por "1ª columna": el freeze de la 1ª columna se eliminó por errores visuales.)
   const columns = useMemo<SummaryColumn[]>(() => {
     let data: SummaryColumn[];
     if (selectedTpl?.config?.columns?.length) data = selectedTpl.config.columns;
     else if (tplItems.length) data = buildAutoColumns(tplItems);
     else data = dynamicColumnsFromRows(rows);
-    const base = [...FIXED_SUMMARY_COLUMNS, ...data];
-    // 1ª columna seleccionable: la elegida va primero, Fecha segunda, resto igual.
-    if (firstColKey && firstColKey !== 'ensayo_date') {
-      const sel = base.find(c => c.key === firstColKey);
-      if (sel) {
-        const fecha = base.find(c => c.key === 'ensayo_date');
-        const rest = base.filter(c => c.key !== firstColKey && c.key !== 'ensayo_date');
-        return [sel, ...(fecha ? [fecha] : []), ...rest];
-      }
-    }
-    return base;
-  }, [selectedTpl, tplItems, rows, firstColKey]);
+    return [...FIXED_SUMMARY_COLUMNS, ...data];
+  }, [selectedTpl, tplItems, rows]);
   const dataCols = useMemo(() => columns.filter(c => !FIXED_SUMMARY_COLUMNS.some(f => f.key === c.key)), [columns]);
   const groups = useMemo(() => groupSpans(columns), [columns]);
   const hasGroups = groups.some(g => g.title);
   const yOptions = useMemo(() => chartYOptions(dataCols), [dataCols]);
+  const yLabelOf = (yKey: string) => yOptions.find(o => o.key === yKey)?.label ?? t('webDash.value');
 
   const hasActiveFilters = !!dateFrom || !!dateTo || !!sectorFilter || !!locFilter || statusFilter.size !== 3;
+  const activeFilterCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sectorFilter ? 1 : 0) + (locFilter ? 1 : 0) + (statusFilter.size !== 3 ? 1 : 0);
   const clearFilters = () => { setDateFrom(''); setDateTo(''); setSectorFilter(''); setLocFilter(''); setStatusFilter(new Set(['APPROVED', 'SUBMITTED', 'REJECTED'])); };
   const toggleStatus = (k: string) => setStatusFilter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
@@ -197,24 +208,57 @@ function SummaryTablesInner() {
     const csv = '﻿' + [header, ...lines].join('\r\n'); // UTF-8 con BOM
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `resumen_${selectedTpl?.id_protocolo ?? 'ensayo'}.csv`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `dashboard_${selectedTpl?.id_protocolo ?? 'ensayo'}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
 
-  // Datos del gráfico (X = fecha → tiempo; Y = columna elegida).
-  const chartData = useMemo(() => {
-    if (!chart) return null;
-    const pts = filtered
-      .map(r => ({ x: r.ensayo_date ? new Date(r.ensayo_date + 'T12:00:00').getTime() : NaN, y: num(r.values_json?.[chart.yKey]), code: r.protocol_code ?? '' }))
-      .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-      .sort((a, b) => a.x - b.x);
-    return pts;
-  }, [chart, filtered]);
+  // Puntos de un gráfico (X = fecha → tiempo; Y = columna elegida).
+  const buildPts = (yKey: string) => filtered
+    .map(r => ({ x: r.ensayo_date ? new Date(r.ensayo_date + 'T12:00:00').getTime() : NaN, y: num(r.values_json?.[yKey]), code: r.protocol_code ?? '' }))
+    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .sort((a, b) => a.x - b.x);
+
+  // Reordenar gráficos al soltar (drag HTML5).
+  const dropChart = (to: number) => {
+    setCharts(prev => {
+      if (dragIdx === null || dragIdx === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(dragIdx, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    setDragIdx(null);
+  };
+
+  // Botones de acción del header condensado (tutorial · CSV · filtros · ⚙).
+  const HeaderActions = (
+    <div className="ml-auto flex items-center gap-1">
+      <button onClick={() => setShowHelp(true)} title={t('webDash.tutorial')} aria-label={t('webDash.tutorial')}
+        className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/90"><HelpCircle size={18} /></button>
+      <button onClick={exportCsv} disabled={filtered.length === 0} title={t('webDash.exportCsv')} aria-label={t('webDash.exportCsv')}
+        className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/90 disabled:opacity-40"><Download size={18} /></button>
+      <button onClick={() => setShowFilters(true)} title={t('webDash.openFilters')} aria-label={t('webDash.openFilters')}
+        className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/90"><Filter size={18} />
+        {activeFilterCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 rounded-full bg-secondary text-[9px] font-bold flex items-center justify-center text-white">{activeFilterCount}</span>}</button>
+      <button onClick={() => setShowCharts(true)} title={t('webDash.chartsConfig')} aria-label={t('webDash.chartsConfig')}
+        className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/90"><Settings size={18} /></button>
+    </div>
+  );
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
-      <PageHeader title={t('webDash.summaryTitle')} subtitle={project?.name}
-        crumbs={[{ label: t('webDash.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…', href: `/app/projects/${projectId}/menu` }, { label: t('webDash.summaryTitle') }]} />
+      {/* SELECTOR (tipos de ensayo): header normal. DASHBOARD: header condensado a 1 línea. */}
+      {!templateId ? (
+        <PageHeader title={t('webDash.summaryTitle')} subtitle={project?.name}
+          crumbs={[{ label: t('webDash.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…', href: `/app/projects/${projectId}/menu` }, { label: t('webDash.summaryTitle') }]} />
+      ) : (
+        <div className="sticky top-0 z-40 bg-navy text-white flex items-center gap-2 px-3 h-12 shadow-md">
+          <button onClick={() => setTemplateId(null)} aria-label={t('webDash.backToTestTypes')}
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/10"><ArrowLeft size={20} /></button>
+          <span className="text-base font-extrabold tracking-wide">{t('webDash.summaryTitle')}</span>
+          {HeaderActions}
+        </div>
+      )}
 
       <div className="flex-1 w-full max-w-[1400px] mx-auto px-4 py-5 flex flex-col gap-4">
         {/* Selector de tipo */}
@@ -235,53 +279,36 @@ function SummaryTablesInner() {
 
         {templateId && (
           <>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => setTemplateId(null)} className="text-xs font-bold text-primary hover:underline">{t('webDash.backToTestTypes')}</button>
-              <span className="text-sm font-extrabold text-textPrimary">{selectedTpl?.id_protocolo}{selectedTpl?.name ? ` — ${selectedTpl.name}` : ''}</span>
-              <div className="ml-auto flex items-center gap-2">
-                <button onClick={() => { setFirstColTemp(firstColKey); setShowFirstCol(true); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-border text-textSecondary hover:border-primary hover:text-primary transition"
-                  title={t('webDash.firstColTitle')}>{t('webDash.firstColLabel', { col: columns.find(c => c.key === firstColKey)?.label ?? t('webDash.colDate') })}</button>
-                <button onClick={() => setShowChart(true)} disabled={yOptions.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-primary text-primary hover:bg-primary/5 disabled:opacity-40"><LineChart size={14} /> {t('webDash.generateChart')}</button>
-                <button onClick={exportCsv} disabled={filtered.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary/90 disabled:opacity-40"><Download size={14} /> {t('webDash.exportCsv')}</button>
+            {/* Carrusel de gráficos (scroll horizontal; orden = el del modal ⚙) */}
+            {charts.length === 0 ? (
+              <button onClick={() => setShowCharts(true)} className="bg-white rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted hover:border-primary/40 hover:text-primary transition flex items-center justify-center gap-2">
+                <LineChart size={16} /> {t('webDash.chartsCarouselEmpty')}
+              </button>
+            ) : (
+              <div className="flex gap-4 overflow-x-auto pb-2 snap-x">
+                {charts.map(ch => {
+                  const pts = buildPts(ch.yKey);
+                  return (
+                    <div key={ch.id} className="bg-white rounded-xl border border-border p-4 shrink-0 w-[760px] max-w-[90vw] snap-start">
+                      <h3 className="text-sm font-bold text-navy mb-2">{t('webDash.scatterVsTime', { param: yLabelOf(ch.yKey) })}</h3>
+                      <ScatterChart data={pts} yLabel={yLabelOf(ch.yKey)} trend={ch.trend} />
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            )}
 
-            {/* Filtros — rango de fechas estándar (Fecha inicial / Fecha final) */}
-            <div className="bg-white rounded-xl border border-border p-3 flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.filters')}</p>
-                <div className="flex items-center gap-3"><span className="text-[11px] text-gray-400">{t('webDash.filteredOf', { shown: filtered.length, total: rows.length })}</span>
-                  {hasActiveFilters && <button onClick={clearFilters} className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"><XIcon className="w-3 h-3" /> {t('webDash.clear')}</button>}</div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <label className="flex flex-col gap-1"><span className="text-[10px] font-semibold text-gray-500">{t('webDash.dateFrom')}</span>
-                  <input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="border border-border rounded px-2 py-1.5 text-xs" /></label>
-                <label className="flex flex-col gap-1"><span className="text-[10px] font-semibold text-gray-500">{t('webDash.dateTo')}</span>
-                  <input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="border border-border rounded px-2 py-1.5 text-xs" /></label>
-                <div className="flex flex-col gap-1"><span className="text-[10px] font-semibold text-gray-500">{t('webDash.status')}</span>
-                  <div className="flex flex-wrap gap-1">{STATUS_FILTERS.map(s => { const on = statusFilter.has(s.key); return (
-                    <button key={s.key} onClick={() => toggleStatus(s.key)} style={on ? { borderColor: s.color, color: s.color } : undefined} className={`text-[10px] font-bold rounded-full border px-2 py-1 bg-white ${on ? '' : 'border-gray-200 text-gray-300'}`}>{t(s.labelKey)}</button>); })}</div></div>
-                {worksBySectors && <label className="flex flex-col gap-1"><span className="text-[10px] font-semibold text-gray-500">{t('webDash.sector')}</span>
-                  <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)} className="border border-border rounded px-2 py-1.5 text-xs bg-white"><option value="">{t('webDash.allMale')}</option>{sectorOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}
-                {worksByLocations && <label className="flex flex-col gap-1"><span className="text-[10px] font-semibold text-gray-500">{t('webDash.location')}</span>
-                  <select value={locFilter} onChange={e => setLocFilter(e.target.value)} className="border border-border rounded px-2 py-1.5 text-xs bg-white"><option value="">{t('webDash.allFemale')}</option>{locOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}
-              </div>
-            </div>
-
-            {/* Tabla — congela encabezado (fila de nombres) y primera columna, tipo Excel. */}
+            {/* Tabla — congela solo el encabezado (fila de nombres). Sin freeze de 1ª columna. */}
             <div className="bg-white rounded-xl border border-border overflow-auto max-h-[70vh]">
               {loadingRows ? <div className="flex items-center gap-2 text-muted text-sm p-8"><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</div>
                 : filtered.length === 0 ? <div className="p-8 text-center text-sm text-muted">{t('webDash.noTestMatches')}</div>
                 : <table className="text-[12px] border-collapse">
                   <thead>
-                    {hasGroups && <tr className="bg-[#0f2d4a] text-white">{groups.map((g, i) => <th key={i} colSpan={g.span} className="px-2 py-2.5 text-center text-[13px] font-extrabold uppercase tracking-wide border-l border-white/20">{g.title ?? ''}</th>)}</tr>}
-                    <tr className="bg-navy text-white">{columns.map((c, ci) => <th key={c.key} className={`px-2.5 py-2 text-center text-[11px] font-bold uppercase tracking-wider border-l border-white/15 whitespace-nowrap bg-navy ${ci === 0 ? 'sticky top-0 left-0 z-40' : 'sticky top-0 z-20'}`}>{c.label}</th>)}</tr>
+                    {hasGroups && <tr className="bg-[#0f2d4a] text-white">{groups.map((g, i) => <th key={i} colSpan={g.span} className="px-2 py-2.5 text-center text-[13px] font-extrabold uppercase tracking-wide border-l border-white/20 sticky top-0 z-20">{g.title ?? ''}</th>)}</tr>}
+                    <tr className="bg-navy text-white">{columns.map((c) => <th key={c.key} className="px-2.5 py-2 text-center text-[11px] font-bold uppercase tracking-wider border-l border-white/15 whitespace-nowrap bg-navy sticky top-0 z-20">{c.label}</th>)}</tr>
                   </thead>
                   <tbody>{filtered.map((r, ri) => (
-                    <tr key={r.id} className={ri % 2 ? 'bg-surface/40' : 'bg-white'}>{columns.map((c, ci) => {
+                    <tr key={r.id} className={ri % 2 ? 'bg-surface/40' : 'bg-white'}>{columns.map((c) => {
                       const txt = cellValue(r, c);
                       let content: ReactNode = txt || <span className="text-gray-300">—</span>;
                       if (c.key === 'estado') {
@@ -291,15 +318,13 @@ function SummaryTablesInner() {
                         // Enlace al ensayo; volver (atrás) regresa a la tabla (?t en la URL).
                         content = <Link href={`/app/projects/${projectId}/protocols/${r.protocol_id}/audit`} className="text-primary font-bold hover:underline">{txt}</Link>;
                       }
-                      const sticky = ci === 0 ? `sticky left-0 z-10 ${ri % 2 ? 'bg-[#eef2f7]' : 'bg-white'}` : '';
-                      return <td key={c.key} className={`px-2.5 py-1.5 border-t border-divider whitespace-nowrap text-center ${c.kind === 'number' ? 'tabular-nums' : ''} ${sticky}`}>{content}</td>;
+                      return <td key={c.key} className={`px-2.5 py-1.5 border-t border-divider whitespace-nowrap text-center ${c.kind === 'number' ? 'tabular-nums' : ''}`}>{content}</td>;
                     })}</tr>))}</tbody>
-                  {/* Footer: una fila por MEDIDA. Divisor FUERTE solo entre datos y cálculos;
-                      entre cálculos, línea tenue. */}
+                  {/* Footer: una fila por MEDIDA. Divisor FUERTE solo entre datos y cálculos. */}
                   <tfoot>{measures.map((op, mi) => (
                     <tr key={op} className="bg-[#eef2f7] font-bold text-navy">{columns.map((c, ci) => {
                       const div = mi === 0 ? 'border-t-2 border-navy' : 'border-t border-gray-200';
-                      if (ci === 0) return <td key={c.key} className={`px-2.5 py-2 ${div} text-[11px] uppercase sticky left-0 z-10 bg-[#eef2f7]`}>{t(MEASURE_LABEL_KEYS[op])}</td>;
+                      if (ci === 0) return <td key={c.key} className={`px-2.5 py-2 ${div} text-[11px] uppercase`}>{t(MEASURE_LABEL_KEYS[op])}</td>;
                       const isData = dataCols.some(d => d.key === c.key);
                       const val = isData ? measure(filtered.map(r => num(r.values_json?.[c.key])), op) : null;
                       return <td key={c.key} className={`px-2.5 py-2 ${div} text-center tabular-nums`}>{val != null ? fmt(val) : ''}</td>;
@@ -326,65 +351,98 @@ function SummaryTablesInner() {
                 ))}
               </div>
             )}
-
-            {/* Gráfico generado (abajo, base para dashboards) */}
-            {chart && chartData && (
-              <div className="bg-white rounded-xl border border-border p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-bold text-navy">{t('webDash.scatterVsTime', { param: yOptions.find(o => o.key === chart.yKey)?.label ?? '' })}</h3>
-                  <button onClick={() => setChart(null)} className="text-gray-400 hover:text-danger"><XIcon size={16} /></button>
-                </div>
-                <ScatterChart data={chartData} yLabel={yOptions.find(o => o.key === chart.yKey)?.label ?? t('webDash.value')} trend={chart.trend} />
-              </div>
-            )}
           </>
         )}
       </div>
 
-      {/* Modal generar gráfico */}
-      {showChart && (
-        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowChart(false)}>
+      {/* Modal: TUTORIAL (ayuda breve) */}
+      {showHelp && (
+        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
           <div className="bg-white rounded-xl w-full max-w-md p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-navy">{t('webDash.generateScatter')}</h3>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisX')}</span>
-              <input disabled value={t('webDash.axisXValue')} className="border border-border rounded px-2 py-1.5 text-sm bg-surface text-gray-500" /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisYParam')}</span>
-              <select id="ychart" className="border border-border rounded px-2 py-1.5 text-sm bg-white" defaultValue={chart?.yKey ?? ''}>
-                <option value="" disabled>{t('webDash.chooseColumn')}</option>
-                {yOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-              </select></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.trendLine')}</span>
-              <select id="tchart" className="border border-border rounded px-2 py-1.5 text-sm bg-white" defaultValue="linear">
-                <option value="linear">{t('webDash.trendLinear')}</option><option value="quad">{t('webDash.trendQuad')}</option><option value="cubic">{t('webDash.trendCubic')}</option>
-              </select></label>
-            <div className="flex justify-end gap-2 mt-1">
-              <button onClick={() => setShowChart(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:text-gray-800">{t('common.cancel')}</button>
-              <button onClick={() => {
-                const y = (document.getElementById('ychart') as HTMLSelectElement)?.value;
-                const tr = (document.getElementById('tchart') as HTMLSelectElement)?.value as 'linear' | 'quad' | 'cubic';
-                if (y) { setChart({ yKey: y, trend: tr || 'linear' }); setShowChart(false); }
-              }} className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90">{t('webDash.generate')}</button>
+            <h3 className="text-base font-bold text-navy">{t('webDash.tutorial')}</h3>
+            <ul className="text-sm text-textSecondary list-disc pl-5 flex flex-col gap-1.5">
+              <li>{t('webDash.chartsConfig')} ⚙: {t('webDash.reorderHint')}.</li>
+              <li>{t('webDash.openFilters')}: {t('webDash.filtersModalTitle')}.</li>
+              <li>{t('webDash.exportCsv')}.</li>
+            </ul>
+            <div className="flex justify-end"><button onClick={() => setShowHelp(false)} className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90">{t('webDash.done')}</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: FILTROS (todos en un solo lugar) */}
+      {showFilters && (
+        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowFilters(false)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-navy">{t('webDash.filtersModalTitle')}</h3>
+              <span className="text-[11px] text-gray-400">{t('webDash.filteredOf', { shown: filtered.length, total: rows.length })}</span>
+            </div>
+            <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-gray-500">{t('webDash.dateFrom')}</span>
+              <input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+            <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-gray-500">{t('webDash.dateTo')}</span>
+              <input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+            <div className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-gray-500">{t('webDash.status')}</span>
+              <div className="flex flex-wrap gap-1.5">{STATUS_FILTERS.map(s => { const on = statusFilter.has(s.key); return (
+                <button key={s.key} onClick={() => toggleStatus(s.key)} style={on ? { borderColor: s.color, color: s.color } : undefined} className={`text-[11px] font-bold rounded-full border px-2.5 py-1 bg-white ${on ? '' : 'border-gray-200 text-gray-300'}`}>{t(s.labelKey)}</button>); })}</div></div>
+            {worksBySectors && <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-gray-500">{t('webDash.sector')}</span>
+              <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm bg-white"><option value="">{t('webDash.allMale')}</option>{sectorOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}
+            {worksByLocations && <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-gray-500">{t('webDash.location')}</span>
+              <select value={locFilter} onChange={e => setLocFilter(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm bg-white"><option value="">{t('webDash.allFemale')}</option>{locOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}
+            <div className="flex justify-between gap-2 mt-1">
+              <button onClick={clearFilters} disabled={!hasActiveFilters} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-primary hover:underline disabled:opacity-40"><XIcon className="w-3 h-3" /> {t('webDash.clear')}</button>
+              <button onClick={() => setShowFilters(false)} className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90">{t('webDash.done')}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: elegir 1ª columna (fija) */}
-      {showFirstCol && (
-        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowFirstCol(false)}>
-          <div className="bg-white rounded-xl w-full max-w-sm p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-navy">{t('webDash.firstColModalTitle')}</h3>
-            <div className="max-h-72 overflow-y-auto flex flex-col gap-0.5">
-              {columns.map(c => (
-                <button key={c.key} onClick={() => setFirstColTemp(c.key)}
-                  className={`text-left text-sm px-3 py-2 rounded ${firstColTemp === c.key ? 'bg-primary/10 text-primary font-bold' : 'hover:bg-surface text-textPrimary'}`}>
-                  {c.group ? `${c.group} · ${c.label}` : c.label}
-                </button>
-              ))}
+      {/* Modal: ⚙ CONFIGURAR GRÁFICOS (gestión arriba + agregar abajo) */}
+      {showCharts && (
+        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowCharts(false)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-navy">{t('webDash.chartsConfig')}</h3>
+              <button onClick={() => setShowCharts(false)} className="text-gray-400 hover:text-danger"><XIcon size={18} /></button>
             </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setShowFirstCol(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:text-gray-800">{t('common.cancel')}</button>
-              <button onClick={() => { setFirstColKey(firstColTemp); setShowFirstCol(false); }} className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90">{t('webDash.accept')}</button>
+
+            {/* GESTIÓN: reordenar (drag) + eliminar */}
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.manageCharts')}</p>
+              {charts.length === 0 ? <p className="text-xs text-muted">{t('webDash.noChartsYet')}</p> : (
+                <>
+                  <p className="text-[10px] text-gray-400">{t('webDash.reorderHint')}</p>
+                  <div className="flex flex-col gap-1">
+                    {charts.map((ch, i) => (
+                      <div key={ch.id} draggable onDragStart={() => setDragIdx(i)} onDragOver={e => e.preventDefault()} onDrop={() => dropChart(i)}
+                        className={`flex items-center gap-2 px-2 py-2 rounded-lg border bg-surface/60 ${dragIdx === i ? 'border-primary opacity-60' : 'border-border'}`}>
+                        <GripVertical size={16} className="text-gray-400 cursor-grab shrink-0" />
+                        <span className="flex-1 min-w-0 text-sm text-textPrimary truncate">{yLabelOf(ch.yKey)} <span className="text-[10px] text-gray-400">· {ch.trend === 'linear' ? t('webDash.trendLinear') : ch.trend === 'quad' ? t('webDash.trendQuad') : t('webDash.trendCubic')}</span></span>
+                        <button onClick={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} title={t('webDash.deleteChartTitle')} className="text-gray-400 hover:text-danger shrink-0"><Trash2 size={15} /></button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* AGREGAR (igual que el de gráficos) */}
+            <div className="border-t border-divider pt-3 flex flex-col gap-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.addChart')}</p>
+              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisX')}</span>
+                <input disabled value={t('webDash.axisXValue')} className="border border-border rounded px-2 py-1.5 text-sm bg-surface text-gray-500" /></label>
+              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisYParam')}</span>
+                <select value={addY} onChange={e => setAddY(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="" disabled>{t('webDash.chooseColumn')}</option>
+                  {yOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select></label>
+              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.trendLine')}</span>
+                <select value={addTrend} onChange={e => setAddTrend(e.target.value as Trend)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="linear">{t('webDash.trendLinear')}</option><option value="quad">{t('webDash.trendQuad')}</option><option value="cubic">{t('webDash.trendCubic')}</option>
+                </select></label>
+              <button onClick={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend }]); setAddY(''); setAddTrend('linear'); } }}
+                disabled={!addY || yOptions.length === 0}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40"><Plus size={14} /> {t('webDash.addChart')}</button>
             </div>
           </div>
         </div>
