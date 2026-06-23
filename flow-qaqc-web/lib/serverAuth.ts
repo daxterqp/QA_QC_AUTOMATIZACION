@@ -13,9 +13,10 @@ export interface ServerUser {
   id: string;
   name: string | null;
   role: string | null;
+  orgId: string | null;   // multi-tenant (v53): organización del usuario
 }
 
-/** Devuelve el usuario de la sesión (id, name, role) o null si no hay sesión. */
+/** Devuelve el usuario de la sesión (id, name, role, orgId) o null si no hay sesión. */
 export async function getServerUser(): Promise<ServerUser | null> {
   const supabase = await createClient();
 
@@ -24,11 +25,16 @@ export async function getServerUser(): Promise<ServerUser | null> {
 
   const { data, error } = await supabase
     .from('users')
-    .select('id, name, role')
+    .select('id, name, role, org_id')
     .eq('auth_id', authUser.id)
     .maybeSingle();
   if (error || !data) return null;
-  return { id: data.id, name: (data as any).name ?? null, role: (data as any).role ?? null };
+  return {
+    id: data.id,
+    name: (data as any).name ?? null,
+    role: (data as any).role ?? null,
+    orgId: (data as any).org_id ?? null,
+  };
 }
 
 /** ¿El usuario puede eliminar ensayos? Solo Jefe (RESIDENT) o Creador. */

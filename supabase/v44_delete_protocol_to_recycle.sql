@@ -104,4 +104,7 @@ begin
 end;
 $$;
 
-grant execute on function delete_protocol_to_recycle(text, text, text) to anon, authenticated;
+-- Seguridad (v48/v50): NUNCA a anon. Es SECURITY DEFINER y destructiva; su guardia interna
+-- usa can_access_project (org-scoped desde v53). Re-otorgar a anon sería una regresión.
+revoke all on function delete_protocol_to_recycle(text, text, text) from public, anon;
+grant execute on function delete_protocol_to_recycle(text, text, text) to authenticated;
