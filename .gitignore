@@ -51,3 +51,6 @@ dist-desktop/
 **/.next/
 _wmdb_dump.b64
 _wmdb_dump.db
+
+# Carpeta-base para arrancar Flow_PM (copia del esqueleto; no es fuente de QA/QC)
+flow-pm-starter/
