@@ -1,8 +1,10 @@
 /**
- * SummaryTablesScreen (móvil) — Tablas Resumen (Fase 2+3).
- * Selector de tipo de ensayo → tabla consolidada (1 fila por ensayo) con
- * columnas fijas + columnas de la ficha, encabezados agrupados, filtros, KPIs
- * y export CSV. Solo LEE `summary_rows` local (construida al guardar ensayos).
+ * SummaryTablesScreen (móvil) — "Dashboard" (ex Tablas Resumen).
+ * Selector de tipo de ensayo → header condensado (1 línea) con back + acciones
+ * (tutorial · CSV · filtros · ⚙ gráficos). Filtros en modal. Carrusel de gráficos
+ * configurable (agregar / eliminar / reordenar arrastrando) por tipo de ensayo, y
+ * tabla consolidada debajo. La tabla congela SOLO el encabezado (fila de nombres);
+ * el freeze de la 1ª columna se eliminó por errores visuales.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal } from 'react-native';
@@ -11,6 +13,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Q } from '@nozbe/watermelondb';
+import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, runOnJS } from 'react-native-reanimated';
 import AppHeader from '@components/AppHeader';
 import CalendarPicker from '@components/CalendarPicker';
 import { Colors, Radius } from '../theme/colors';
@@ -40,6 +44,9 @@ interface Row {
   status: string | null; values: Record<string, unknown>;
 }
 
+type Trend = 'linear' | 'quad' | 'cubic';
+type ChartCfg = { id: string; yKey: string; trend: Trend };
+const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 function num(v: unknown): number {
   if (typeof v === 'number') return v;
@@ -57,8 +64,6 @@ function cellValue(r: Row, c: SummaryColumn): string {
     default: {
       const v = r.values[c.key];
       if (v == null || v === '') return '';
-      // v43.3 — Mostrar la MISMA cantidad de decimales que la ficha (formatComputed con
-      // los decimales de la celda). Antes se mostraba el número crudo (15+ decimales).
       if (c.kind === 'number') { const n = num(v); if (Number.isFinite(n)) return formatComputed(n, c.decimals); }
       return String(v);
     }
@@ -87,11 +92,9 @@ function measure(values: number[], op: MeasureOp): number | null {
   if (ns.length < 2) return 0;
   return Math.sqrt(ns.reduce((a, b) => a + (b - mean) ** 2, 0) / (ns.length - 1));
 }
-const fmt = (n: number | null) => n == null ? '' : (Math.abs(n) >= 100 ? n.toFixed(1) : n.toFixed(2));
-// v43.3 — Altura de fila FIJA: la 1ª columna congelada y el cuerpo deben tener filas
-// de idéntica altura, si no se desincronizan al hacer scroll vertical (la estructura
-// "se rompe"). Con altura fija ambos overlays quedan siempre alineados.
+// v43.3 — Altura de fila FIJA para que el encabezado congelado y el cuerpo queden alineados.
 const ROW_H = 46;
+const MGR_H = 50; // alto de cada fila en la gestión de gráficos (para el drag)
 
 // Regresión polinómica (mínimos cuadrados) para la tendencia.
 function polyfit(xs: number[], ys: number[], degree: number): number[] | null {
@@ -117,7 +120,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
   const { projectId, projectName } = route.params;
 
-  // Tour contextual (botón de ayuda ?)
+  // Tour contextual (botón de ayuda / tutorial)
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   const summaryTestTypeRef = useTourStep('summary_test_type');
   const summaryChartExportRef = useTourStep('summary_chart_export');
@@ -144,12 +147,15 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [tplItems, setTplItems] = useState<{ id: string; partida_item: string | null; item_description: string; validation_method: string | null; section: string | null }[]>([]);
   const [datePicker, setDatePicker] = useState<null | 'from' | 'to'>(null);
   const [measures, setMeasures] = useState<MeasureOp[]>(['avg']);
-  const [firstColKey, setFirstColKey] = useState('ensayo_date'); // 1ª columna (congelada)
-  const [showFirstColModal, setShowFirstColModal] = useState(false);
-  const [firstColTemp, setFirstColTemp] = useState('ensayo_date');
-  const [showChart, setShowChart] = useState(false);
-  const [chart, setChart] = useState<{ yKey: string; trend: 'linear' | 'quad' | 'cubic' } | null>(null);
-  const [chartForm, setChartForm] = useState<{ yKey: string; trend: 'linear' | 'quad' | 'cubic' }>({ yKey: '', trend: 'linear' });
+
+  // Modales
+  const [showFilters, setShowFilters] = useState(false);
+  const [showCharts, setShowCharts] = useState(false);
+
+  // Dashboard de gráficos: ARRAY ordenado, persistido por tipo de ensayo.
+  const [charts, setCharts] = useState<ChartCfg[]>([]);
+  const [addY, setAddY] = useState('');
+  const [addTrend, setAddTrend] = useState<Trend>('linear');
 
   // Estructura de la ficha (para encabezados limpios/ordenados).
   useEffect(() => {
@@ -159,7 +165,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       .catch(() => setTplItems([]));
   }, [templateId]);
 
-  // Config de medidas (KPIs) GUARDADA por tipo de ensayo.
+  // Medidas (KPIs) guardadas por tipo de ensayo.
   useEffect(() => {
     if (!templateId) return;
     AsyncStorage.getItem(`summary_measures_${templateId}`).then(raw => { try { setMeasures(raw ? JSON.parse(raw) : ['avg']); } catch { setMeasures(['avg']); } });
@@ -169,15 +175,23 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     AsyncStorage.setItem(`summary_measures_${templateId}`, JSON.stringify(measures)).catch(() => {});
   }, [measures, templateId]);
 
+  // Gráficos (dashboard) guardados por tipo de ensayo.
+  useEffect(() => {
+    if (!templateId) { setCharts([]); return; }
+    AsyncStorage.getItem(`summary_charts_${templateId}`).then(raw => { try { setCharts(raw ? JSON.parse(raw) : []); } catch { setCharts([]); } });
+  }, [templateId]);
+  useEffect(() => {
+    if (!templateId) return;
+    AsyncStorage.setItem(`summary_charts_${templateId}`, JSON.stringify(charts)).catch(() => {});
+  }, [charts, templateId]);
+
   // Backfill local solo 1 vez por montaje (los protocolos viejos sin fila).
   const didBackfill = useRef(false);
-  // Freeze (Excel): overlays absolutos sincronizados por scroll.
-  const headerRef = useRef<ScrollView>(null);   // encabezado congelado (mueve en X)
-  const firstColRef = useRef<ScrollView>(null);  // 1ª columna congelada (mueve en Y)
+  // Freeze del encabezado: overlay absoluto sincronizado por scroll horizontal.
+  const headerRef = useRef<ScrollView>(null);
   const [headerH, setHeaderH] = useState(0);
 
   const load = useCallback(async () => {
-    // Orquestación con la nube: backfill (1ª vez) + pull incremental → luego leer local.
     if (!didBackfill.current) { didBackfill.current = true; await backfillLocalSummary(projectId); }
     await pullSummaryRows(projectId);
     const recs: any[] = await summaryRowsCollection.query(Q.where('project_id', projectId)).fetch();
@@ -233,36 +247,23 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     return true;
   }), [rows, statusFilter, sectorFilter, dateFrom, dateTo]);
 
+  // Columnas (sin reordenar por 1ª columna: ese freeze se eliminó).
   const columns = useMemo<SummaryColumn[]>(() => {
     const cfg = templateId ? configByTpl[templateId] : null;
     let data: SummaryColumn[];
     if (cfg?.columns?.length) data = cfg.columns;
     else if (tplItems.length) data = buildAutoColumns(tplItems);
     else data = dynamicColumnsFromRows(rows.map(r => ({ values_json: r.values })));
-    const base = [...FIXED_SUMMARY_COLUMNS, ...data];
-    // 1ª columna seleccionable: la elegida va primero, Fecha segunda, resto igual.
-    if (firstColKey && firstColKey !== 'ensayo_date') {
-      const sel = base.find(c => c.key === firstColKey);
-      if (sel) {
-        const fecha = base.find(c => c.key === 'ensayo_date');
-        const rest = base.filter(c => c.key !== firstColKey && c.key !== 'ensayo_date');
-        return [sel, ...(fecha ? [fecha] : []), ...rest];
-      }
-    }
-    return base;
-  }, [templateId, configByTpl, tplItems, rows, firstColKey]);
+    return [...FIXED_SUMMARY_COLUMNS, ...data];
+  }, [templateId, configByTpl, tplItems, rows]);
   const dataCols = useMemo(() => columns.filter(c => !FIXED_SUMMARY_COLUMNS.some(f => f.key === c.key)), [columns]);
   const groups = useMemo(() => groupSpans(columns), [columns]);
   const hasGroups = groups.some(g => g.title);
-  // Ancho JUSTO por columna (según el contenido más largo), no fijo.
   const colWidth = useMemo(() => {
     const w: Record<string, number> = {};
     for (const c of columns) {
-      // El ENCABEZADO se reparte en 2 líneas → no necesita el ancho de todo el
-      // título; basta la palabra más larga (o la mitad del texto). Así ocupa menos.
       const longestWord = c.label.split(/\s+/).reduce((m, s) => Math.max(m, s.length), 0);
       const labelChars = Math.max(longestWord, Math.ceil(c.label.length / 2));
-      // Los DATOS no deben cortarse: usamos su largo completo.
       let dataChars = 0;
       for (const r of filtered) { const v = cellValue(r, c); if (v.length > dataChars) dataChars = v.length; }
       const maxLen = Math.max(labelChars, dataChars);
@@ -271,23 +272,22 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     return w;
   }, [columns, filtered]);
   const widthOf = (c: SummaryColumn) => colWidth[c.key] ?? 90;
-  // Ancho de cada grupo paraguas = suma de sus columnas.
-  const groupWidths = useMemo(() => {
-    const out: number[] = []; let idx = 0;
-    for (const g of groups) { let sum = 0; for (let k = 0; k < g.span; k++) sum += widthOf(columns[idx + k]); out.push(sum); idx += g.span; }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, columns, colWidth]);
   const yOptions = useMemo(() => chartYOptions(dataCols), [dataCols]);
-  const chartData = useMemo(() => {
-    if (!chart) return null;
-    return filtered
-      .map(r => ({ x: r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN, y: num(r.values[chart.yKey]), code: r.protocolCode ?? '' }))
-      .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-      .sort((a, b) => a.x - b.x);
-  }, [chart, filtered]);
+  const yLabelOf = (yKey: string) => yOptions.find(o => o.key === yKey)?.label ?? t('summary.value');
+
+  // Puntos de un gráfico (X = fecha → tiempo; Y = columna).
+  const buildPts = useCallback((yKey: string) => filtered
+    .map(r => ({ x: r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN, y: num(r.values[yKey]), code: r.protocolCode ?? '' }))
+    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .sort((a, b) => a.x - b.x), [filtered]);
 
   const toggleStatus = (k: string) => setStatusFilter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const activeFilterCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sectorFilter ? 1 : 0) + (statusFilter.size !== 3 ? 1 : 0);
+  const clearFilters = () => { setStatusFilter(new Set(['APPROVED', 'SUBMITTED', 'REJECTED'])); setSectorFilter(''); setDateFrom(''); setDateTo(''); };
+  const reorderCharts = useCallback((from: number, to: number) => setCharts(prev => {
+    if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+    const n = [...prev]; const [m] = n.splice(from, 1); n.splice(to, 0, m); return n;
+  }), []);
 
   async function exportCsv() {
     try {
@@ -295,7 +295,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       const header = columns.map(c => esc(c.label)).join(',');
       const lines = filtered.map(r => columns.map(c => esc(cellValue(r, c))).join(','));
       const csv = '﻿' + [header, ...lines].join('\r\n'); // UTF-8 con BOM
-      const uri = `${FileSystem.cacheDirectory}resumen_${(templateId && labelByTpl[templateId]) || 'ensayo'}.csv`;
+      const uri = `${FileSystem.cacheDirectory}dashboard_${(templateId && labelByTpl[templateId]) || 'ensayo'}.csv`;
       await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'text/csv', dialogTitle: t('summary.exportDialogTitle') });
       else Alert.alert(t('summary.csvGenerated'), uri);
@@ -304,8 +304,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     }
   }
 
-  // ── Render reutilizable de celdas (cuerpo + overlays congelados) ───────────
-  const firstColW = columns.length ? widthOf(columns[0]) : 90;
+  // ── Render reutilizable de celdas ─────────────────────────────────────────
   const rowBg = (ri: number) => (ri % 2 ? '#f7f9fc' : Colors.white);
   const footerBg = (mi: number) => (mi % 2 ? '#e3e9f2' : '#eef2f7');
   const renderGroupRow = (cols: SummaryColumn[]) => {
@@ -341,12 +340,24 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <AppHeader
         title={t('summary.title')}
-        subtitle={projectName}
-        onBack={() => navigation.goBack()}
+        subtitle={templateId ? undefined : projectName}
+        onBack={templateId ? () => setTemplateId(null) : () => navigation.goBack()}
         rightContent={
-          <TouchableOpacity onPress={() => jumpToStep('summary_test_type')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
-          </TouchableOpacity>
+          templateId ? (
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={() => jumpToStep('summary_test_type')} hitSlop={8} style={styles.headerBtn}><Ionicons name="help-circle-outline" size={21} color={Colors.white} /></TouchableOpacity>
+              <TouchableOpacity onPress={exportCsv} disabled={filtered.length === 0} hitSlop={8} style={[styles.headerBtn, filtered.length === 0 && { opacity: 0.4 }]}><Ionicons name="download-outline" size={20} color={Colors.white} /></TouchableOpacity>
+              <TouchableOpacity ref={summaryFiltersRef} onPress={() => setShowFilters(true)} hitSlop={8} style={styles.headerBtn}>
+                <Ionicons name="filter" size={19} color={Colors.white} />
+                {activeFilterCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{activeFilterCount}</Text></View>}
+              </TouchableOpacity>
+              <TouchableOpacity ref={summaryChartExportRef} onPress={() => setShowCharts(true)} hitSlop={8} style={styles.headerBtn}><Ionicons name="settings-outline" size={19} color={Colors.white} /></TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => jumpToStep('summary_test_type')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="help-circle-outline" size={22} color={Colors.white} />
+            </TouchableOpacity>
+          )
         }
       />
 
@@ -357,12 +368,12 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
           ) : (
             <>
               <Text style={styles.hint}>{t('summary.pickTestType')}</Text>
-              {templates.map((t, i) => (
-                <TouchableOpacity ref={i === 0 ? summaryTestTypeRef : undefined} key={t.id} style={styles.tplCard} onPress={() => setTemplateId(t.id)} activeOpacity={0.8}>
+              {templates.map((tp, i) => (
+                <TouchableOpacity ref={i === 0 ? summaryTestTypeRef : undefined} key={tp.id} style={styles.tplCard} onPress={() => setTemplateId(tp.id)} activeOpacity={0.8}>
                   <View style={styles.tplIcon}><Ionicons name="grid" size={20} color={Colors.secondary} /></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.tplTitle}>{t.label}</Text>
-                    <Text style={styles.tplSub}>{tx('summary.testCount', { count: t.count, plural: t.count === 1 ? '' : 's' })}{configByTpl[t.id] ? tx('summary.customConfig') : tx('summary.autoColumns')}</Text>
+                    <Text style={styles.tplTitle}>{tp.label}</Text>
+                    <Text style={styles.tplSub}>{tx('summary.testCount', { count: tp.count, plural: tp.count === 1 ? '' : 's' })}{configByTpl[tp.id] ? tx('summary.customConfig') : tx('summary.autoColumns')}</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                 </TouchableOpacity>
@@ -372,67 +383,33 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
         </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
-          {/* Barra superior */}
-          <View ref={summaryChartExportRef} style={styles.topBar}>
-            <TouchableOpacity onPress={() => setTemplateId(null)} style={styles.backChip}><Ionicons name="chevron-back" size={14} color={Colors.primary} /><Text style={styles.backChipText}>{t('summary.types')}</Text></TouchableOpacity>
-            <Text style={styles.topTitle} numberOfLines={1}>{labelByTpl[templateId] ?? ''}</Text>
-            <TouchableOpacity onPress={() => { setChartForm({ yKey: yOptions[0]?.key ?? '', trend: 'linear' }); setShowChart(true); }} disabled={yOptions.length === 0} style={[styles.chartBtn, yOptions.length === 0 && { opacity: 0.4 }]}>
-              <Ionicons name="stats-chart-outline" size={14} color={Colors.primary} /><Text style={styles.chartBtnText}>{t('summary.chart')}</Text>
+          {/* Carrusel de gráficos (orden = el del modal ⚙) */}
+          {charts.length === 0 ? (
+            <TouchableOpacity style={styles.carouselEmpty} onPress={() => setShowCharts(true)} activeOpacity={0.8}>
+              <Ionicons name="stats-chart-outline" size={16} color={Colors.primary} />
+              <Text style={styles.carouselEmptyText}>{t('summary.chartsEmpty')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={exportCsv} disabled={filtered.length === 0} style={[styles.exportBtn, filtered.length === 0 && { opacity: 0.4 }]}>
-              <Ionicons name="download-outline" size={14} color={Colors.white} /><Text style={styles.exportText}>{t('summary.csv')}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Filtros */}
-          <View ref={summaryFiltersRef} style={styles.filters}>
-            <Text style={styles.filterLabel}>{t('summary.status')} · {filtered.length}/{rows.length}</Text>
-            <View style={styles.chipRow}>
-              {[['APPROVED', t('summary.statusApproved'), '#1e8e3e'], ['SUBMITTED', t('summary.statusInReview'), '#394e7d'], ['REJECTED', t('summary.statusRejected'), '#d93025']].map(([k, l, col]) => {
-                const on = statusFilter.has(k);
-                return <TouchableOpacity key={k} onPress={() => toggleStatus(k)} style={[styles.ghost, { borderColor: on ? col : Colors.border }]}><Text style={[styles.ghostText, { color: on ? col : Colors.textMuted }]}>{l}</Text></TouchableOpacity>;
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carousel} contentContainerStyle={{ gap: 10, padding: 10 }}>
+              {charts.map(ch => {
+                const data = buildPts(ch.yKey);
+                return (
+                  <View key={ch.id} style={styles.chartCard}>
+                    <Text style={styles.chartTitle} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
+                    {data.length > 0 ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend} />
+                      : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
+                  </View>
+                );
               })}
-            </View>
-            {worksBySectors && (
-              <>
-                <Text style={styles.filterLabel}>{t('summary.sector')}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                  <Chip label={t('summary.all')} on={!sectorFilter} onPress={() => setSectorFilter('')} />
-                  {sectorOptions.map(o => <Chip key={o.id} label={o.label} on={sectorFilter === o.id} onPress={() => setSectorFilter(o.id)} />)}
-                </ScrollView>
-              </>
-            )}
-            {dateChoices.length > 0 && (
-              <>
-                <Text style={styles.filterLabel}>{t('summary.dateRange')}</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('from')}>
-                    <Text style={styles.dateFieldLabel}>{t('summary.dateFrom')}</Text>
-                    <Text style={styles.dateFieldValue}>{dateFrom || '—'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('to')}>
-                    <Text style={styles.dateFieldLabel}>{t('summary.dateTo')}</Text>
-                    <Text style={styles.dateFieldValue}>{dateTo || '—'}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-            {/* 1ª columna congelada: modal para elegir cuál va primero. */}
-            <Text style={styles.filterLabel}>{t('summary.firstColLabel')}</Text>
-            <TouchableOpacity style={styles.selectField} onPress={() => { setFirstColTemp(firstColKey); setShowFirstColModal(true); }}>
-              <Text style={styles.selectFieldValue} numberOfLines={1}>{columns.find(c => c.key === firstColKey)?.label ?? t('summary.dateColFallback')}</Text>
-              <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
+            </ScrollView>
+          )}
 
           {filtered.length === 0 ? (
             <ScrollView style={{ flex: 1 }}><View style={styles.empty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View></ScrollView>
           ) : (
             <View style={{ flex: 1 }}>
-              {/* CUERPO: scroll vertical + horizontal; sincroniza los overlays. */}
-              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}
-                scrollEventThrottle={16}
-                onScroll={e => firstColRef.current?.scrollTo({ y: e.nativeEvent.contentOffset.y, animated: false })}>
+              {/* CUERPO: scroll vertical + horizontal; sincroniza el encabezado congelado. */}
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} scrollEventThrottle={16}>
                 <ScrollView horizontal scrollEventThrottle={16}
                   onScroll={e => headerRef.current?.scrollTo({ x: e.nativeEvent.contentOffset.x, animated: false })}>
                   <View>
@@ -462,42 +439,17 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                     );
                   })}
                 </View>
-                {/* v42e — El gráfico generado se muestra en un Modal (abajo), NO embebido
-                    aquí: como overlay, los overlays absolutos de la 1ª columna/header
-                    congelados (bottom:0) lo cubrían y la columna quedaba "pegada" encima. */}
               </ScrollView>
 
-              {/* OVERLAY: encabezado CONGELADO (columnas 1..n), refleja el scroll horizontal. */}
+              {/* OVERLAY: encabezado CONGELADO (todas las columnas), refleja el scroll horizontal. */}
               {headerH > 0 && (
-                <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: firstColW, right: 0, height: headerH }}>
+                <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: headerH }}>
                   <ScrollView horizontal ref={headerRef} scrollEnabled={false} showsHorizontalScrollIndicator={false}>
                     <View>
-                      {hasGroups && renderGroupRow(columns.slice(1))}
-                      {renderNameRow(columns.slice(1))}
+                      {hasGroups && renderGroupRow(columns)}
+                      {renderNameRow(columns)}
                     </View>
                   </ScrollView>
-                </View>
-              )}
-
-              {/* OVERLAY: PRIMERA columna CONGELADA, refleja el scroll vertical. */}
-              {headerH > 0 && (
-                <View pointerEvents="none" style={{ position: 'absolute', top: headerH, left: 0, width: firstColW, bottom: 0 }}>
-                  <ScrollView ref={firstColRef} scrollEnabled={false} showsVerticalScrollIndicator={false}>
-                    {filtered.map((r, ri) => (
-                      <View key={r.id} style={{ flexDirection: 'row', height: ROW_H, backgroundColor: rowBg(ri) }}>{renderRowCells(r, [columns[0]])}</View>
-                    ))}
-                    {measures.map((op, mi) => (
-                      <View key={op} style={{ flexDirection: 'row', height: ROW_H, backgroundColor: footerBg(mi), borderTopWidth: mi === 0 ? 2 : 1, borderTopColor: mi === 0 ? Colors.navy : '#dbe2ec' }}>{renderFooterCells(op, [columns[0]])}</View>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-
-              {/* CORNER: encabezado de la 1ª columna (cruce fijo). */}
-              {headerH > 0 && (
-                <View style={{ position: 'absolute', top: 0, left: 0, width: firstColW, height: headerH, backgroundColor: Colors.navy }}>
-                  {hasGroups && <View style={[styles.gHead, { width: firstColW }]}><Text style={styles.gHeadText}> </Text></View>}
-                  <View style={[styles.th, { width: firstColW, flex: 1 }]}><Text style={styles.thText} numberOfLines={2}>{columns[0]?.label ?? ''}</Text></View>
                 </View>
               )}
             </View>
@@ -520,81 +472,147 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
         </View>
       </Modal>
 
-      {/* Modal generar gráfico */}
-      <Modal visible={showChart} transparent animationType="fade" onRequestClose={() => setShowChart(false)}>
+      {/* Modal: FILTROS (todos en un lugar) */}
+      <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => setShowFilters(false)}>
         <View style={styles.modalBg}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowChart(false)} />
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowFilters(false)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{t('summary.genScatterTitle')}</Text>
+            <View style={styles.modalHeadRow}>
+              <Text style={styles.modalTitle}>{t('summary.filtersTitle')}</Text>
+              <Text style={styles.modalCount}>{filtered.length}/{rows.length}</Text>
+            </View>
+            <ScrollView style={{ maxHeight: 420 }}>
+              <Text style={styles.filterLabel}>{t('summary.status')}</Text>
+              <View style={styles.chipRow}>
+                {[['APPROVED', t('summary.statusApproved'), '#1e8e3e'], ['SUBMITTED', t('summary.statusInReview'), '#394e7d'], ['REJECTED', t('summary.statusRejected'), '#d93025']].map(([k, l, col]) => {
+                  const on = statusFilter.has(k);
+                  return <TouchableOpacity key={k} onPress={() => toggleStatus(k)} style={[styles.ghost, { borderColor: on ? col : Colors.border }]}><Text style={[styles.ghostText, { color: on ? col : Colors.textMuted }]}>{l}</Text></TouchableOpacity>;
+                })}
+              </View>
+              {worksBySectors && (
+                <>
+                  <Text style={styles.filterLabel}>{t('summary.sector')}</Text>
+                  <View style={styles.chipRow}>
+                    <Chip label={t('summary.all')} on={!sectorFilter} onPress={() => setSectorFilter('')} />
+                    {sectorOptions.map(o => <Chip key={o.id} label={o.label} on={sectorFilter === o.id} onPress={() => setSectorFilter(o.id)} />)}
+                  </View>
+                </>
+              )}
+              {dateChoices.length > 0 && (
+                <>
+                  <Text style={styles.filterLabel}>{t('summary.dateRange')}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('from')}>
+                      <Text style={styles.dateFieldLabel}>{t('summary.dateFrom')}</Text>
+                      <Text style={styles.dateFieldValue}>{dateFrom || '—'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.dateField} onPress={() => setDatePicker('to')}>
+                      <Text style={styles.dateFieldLabel}>{t('summary.dateTo')}</Text>
+                      <Text style={styles.dateFieldValue}>{dateTo || '—'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+            <View style={styles.modalFootRow}>
+              <TouchableOpacity onPress={clearFilters} disabled={activeFilterCount === 0}><Text style={[styles.clearText, activeFilterCount === 0 && { opacity: 0.4 }]}>{t('summary.clear')}</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowFilters(false)} style={styles.genBtn}><Text style={styles.genBtnText}>{t('summary.done')}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: ⚙ CONFIGURAR GRÁFICOS (gestión arriba con drag + agregar abajo) */}
+      <Modal visible={showCharts} transparent animationType="fade" onRequestClose={() => setShowCharts(false)}>
+        <GestureHandlerRootView style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowCharts(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeadRow}>
+              <Text style={styles.modalTitle}>{t('summary.chartsConfig')}</Text>
+              <TouchableOpacity onPress={() => setShowCharts(false)} hitSlop={8}><Ionicons name="close" size={20} color={Colors.textMuted} /></TouchableOpacity>
+            </View>
+
+            {/* GESTIÓN: reordenar (mantén y arrastra) + eliminar */}
+            <Text style={styles.filterLabel}>{t('summary.manageCharts')}</Text>
+            {charts.length === 0 ? <Text style={styles.smallMuted}>{t('summary.noChartsYet')}</Text> : (
+              <>
+                <Text style={styles.smallMuted}>{t('summary.reorderHint')}</Text>
+                <View style={{ height: charts.length * MGR_H, marginTop: 4 }}>
+                  {charts.map((ch, i) => (
+                    <ManagerRow key={ch.id} index={i} count={charts.length}
+                      label={yLabelOf(ch.yKey)}
+                      sub={ch.trend === 'linear' ? t('summary.trendLinear') : ch.trend === 'quad' ? t('summary.trendQuad') : t('summary.trendCubic')}
+                      onReorder={reorderCharts}
+                      onDelete={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} />
+                  ))}
+                </View>
+              </>
+            )}
+
+            {/* AGREGAR */}
+            <View style={styles.addDivider} />
+            <Text style={styles.filterLabel}>{t('summary.addChart')}</Text>
             <Text style={styles.chartFieldLabel}>{t('summary.axisX')}</Text>
             <View style={styles.chartFixedField}><Text style={styles.chartFixedText}>{t('summary.axisXFixed')}</Text></View>
             <Text style={styles.chartFieldLabel}>{t('summary.axisYParam')}</Text>
-            <ScrollView style={{ maxHeight: 180 }}>
+            <ScrollView style={{ maxHeight: 150 }}>
               {yOptions.map(o => {
-                const on = chartForm.yKey === o.key;
-                return <TouchableOpacity key={o.key} style={[styles.dateRow, on && { backgroundColor: Colors.primary + '12' }]} onPress={() => setChartForm(f => ({ ...f, yKey: o.key }))}>
+                const on = addY === o.key;
+                return <TouchableOpacity key={o.key} style={[styles.dateRow, on && { backgroundColor: Colors.primary + '12' }]} onPress={() => setAddY(o.key)}>
                   <Text style={[styles.dateRowText, on && { color: Colors.primary, fontWeight: '800' }]}>{o.label}</Text></TouchableOpacity>;
               })}
             </ScrollView>
             <Text style={styles.chartFieldLabel}>{t('summary.trendLine')}</Text>
             <View style={styles.chipRow}>
-              {([['linear', t('summary.trendLinear')], ['quad', t('summary.trendQuad')], ['cubic', t('summary.trendCubic')]] as [('linear' | 'quad' | 'cubic'), string][]).map(([k, l]) => (
-                <TouchableOpacity key={k} onPress={() => setChartForm(f => ({ ...f, trend: k }))} style={[styles.choice, chartForm.trend === k && styles.choiceOn]}>
-                  <Text style={[styles.choiceText, chartForm.trend === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
+              {([['linear', t('summary.trendLinear')], ['quad', t('summary.trendQuad')], ['cubic', t('summary.trendCubic')]] as [Trend, string][]).map(([k, l]) => (
+                <TouchableOpacity key={k} onPress={() => setAddTrend(k)} style={[styles.choice, addTrend === k && styles.choiceOn]}>
+                  <Text style={[styles.choiceText, addTrend === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
               ))}
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
-              <TouchableOpacity onPress={() => setShowChart(false)}><Text style={{ color: Colors.textSecondary, fontWeight: '700', padding: 8 }}>{t('summary.cancel')}</Text></TouchableOpacity>
-              <TouchableOpacity disabled={!chartForm.yKey} onPress={() => { setChart({ yKey: chartForm.yKey, trend: chartForm.trend }); setShowChart(false); }} style={[styles.genBtn, !chartForm.yKey && { opacity: 0.4 }]}>
-                <Text style={styles.genBtnText}>{t('summary.generate')}</Text></TouchableOpacity>
-            </View>
+            <TouchableOpacity disabled={!addY || yOptions.length === 0}
+              onPress={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend }]); setAddY(''); setAddTrend('linear'); } }}
+              style={[styles.addBtn, (!addY || yOptions.length === 0) && { opacity: 0.4 }]}>
+              <Ionicons name="add" size={16} color={Colors.white} /><Text style={styles.genBtnText}>{t('summary.addChart')}</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-
-      {/* v42e — Modal con el gráfico generado (antes embebido bajo la tabla, donde
-          los overlays congelados lo tapaban). Aquí va por encima de todo. */}
-      <Modal visible={!!chart && !!chartData && chartData.length > 0} transparent animationType="fade" onRequestClose={() => setChart(null)}>
-        <View style={styles.modalBg}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setChart(null)} />
-          <View style={styles.modalCard}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <Text style={styles.chartTitle} numberOfLines={1}>{yOptions.find(o => o.key === chart?.yKey)?.label}{t('summary.vsTime')}</Text>
-              <TouchableOpacity onPress={() => setChart(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Ionicons name="close" size={20} color={Colors.textMuted} /></TouchableOpacity>
-            </View>
-            {chart && chartData && chartData.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <ScatterChartRN data={chartData} yLabel={yOptions.find(o => o.key === chart.yKey)?.label ?? t('summary.value')} trend={chart.trend} />
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal: elegir 1ª columna (fija) */}
-      <Modal visible={showFirstColModal} transparent animationType="fade" onRequestClose={() => setShowFirstColModal(false)}>
-        <View style={styles.modalBg}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowFirstColModal(false)} />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{t('summary.firstColModalTitle')}</Text>
-            <ScrollView style={{ maxHeight: 340 }}>
-              {columns.map(c => {
-                const on = firstColTemp === c.key;
-                return (
-                  <TouchableOpacity key={c.key} style={[styles.dateRow, on && { backgroundColor: Colors.primary + '12' }]} onPress={() => setFirstColTemp(c.key)}>
-                    <Text style={[styles.dateRowText, on && { color: Colors.primary, fontWeight: '800' }]}>{c.group ? `${c.group} · ${c.label}` : c.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
-              <TouchableOpacity onPress={() => setShowFirstColModal(false)}><Text style={{ color: Colors.textSecondary, fontWeight: '700', padding: 8 }}>{t('summary.cancel')}</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => { setFirstColKey(firstColTemp); setShowFirstColModal(false); }} style={styles.genBtn}><Text style={styles.genBtnText}>{t('summary.accept')}</Text></TouchableOpacity>
-            </View>
-          </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
+  );
+}
+
+// Fila de gestión de gráficos: mantén presionado y arrastra para reordenar.
+function ManagerRow({ index, count, label, sub, onReorder, onDelete }: {
+  index: number; count: number; label: string; sub: string; onReorder: (from: number, to: number) => void; onDelete: () => void;
+}) {
+  const ty = useSharedValue(0);
+  const active = useSharedValue(0);
+  const pan = Gesture.Pan()
+    .activateAfterLongPress(160)
+    .onStart(() => { active.value = 1; })
+    .onUpdate(e => { ty.value = e.translationY; })
+    .onEnd(e => {
+      const delta = Math.round(e.translationY / MGR_H);
+      let to = index + delta; if (to < 0) to = 0; if (to > count - 1) to = count - 1;
+      if (to !== index) runOnJS(onReorder)(index, to);
+      ty.value = 0; active.value = 0;
+    });
+  const aStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: ty.value }, { scale: active.value ? 1.03 : 1 }],
+    zIndex: active.value ? 20 : 0,
+    shadowOpacity: active.value ? 0.18 : 0,
+  }));
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View style={[styles.mgrRow, aStyle]}>
+        <Ionicons name="reorder-three" size={22} color={Colors.textMuted} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.mgrLabel} numberOfLines={1}>{label}</Text>
+          <Text style={styles.mgrSub}>{sub}</Text>
+        </View>
+        <TouchableOpacity onPress={onDelete} hitSlop={10}><Ionicons name="trash-outline" size={18} color="#d93025" /></TouchableOpacity>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -616,8 +634,8 @@ function ScatterChartRN({ data, yLabel, trend }: { data: { x: number; y: number;
   const nx = xs.map(x => (x - minX) / dx);
   const coef = polyfit(nx, ys, degree);
   const trendPts: string[] = [];
-  if (coef) for (let i = 0; i <= 50; i++) { const t = i / 50; trendPts.push(`${sx(minX + t * dx).toFixed(1)},${sy(polyval(coef, t)).toFixed(1)}`); }
-  const fmtD = (t: number) => { const d = new Date(t); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
+  if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; trendPts.push(`${sx(minX + tt * dx).toFixed(1)},${sy(polyval(coef, tt)).toFixed(1)}`); }
+  const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
   return (
     <View>
       <Svg width={W} height={H}>
@@ -653,43 +671,58 @@ const styles = StyleSheet.create({
   tplTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   tplSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 
-  topBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  backChip: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  backChipText: { color: Colors.primary, fontWeight: '800', fontSize: 12 },
-  topTitle: { flex: 1, fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
-  exportBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: 10, paddingVertical: 6 },
-  exportText: { color: Colors.white, fontWeight: '800', fontSize: 12 },
+  // Header condensado: fila de iconos a la derecha.
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: 2, right: 2, minWidth: 14, height: 14, paddingHorizontal: 3, borderRadius: 7, backgroundColor: Colors.secondary, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: Colors.white, fontSize: 8, fontWeight: '800' },
 
-  filters: { backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 12, paddingVertical: 8, gap: 4 },
-  filterLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 4 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  // Carrusel de gráficos
+  carousel: { flexGrow: 0, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  carouselEmpty: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 10, padding: 14, borderRadius: Radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
+  carouselEmptyText: { fontSize: 12.5, color: Colors.primary, fontWeight: '700' },
+  chartCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, width: 344 },
+  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, marginBottom: 6 },
+  chartEmpty: { height: 200, alignItems: 'center', justifyContent: 'center' },
+
+  filterLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 8 },
+  smallMuted: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4 },
   ghost: { borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: Colors.white },
   ghostText: { fontSize: 11, fontWeight: '800' },
   choice: { borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: Colors.white },
   choiceOn: { borderColor: Colors.primary, backgroundColor: Colors.primary + '12' },
   choiceText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600', maxWidth: 160 },
   choiceTextOn: { color: Colors.primary, fontWeight: '800' },
-  dateField: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: Colors.white },
-  selectField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 9, backgroundColor: Colors.white },
-  selectFieldValue: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  dateField: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: Colors.white, marginTop: 4 },
   dateFieldLabel: { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase' },
   dateFieldValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginTop: 2 },
+
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14, width: '100%', maxWidth: 360 },
-  modalTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginBottom: 8 },
+  modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14, width: '100%', maxWidth: 380 },
+  modalTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  modalHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  modalCount: { fontSize: 11, color: Colors.textMuted, fontWeight: '700' },
+  modalFootRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  clearText: { color: Colors.primary, fontWeight: '800', fontSize: 12, padding: 6 },
   dateRow: { paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: Colors.border },
   dateRowText: { fontSize: 14, color: Colors.textPrimary },
-  chartBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: 10, paddingVertical: 5 },
-  chartBtnText: { color: Colors.primary, fontWeight: '800', fontSize: 12 },
+
   measureBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 10, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.border },
   measureChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: Colors.white },
   measureChipOn: { borderColor: Colors.primary, backgroundColor: Colors.primary + '10' },
   measureChipText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
-  chartCard: { margin: 10, padding: 12, backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border },
-  chartTitle: { flex: 1, fontSize: 13, fontWeight: '800', color: Colors.navy },
+
+  // Gestión de gráficos (drag)
+  mgrRow: { position: 'absolute', left: 0, right: 0, height: MGR_H, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, marginBottom: 6, shadowColor: Colors.navy, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+  mgrLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  mgrSub: { fontSize: 10, color: Colors.textMuted, marginTop: 1 },
+
+  addDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
   chartFieldLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 8, marginBottom: 3 },
   chartFixedField: { backgroundColor: Colors.surface, borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 10, paddingVertical: 8 },
   chartFixedText: { fontSize: 13, color: Colors.textMuted },
+  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 10, marginTop: 12 },
   genBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: 16, paddingVertical: 8 },
   genBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 
