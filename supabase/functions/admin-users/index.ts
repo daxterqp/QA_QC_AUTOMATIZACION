@@ -35,10 +35,10 @@ Deno.serve(async (req: Request) => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
     const { data: callerProfile } = await admin.from("users").select("role, org_id").eq("auth_id", user.id).maybeSingle();
     if (!callerProfile || callerProfile.role !== "CREATOR") return json({ error: "forbidden: solo CREATOR" }, 403);
-    // Multi-tenant (v53): los usuarios/accesos creados heredan la org del CREATOR llamador,
+    // Multi-tenant (v56): los usuarios/accesos creados heredan la org del CREATOR llamador,
     // y toda mutación queda ACOTADA a esa org (un CREATOR de A no puede tocar usuarios de B).
     const callerOrgId = (callerProfile as { org_id?: string | null }).org_id ?? null;
-    if (!callerOrgId) return json({ error: "CREATOR sin organización; corré el backfill v53" }, 409);
+    if (!callerOrgId) return json({ error: "CREATOR sin organización; corré el backfill v56" }, 409);
 
     const body = await req.json();
     const action = body?.action;

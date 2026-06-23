@@ -13,7 +13,7 @@ export interface ServerUser {
   id: string;
   name: string | null;
   role: string | null;
-  orgId: string | null;   // multi-tenant (v53): organización del usuario
+  orgId: string | null;   // multi-tenant (v56): organización del usuario
 }
 
 /** Devuelve el usuario de la sesión (id, name, role, orgId) o null si no hay sesión. */

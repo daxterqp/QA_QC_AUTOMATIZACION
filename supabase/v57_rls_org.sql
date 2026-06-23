@@ -1,5 +1,5 @@
 -- ============================================================================
--- v54 — RLS multi-tenant: política RESTRICTIVA de organización por tabla
+-- v57 — RLS multi-tenant: política RESTRICTIVA de organización por tabla
 -- ============================================================================
 -- Estrategia clave (segura y de bajo riesgo): NO tocamos las políticas existentes
 -- (las de acceso por proyecto/rol de v48/v49). Agregamos una política
@@ -7,7 +7,7 @@
 --     acceso efectivo = (políticas actuales) AND (org_id = auth_org())
 -- Una política restrictiva SOLO puede ACOTAR, nunca abrir → imposible empeorar el
 -- acceso. Resultado: nadie ve/escribe filas de otra empresa, ni un CREATOR.
--- Aplicar DESPUÉS de v53 (que crea org_id + auth_org()).
+-- Aplicar DESPUÉS de v56 (que crea org_id + auth_org()).
 -- ============================================================================
 
 do $$
@@ -26,7 +26,7 @@ begin
   ] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists org_guard on public.%I', t);
-    execute format($p$create policy org_guard as restrictive on public.%I for all
+    execute format($p$create policy org_guard on public.%I as restrictive for all
       using (org_id = public.auth_org())
       with check (org_id = public.auth_org())$p$, t);
   end loop;

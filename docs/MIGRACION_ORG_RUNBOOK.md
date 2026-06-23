@@ -1,5 +1,10 @@
 # Runbook — Activar multi-tenant `org_id` + eco org-scoped (Flow_QA/QC)
 
+> **ESTADO: ✅ APLICADO en producción el 2026-06-23** (migraciones v56→v57→v58→v59 + re-deploy de
+> `admin-users` v4 y `eco` v1). Verificado: org_id NULL=0, advisor sin ERRORs/anon-exec, prueba de
+> aislamiento 2 empresas OK (un user de otra org ve 0 proyectos/protocolos). Este doc queda como
+> registro de lo aplicado + rollback. Lo único que falta lo hacés vos (ver §3 eco-key y §6).
+
 Aplica el backbone multi-empresa que cierra el god-mode cross-empresa, org-scopea el borrado
 y la API `eco`. **Data ficticia → riesgo bajo + rollback simple.** Aplicar **en orden**.
 
@@ -7,18 +12,18 @@ y la API `eco`. **Data ficticia → riesgo bajo + rollback simple.** Aplicar **e
 > Para la Edge Function `eco` sí hace falta el **Supabase CLI** o el deploy por MCP.
 
 > **ORDEN CORRECTO (revisado por panel adversarial — importante):**
-> parchear código TS → **desplegar `admin-users` y `eco`** → aplicar **v53** → **verificar org_id NULL = 0
-> y que tu CREATOR tenga org** → aplicar **v54** → **v55**. El deploy de `admin-users` va ANTES de v54
+> parchear código TS → **desplegar `admin-users` y `eco`** → aplicar **v56** → **verificar org_id NULL = 0
+> y que tu CREATOR tenga org** → aplicar **v57** → **v58**. El deploy de `admin-users` va ANTES de v57
 > porque cierra un takeover cross-empresa (issue B) que la RLS restrictiva NO tapa (service_role la bypassa).
 
 ## 0. Pre-check
 - Confirmá que existe la función `app_user_role()` / `app_user_id()` (de v47). Las nuevas se apoyan en ellas.
 - Backup: ya hay backup diario; si querés, corré el workflow `Backup Supabase DB` a mano antes.
-- **Re-desplegá las Edge Functions** con el código nuevo ANTES de v54:
+- **Re-desplegá las Edge Functions** con el código nuevo ANTES de v57:
   `supabase functions deploy admin-users` y `supabase functions deploy eco --no-verify-jwt`.
 
 ## 1. Aplicar migraciones (en orden, SQL Editor)
-1. **`supabase/v53_org_multitenant.sql`** — crea `organizations` + org default (UUID
+1. **`supabase/v56_org_multitenant.sql`** — crea `organizations` + org default (UUID
    `11111111-1111-4111-8111-111111111111`), agrega `org_id` a todas las tablas (**DEFAULT + NOT NULL**,
    backfill a esa org), trigger `set_org_id` (**fuerza** org de sesión en cada insert/update; anti-spoof),
    `auth_org()` (con COALESCE a la org demo en single-tenant) y `can_access_project` org-scoped.
@@ -28,9 +33,9 @@ y la API `eco`. **Data ficticia → riesgo bajo + rollback simple.** Aplicar **e
      select count(*) from public.projects where org_id is null;   -- = 0
      select id, name, role, org_id from public.users where role = 'CREATOR';  -- org_id NO null
      ```
-     Si tu CREATOR tuviera org_id null, NO sigas con v54 (te bloquearías): revisá el backfill primero.
-2. **`supabase/v54_rls_org.sql`** — política **restrictiva** `org_guard` por tabla (acota a la org; no abre nada).
-3. **`supabase/v55_eco_org.sql`** — `eco_api_keys` + funciones `eco_*` org-scoped. (Reemplaza v52; si no aplicaste v52, igual aplicá este.)
+     Si tu CREATOR tuviera org_id null, NO sigas con v57 (te bloquearías): revisá el backfill primero.
+2. **`supabase/v57_rls_org.sql`** — política **restrictiva** `org_guard` por tabla (acota a la org; no abre nada).
+3. **`supabase/v58_eco_org.sql`** — `eco_api_keys` + funciones `eco_*` org-scoped. (Reemplaza v52; si no aplicaste v52, igual aplicá este.)
 
 > Si una corrida falla a mitad, es idempotente (`add column if not exists`, `set default/not null` repetibles,
 > `drop policy if exists`): se puede re-correr. Ante la duda, ver Rollback (§5).
@@ -62,7 +67,7 @@ values ('22222222-2222-4222-8222-222222222222','Empresa B','empresa-b',
 -- Generá una key aleatoria larga (ej. openssl rand -hex 32) y guardá SU HASH:
 insert into public.eco_api_keys(org_id, key_hash, label, created_at)
 values ('11111111-1111-4111-8111-111111111111',
-        encode(digest('<TU_API_KEY_EN_CLARO>','sha256'),'hex'),  -- requiere pgcrypto (lo crea v53)
+        encode(digest('<TU_API_KEY_EN_CLARO>','sha256'),'hex'),  -- requiere pgcrypto (lo crea v56)
         'flow-pm', (extract(epoch from now())*1000)::bigint);
 ```
 - Flow_PM consume con `Authorization: Bearer <TU_API_KEY_EN_CLARO>` (el Edge la hashea y resuelve la org).

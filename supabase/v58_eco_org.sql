@@ -1,12 +1,12 @@
 -- ============================================================================
--- v55 — API `eco` ORG-SCOPED (reemplaza/supera a v52)
+-- v58 — API `eco` ORG-SCOPED (reemplaza/supera a v52)
 -- ============================================================================
 -- Antes: una sola ECO_API_KEY global + funciones sin org → con la key se leía data
 -- de CUALQUIER empresa. Ahora: una API key POR EMPRESA (hash en `eco_api_keys`), y
 -- las funciones exigen `p_org_id` y filtran por él.
 -- La Edge Function (supabase/functions/eco/index.ts) resuelve org desde el hash de
 -- la key con `eco_org_from_key()` y pasa `p_org_id`.
--- NOTA: si NO aplicaste v52, aplicá directamente este v55 (lo supera).
+-- NOTA: si NO aplicaste v52, aplicá directamente este v58 (lo supera).
 -- ============================================================================
 
 create table if not exists public.eco_api_keys (

@@ -1,6 +1,7 @@
 -- ============================================================================
--- v53 — Multi-tenant `org_id` (COLUMNA VERTEBRAL)  ·  retrofit SEGURO
+-- v56 — Multi-tenant `org_id` (COLUMNA VERTEBRAL)  ·  retrofit SEGURO
 -- ============================================================================
+-- (numerada v56 porque v53/v54/v55 ya las ocupó el épico de login en la DB.)
 -- Cierra el hueco raíz: hoy un CREATOR ve/borra cualquier proyecto (god-mode);
 -- con 2+ empresas eso filtra/borra datos cruzados. Aquí metemos `org_id` en TODO.
 --
@@ -17,7 +18,7 @@
 -- definirse DESPUÉS de agregar la columna. Secuencia: pgcrypto → organizations → set_org_id
 -- (plpgsql, no se valida al crear) → DO-block (columna+backfill+NOT NULL+FK+índices+trigger) →
 -- helpers sql → RLS de organizations.
--- Aplicar en orden: v53 → v54 → v55.  Rollback: ver docs/MIGRACION_ORG_RUNBOOK.md.
+-- Aplicar en orden: v56 → v57 → v58.  Rollback: ver docs/MIGRACION_ORG_RUNBOOK.md.
 -- ============================================================================
 
 create extension if not exists pgcrypto;
