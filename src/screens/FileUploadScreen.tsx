@@ -45,6 +45,7 @@ import type Equipment from '@models/Equipment';
 import ProjectSectorsContent from '@components/ProjectSectorsContent';
 import { exportCalibrationReport } from '@services/CalibrationReportService';
 import { useI18n, tx } from '@i18n/index';
+import { parseFeatureFlagsJson, isTraceabilityEnabled, isGeolocationEnabled, type ProjectFeatureFlags } from '@utils/featureFlags';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FileUpload'>;
 type Tab = 'actividades' | 'ubicaciones' | 'equipos_lab' | 'equipos' | 'sectores' | 'planos_pdf' | 'planos_dwg' | 'personalizar';
@@ -74,6 +75,8 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   const { currentUser } = useAuth();
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>('actividades');
+  // Feature flags del proyecto — para ocultar pestañas de módulos APAGADOS (paridad con web).
+  const [flags, setFlags] = useState<ProjectFeatureFlags | null>(null);
 
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
 
@@ -83,6 +86,21 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     });
     return unsub;
   }, [navigation, tourActive, isContextual, dismissTour]);
+
+  useEffect(() => {
+    projectsCollection.find(projectId)
+      .then((p: any) => setFlags(parseFeatureFlagsJson(p?.featureFlags)))
+      .catch(() => {});
+  }, [projectId]);
+
+  // Si la pestaña activa pertenece a un módulo que quedó apagado, saltar a Ubicaciones.
+  useEffect(() => {
+    if (!flags) return;
+    const hidden =
+      ((activeTab === 'actividades' || activeTab === 'equipos') && !isTraceabilityEnabled(flags)) ||
+      (activeTab === 'sectores' && !(isGeolocationEnabled(flags) || !!flags.fill_by_sector));
+    if (hidden) setActiveTab('ubicaciones');
+  }, [flags, activeTab]);
 
   // Tour refs
   const tabActivitiesRef = useTourStep('fileupload_tab_activities');
@@ -1036,7 +1054,22 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     { key: 'planos_dwg',   label: t('fileUpload.tab.planos_dwg'),   icon: 'layers-outline' },
     { key: 'personalizar', label: t('fileUpload.tab.personalizar'), icon: 'settings-outline' },
   ];
-  const tabs = allTabs;
+  // Paridad con la config del proyecto: ocultar pestañas de módulos APAGADOS.
+  //  - actividades / equipos (maquinaria) → trazabilidad.
+  //  - sectores → geolocalización o llenado por sector.
+  //  - resto (ubicaciones, equipos_lab=calibración, planos, personalizar) = estándar.
+  const tabs = allTabs.filter(tb => {
+    if (!flags) return true; // mientras carga, no ocultamos (evita parpadeo de la pestaña default)
+    switch (tb.key) {
+      case 'actividades':
+      case 'equipos':
+        return isTraceabilityEnabled(flags);
+      case 'sectores':
+        return isGeolocationEnabled(flags) || !!flags.fill_by_sector;
+      default:
+        return true;
+    }
+  });
 
   return (
     <View style={styles.container}>
