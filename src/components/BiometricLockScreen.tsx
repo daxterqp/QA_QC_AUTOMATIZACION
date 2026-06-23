@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Image, ImageBackground, Animated, Pressable, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Image, ImageBackground, Animated, Pressable, TouchableOpacity, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useFonts, Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
@@ -10,6 +10,7 @@ import { Colors } from '../theme/colors';
 
 const FF_SEMI = 'Montserrat_600SemiBold';
 const FF_BOLD = 'Montserrat_700Bold';
+const { height: SCREEN_H } = Dimensions.get('window');
 
 /**
  * Pantalla de desbloqueo (huella/rostro) — MISMO formato que el intro
@@ -55,7 +56,7 @@ export default function BiometricLockScreen() {
       </View>
 
       <WaterRipples>
-        <Pressable style={styles.center} onPress={tryUnlock}>
+        <Pressable style={[styles.center, { paddingTop: insets.top + SCREEN_H * 0.21 }]} onPress={tryUnlock}>
           <Image source={require('../../assets/logo-login.png')} style={styles.logo} resizeMode="contain" />
           {!!currentUser?.name && (
             <Text style={[styles.hello, fontsLoaded && { fontFamily: FF_BOLD }]}>Hola, {currentUser.name}</Text>
@@ -77,8 +78,8 @@ export default function BiometricLockScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.navy },
   flex: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  logo: { width: 320, height: 200 },
+  center: { flex: 1, alignItems: 'center', gap: 12 },
+  logo: { width: 580, height: 355 },   // = tamaño mostrado del logo del intro (408×250 a escala 1.42)
   hello: { color: Colors.white, fontSize: 17, fontWeight: '700' },
   hint: {
     position: 'absolute', bottom: 110, left: 0, right: 0, textAlign: 'center',

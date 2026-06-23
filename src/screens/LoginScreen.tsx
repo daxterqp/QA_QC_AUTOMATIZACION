@@ -186,7 +186,7 @@ export default function LoginScreen() {
     Alert.alert(t('login.signupErrorTitle'), t('login.signupErrorMsg'));
   };
 
-  const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.27, 0] });
+  const logoTranslateY = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_H * 0.18, 0] });
   const logoScale = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [1.42, 1] });
   const introOpacity = enterAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: 'clamp' });
   const cardOpacity = enterAnim.interpolate({ inputRange: [0.35, 1], outputRange: [0, 1], extrapolate: 'clamp' });
