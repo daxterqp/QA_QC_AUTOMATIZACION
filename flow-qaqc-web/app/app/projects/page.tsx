@@ -13,7 +13,7 @@ import { useAuth } from '@lib/auth-context';
 import { cn, formatDate } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 import { ProjectConfigModal } from '@components/project/ProjectConfigModal';
-import { ImportProjectButton, DeleteProjectButton } from '@components/project/ProjectBackupActions';
+import { ImportProjectButton, DeleteProjectSection } from '@components/project/ProjectBackupActions';
 import type { Project } from '@/types';
 
 export default function ProjectsPage() {
@@ -300,9 +300,8 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
 
         {/* v40 — Configurar módulos: ícono al costado de Contactos. EXCLUSIVO del
             rol CREATOR (ni el Jefe lo ve). Antes vivía dentro de "Cargar archivos". */}
+        {/* Configurar módulos (incluye, como última opción, Eliminar proyecto). SOLO CREATOR. */}
         {isCreator && <ProjectConfigButton project={project} />}
-        {/* Eliminar proyecto de raíz (con respaldo) — SOLO CREATOR. */}
-        {isCreator && <DeleteProjectButton project={project} />}
       </div>
     </div>
   );
@@ -331,6 +330,7 @@ function ProjectConfigButton({ project }: { project: Project }) {
           initialSampleIdentifier={(project as { sample_identifier?: string | null }).sample_identifier ?? null}
           title={t('webMisc.configureModulesTitle', { name: project.name })}
           confirmLabel={t('webMisc.saveConfig')}
+          dangerZone={<DeleteProjectSection project={project} />}
           onConfirm={async (newFlags, mapTileUrl, sampleIdentifier) => {
             try {
               await updateFlags.mutateAsync({ flags: newFlags, mapTileUrl, sampleIdentifier } as any);

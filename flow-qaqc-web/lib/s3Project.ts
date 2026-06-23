@@ -92,6 +92,24 @@ export async function listProjectS3Keys(projectName: string, projectId: string):
   return Array.from(all);
 }
 
+/** Como listProjectS3Keys pero con el TAMAÑO de cada objeto (para el export
+ *  caché-primero: el tamaño se compara con el del archivo local). Dedupe por key. */
+export async function listProjectS3Objects(projectName: string, projectId: string): Promise<{ key: string; size: number }[]> {
+  const seen = new Map<string, number>();
+  for (const prefix of projectS3Prefixes(projectName, projectId)) {
+    let token: string | undefined;
+    do {
+      const resp = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix, ContinuationToken: token }));
+      for (const o of resp.Contents ?? []) {
+        if (!o.Key || isProtectedKey(o.Key) || seen.has(o.Key)) continue;
+        seen.set(o.Key, o.Size ?? 0);
+      }
+      token = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (token);
+  }
+  return Array.from(seen, ([key, size]) => ({ key, size }));
+}
+
 /** Descarga los bytes de un objeto. */
 export async function getObjectBytes(key: string): Promise<Uint8Array> {
   const resp = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));

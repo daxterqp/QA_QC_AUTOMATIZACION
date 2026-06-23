@@ -33,6 +33,9 @@ interface Props {
   onCancel: () => void;
   confirmLabel?: string;
   title?: string;
+  /** Sección opcional renderizada como ÚLTIMA opción (p.ej. "Zona de peligro" /
+   *  eliminar proyecto). Solo se pasa al editar un proyecto existente. */
+  dangerZone?: React.ReactNode;
 }
 
 export function ProjectConfigModal({
@@ -43,6 +46,7 @@ export function ProjectConfigModal({
   onCancel,
   confirmLabel,
   title,
+  dangerZone,
 }: Props) {
   const { t } = useI18n();
   const resolvedConfirmLabel = confirmLabel ?? t('webCMisc.cfg.confirmLabel');
@@ -313,6 +317,9 @@ export function ProjectConfigModal({
               </div>
             </div>
           </Section>
+
+          {/* ── Última opción: Zona de peligro (eliminar proyecto), si se pasa ── */}
+          {dangerZone}
         </div>
 
         {/* Footer (sticky abajo para que "Guardar" siempre quede a la vista). */}

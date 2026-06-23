@@ -92,8 +92,36 @@ export function DeleteProjectButton({ project }: { project: Project }) {
   );
 }
 
+// ── Eliminar proyecto — sección "Zona de peligro" (dentro de Configuración) ───
+// Misma lógica/modal que DeleteProjectButton, pero presentada como botón ancho
+// para vivir como ÚLTIMA opción de la configuración del proyecto (solo CREATOR).
+export function DeleteProjectSection({ project }: { project: Project }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-2 border-danger/30 rounded-md overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-danger/5 border-b border-danger/20">
+        <AlertTriangle size={14} className="text-danger" />
+        <span className="text-[11px] font-extrabold tracking-wider uppercase text-danger">Zona de peligro</span>
+      </div>
+      <div className="px-3 py-3 flex flex-col gap-2">
+        <p className="text-[11px] text-textSecondary leading-snug">
+          Elimina el proyecto <b>de raíz</b> (base + archivos). Antes se guarda un respaldo .zip
+          restaurable. Acción exclusiva del Creador e irreversible salvo por el respaldo.
+        </p>
+        <button
+          onClick={() => setOpen(true)}
+          className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-white border border-danger text-danger hover:bg-danger hover:text-white transition"
+        >
+          <Trash2 size={14} /> Eliminar proyecto de raíz
+        </button>
+      </div>
+      {open && <DeleteProjectModal project={project} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 type Impact = { projectName: string; counts: Record<string, number>; s3: { count: number; bytes: number } };
-type DeleteResult = { zipPath: string; fileName: string; zipBytes: number; counts: Record<string, number>; s3FileCount: number; s3Deleted: number };
+type DeleteResult = { zipPath: string; fileName: string; zipBytes: number; counts: Record<string, number>; s3FileCount: number; s3Deleted: number; filesFromCache: number; filesFromS3: number };
 
 const COUNT_LABELS: Record<string, string> = {
   protocols: 'Ensayos', protocol_templates: 'Plantillas', plans: 'Planos', equipment: 'Equipos',
@@ -161,6 +189,9 @@ function DeleteProjectModal({ project, onClose }: { project: Project; onClose: (
               <p>✓ Respaldo guardado en:</p>
               <code className="text-[12px] bg-white border border-border rounded px-2 py-1 break-all">{done.zipPath}</code>
               <p className="mt-1">✓ {fmtMB(done.zipBytes)} · {done.s3Deleted} archivo(s) S3 borrados.</p>
+              {(done.filesFromCache + done.filesFromS3) > 0 && (
+                <p className="text-[12px] text-muted">Respaldo armado: {done.filesFromCache} desde caché local · {done.filesFromS3} bajados de S3.</p>
+              )}
             </div>
             <div className="flex justify-between gap-2">
               <a href={`/api/projects/download-export?file=${encodeURIComponent(done.fileName)}`}

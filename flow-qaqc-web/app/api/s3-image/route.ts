@@ -3,37 +3,13 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import { getServerUser } from '@lib/serverAuth';
+import { s3KeyToLocalPath } from '@lib/localCache';
 import { keyBelongsToAccessibleProject } from '../s3-shared/projectAccess';
 
 const REGION     = process.env.NEXT_PUBLIC_AWS_REGION!;
 const BUCKET     = process.env.NEXT_PUBLIC_AWS_BUCKET!;
 const ACCESS_KEY = process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID!;
 const SECRET_KEY = process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY!;
-const LOCAL_BASE = process.env.LOCAL_PHOTO_CACHE ?? 'D:\\Flow-QAQC';
-
-/** ¿La key tiene byte nulo o caracteres de control (U+0000–U+001F)?
- *  Esos caracteres romperían fs.existsSync con un 500; hay que rechazarlos. */
-function hasControlChars(s: string): boolean {
-  for (let i = 0; i < s.length; i++) {
-    if (s.charCodeAt(i) < 0x20) return true;
-  }
-  return false;
-}
-
-/**
- * Mapea s3Key→ruta local. Devuelve null si la key es inválida (path traversal):
- * contiene `..`, tiene byte nulo o caracteres de control, o tras resolver
- * escapa del directorio base LOCAL_BASE.
- */
-function s3KeyToLocalPath(s3Key: string): string | null {
-  if (s3Key.includes('..')) return null;
-  if (hasControlChars(s3Key)) return null;
-  const relative = s3Key.startsWith('projects/') ? s3Key.slice('projects/'.length) : s3Key;
-  const resolved = path.resolve(LOCAL_BASE, ...relative.split('/'));
-  const base = path.resolve(LOCAL_BASE);
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) return null;
-  return resolved;
-}
 
 function getS3Client() {
   return new S3Client({

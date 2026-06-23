@@ -13,7 +13,8 @@
  * CREATOR puede leer/insertar todo por RLS (can_access_project corta para creator).
  */
 import JSZip from 'jszip';
-import { listProjectS3Keys, getObjectBytes, putObjectBytes, contentTypeForKey } from '@lib/s3Project';
+import { listProjectS3Objects, getObjectBytes, putObjectBytes, contentTypeForKey } from '@lib/s3Project';
+import { readLocalIfFresh, writeLocalCache } from '@lib/localCache';
 
 type Supa = any; // SupabaseClient (SSR) — dinámico, evitamos fricción de tipos.
 type Rows = Record<string, any[]>;
@@ -122,13 +123,42 @@ export interface BackupManifest {
   schema: 'project-backup-v1';
   counts: Record<string, number>;
   s3FileCount: number;
+  /** Cuántos archivos salieron del caché local vs hubo que bajar de S3. */
+  filesFromCache?: number;
+  filesFromS3?: number;
 }
 export interface BuiltZip { buffer: Buffer; manifest: BackupManifest; failedFiles: number; }
 
-/** Arma el .zip de respaldo (base + archivos S3). */
+/** Arma el .zip de respaldo (base + archivos S3).
+ *  CACHÉ-PRIMERO: por cada archivo, si está en el caché local (D:\Flow-QAQC) y su
+ *  tamaño coincide con S3 → se lee del disco (sin egress); si no, se baja de S3 y
+ *  se deja en el caché (write-through). Si un archivo no se obtiene por NINGUNA
+ *  vía, se cuenta como fallo y el llamador DEBE abortar el borrado. */
 export async function buildProjectZip(supabase: Supa, project: { id: string; name: string }, exportedAt: string): Promise<BuiltZip> {
   const rows = await collectProjectRows(supabase, project.id);
-  const s3Keys = await listProjectS3Keys(project.name, project.id);
+  const objects = await listProjectS3Objects(project.name, project.id);
+
+  const zip = new JSZip();
+
+  let failedFiles = 0, filesFromCache = 0, filesFromS3 = 0;
+  for (const { key, size } of objects) {
+    // 1) caché local si el tamaño coincide (integridad); 2) si no, S3 + write-through.
+    let bytes = readLocalIfFresh(key, size);
+    if (bytes) {
+      filesFromCache++;
+    } else {
+      try {
+        bytes = await getObjectBytes(key);
+        filesFromS3++;
+        await writeLocalCache(key, bytes); // abarata futuros exports
+      } catch (e) {
+        failedFiles++;
+        console.warn('[projectBackup] no se pudo obtener', key, e);
+        continue;
+      }
+    }
+    zip.file(`files/${key}`, bytes);
+  }
 
   const manifest: BackupManifest = {
     projectId: project.id,
@@ -137,24 +167,13 @@ export async function buildProjectZip(supabase: Supa, project: { id: string; nam
     appNote: 'Flow-QA/QC — respaldo de proyecto (base + archivos S3). Restaurable con "Importar proyecto".',
     schema: 'project-backup-v1',
     counts: rowCounts(rows),
-    s3FileCount: s3Keys.length,
+    s3FileCount: objects.length,
+    filesFromCache,
+    filesFromS3,
   };
-
-  const zip = new JSZip();
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
   zip.file('project.json', JSON.stringify({ rows }));
-  // Descarga cada archivo S3 al .zip. Si ALGUNO falla, lo contamos: el llamador
-  // DEBE abortar el borrado (no perder fotos por un respaldo incompleto).
-  let failedFiles = 0;
-  for (const key of s3Keys) {
-    try {
-      const bytes = await getObjectBytes(key);
-      zip.file(`files/${key}`, bytes);
-    } catch (e) {
-      failedFiles++;
-      console.warn('[projectBackup] no se pudo descargar', key, e);
-    }
-  }
+
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   return { buffer, manifest, failedFiles };
 }

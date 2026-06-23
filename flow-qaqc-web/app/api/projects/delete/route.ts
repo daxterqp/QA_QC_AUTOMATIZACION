@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true, zipPath, fileName, zipBytes: buffer.length,
       counts: manifest.counts, s3FileCount: manifest.s3FileCount, s3Deleted,
+      filesFromCache: manifest.filesFromCache ?? 0, filesFromS3: manifest.filesFromS3 ?? 0,
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
