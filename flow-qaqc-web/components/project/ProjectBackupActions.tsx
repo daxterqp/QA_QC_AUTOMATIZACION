@@ -56,7 +56,7 @@ export function ImportProjectButton() {
         title="Importar/restaurar un proyecto desde su respaldo (.zip)"
       >
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-        Importar
+        Importar proyecto
         <input type="file" accept=".zip,application/zip" className="hidden" onChange={onFile} disabled={busy} />
       </label>
       {result && (

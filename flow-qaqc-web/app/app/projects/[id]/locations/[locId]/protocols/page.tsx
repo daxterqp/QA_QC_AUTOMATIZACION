@@ -13,16 +13,18 @@ import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 import type { ProtocolStatus } from '@/types';
 
+// Paridad EXACTA con el móvil (EnsayosScreen): mismo hue + tinte ~10%.
 const STATUS_COLORS: Record<ProtocolStatus, string> = {
-  DRAFT:       'bg-[#d4dde8] text-[#4a5568]',
-  IN_PROGRESS: 'bg-warning/20 text-warning',
-  SUBMITTED:   'bg-primary/20 text-primary',
-  APPROVED:    'bg-success/20 text-success',
-  REJECTED:    'bg-danger/20 text-danger',
+  DRAFT:       'bg-warning/10 text-warning',
+  IN_PROGRESS: 'bg-warning/10 text-warning',
+  SUBMITTED:   'bg-primary/10 text-primary',
+  APPROVED:    'bg-success/10 text-success',
+  REJECTED:    'bg-danger/10 text-danger',
 };
 
 const STATUS_LABEL_KEYS: Record<ProtocolStatus, string> = {
-  DRAFT:       'webMisc.statusDraft',
+  // DRAFT rotula "En progreso" (paridad con móvil), no "Sin iniciar".
+  DRAFT:       'webMisc.statusInProgress',
   IN_PROGRESS: 'webMisc.statusInProgress',
   SUBMITTED:   'webMisc.statusSubmitted',
   APPROVED:    'webMisc.statusApproved',

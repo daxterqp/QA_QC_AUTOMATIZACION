@@ -28,16 +28,19 @@ import { useEnsayosData, useCreateEnsayos, type EnsayosMode } from '@hooks/useEn
 import { todayEnsayoDate, parseEnsayoDate } from '@lib/protocolCode';
 import type { Protocol, ProtocolStatus } from '@/types';
 
+// Paridad EXACTA con el móvil (EnsayosScreen): mismo hue + tinte ~10% (móvil usa color+'18').
+// DRAFT se ve igual que IN_PROGRESS (warning) porque ambos rotulan "En progreso".
 const STATUS_COLORS: Record<ProtocolStatus, string> = {
-  DRAFT:       'bg-[#d4dde8] text-[#4a5568]',
-  IN_PROGRESS: 'bg-warning/20 text-warning',
-  SUBMITTED:   'bg-primary/20 text-primary',
-  APPROVED:    'bg-success/20 text-success',
-  REJECTED:    'bg-danger/20 text-danger',
+  DRAFT:       'bg-warning/10 text-warning',
+  IN_PROGRESS: 'bg-warning/10 text-warning',
+  SUBMITTED:   'bg-primary/10 text-primary',
+  APPROVED:    'bg-success/10 text-success',
+  REJECTED:    'bg-danger/10 text-danger',
 };
 
 const STATUS_LABELS: Record<ProtocolStatus, string> = {
-  DRAFT:       'webEnsayos.list.statusDraft',
+  // DRAFT rotula "En progreso" (igual que el móvil: DRAFT→inProgress), no "Sin iniciar".
+  DRAFT:       'webEnsayos.list.statusInProgress',
   IN_PROGRESS: 'webEnsayos.list.statusInProgress',
   SUBMITTED:   'webEnsayos.list.statusSubmitted',
   APPROVED:    'webEnsayos.list.statusApproved',
