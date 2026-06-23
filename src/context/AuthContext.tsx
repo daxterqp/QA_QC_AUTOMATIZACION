@@ -220,7 +220,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // require diferido: expo-web-browser es nativo; si el dev-client no se reconstruyó
       // todavía, la llamada nativa falla y cae al catch (NO rompe el arranque de la app).
       const WebBrowser = require('expo-web-browser');
-      const redirectTo = 'flow://login-callback'; // scheme `flow` (app.json) — registrar en Supabase URL Config
+      // Scheme registrado en el manifest nativo (intent-filter de MainActivity) = `com.vxp.scua`.
+      // OJO: NO usar `flow://` — ese scheme NO está en el build actual (no resuelve → el OAuth se cuelga).
+      // Debe estar en Supabase → Authentication → URL Configuration → Redirect URLs.
+      const redirectTo = 'com.vxp.scua://login-callback';
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo, skipBrowserRedirect: true },
