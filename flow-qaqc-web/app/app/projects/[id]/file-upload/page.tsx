@@ -970,7 +970,20 @@ export default function FileUploadPage() {
   // el flag `historical_import` gatea solo las secciones de IMPORTACIÓN dentro.
   const visibleTabs = TABS.filter(tab => {
     if (!flags) return tab.id === 'actividades' || tab.id === 'ubicaciones' || tab.id === 'configuracion';
-    return true;
+    // Paridad con la config del proyecto: ocultar pestañas de módulos APAGADOS.
+    //  - actividades/equipos (maquinaria) = trazabilidad (tareo).
+    //  - sectores = geolocalización o llenado por sector.
+    //  - el resto (ubicaciones, equipos_lab=calibración, planos, dwg, normas, historicos,
+    //    configuracion) es estándar y siempre visible.
+    switch (tab.id) {
+      case 'actividades':
+      case 'equipos':
+        return !!flags.traceability_module;
+      case 'sectores':
+        return !!flags.map_enabled || !!flags.fill_by_sector;
+      default:
+        return true;
+    }
   });
 
   // Si la tab actual ya no es visible (porque se desactivó), saltar a actividades.
