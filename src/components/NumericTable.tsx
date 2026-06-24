@@ -163,21 +163,65 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
   // v47 — ref-guardada → código a mostrar (las celdas guardan el ID permanente; el
   // código es solo el nombre → renumerar no rompe la referencia).
   const [xrefDisplay, setXrefDisplay] = useState<Record<string, string>>({});
+  // v47 — AGRUPAMIENTO EN VIVO: una celda multi-select puede guardar un marcador
+  // `@g:<presetId>` en vez de ids fijos. El marcador se re-resuelve POR FECHA cada vez
+  // (si un ensayo se borra, la regla trae otro) → el grupo siempre está vigente. Las
+  // excepciones/añadidos manuales del preset van por id (renumber-safe).
+  const [markerIds, setMarkerIds] = useState<Record<string, string[]>>({});
+  const markerNames = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of (groupingPresets ?? [])) m[`@g:${p.id}`] = p.name || 'Grupo';
+    return m;
+  }, [groupingPresets]);
+  // Firma de los marcadores presentes en las celdas (committed) → dispara re-resolución.
+  const markerSig = useMemo(() => {
+    if (frozen) return '';
+    const found = new Set<string>();
+    for (const it of items) {
+      const mm = (it.comments ?? '').match(/@g:[A-Za-z0-9_-]+/g);
+      if (mm) for (const mk of mm) found.add(mk);
+    }
+    return Array.from(found).sort().join('|');
+  }, [frozen, items]);
+  useEffect(() => {
+    if (!groupingContext || markerSig === '') { setMarkerIds({}); return; }
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, string[]> = {};
+      for (const mk of markerSig.split('|').filter(Boolean)) {
+        const preset = (groupingPresets ?? []).find(p => `@g:${p.id}` === mk);
+        out[mk] = preset ? await resolvePreset(preset, groupingContext, Date.now()).catch(() => []) : [];
+      }
+      if (!cancelled) setMarkerIds(out);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markerSig, groupingContext]);
+  // Expande marcadores `@g:X` de un valor de celda a su lista de IDS vigente (identidad si no hay marcador).
+  const expandRaw = useCallback((raw: string): string => {
+    if (!raw || raw.indexOf('@g:') < 0) return raw;
+    const out: string[] = [];
+    for (const tok of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+      if (tok.startsWith('@g:')) { for (const id of (markerIds[tok] ?? [])) out.push(id); }
+      else out.push(tok);
+    }
+    return out.join(',');
+  }, [markerIds]);
   // Firma ESTABLE del conjunto de llamados: solo cambia si cambian las fórmulas
   // (no en cada tecleo/commit, que crea un nuevo array `items`). Evita re-consultar
   // la base en cada edición de celda.
   // v45 — incluye `comments`: el scan también detecta el código elegido en celdas
   // `xref`, así la firma cambia (y se re-resuelve) al confirmar un código nuevo.
   const xrefSig = useMemo(
-    () => (frozen ? '' : scanXrefs(items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item }))).map(r => `${r.code}.${r.key}`).sort().join('|')),
-    [frozen, items],
+    () => (frozen ? '' : scanXrefs(items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })), expandRaw).map(r => `${r.code}.${r.key}`).sort().join('|')),
+    [frozen, items, expandRaw],
   );
   useEffect(() => {
     if (!projectId || xrefSig === '') { setXrefValues({}); setXrefDisplay({}); return; }
     let cancelled = false;
     // `items` (closure) solo se usa para re-escanear refs (== xrefSig); los valores
     // vienen de la base, así que una referencia "vieja" de items no afecta.
-    resolveXrefs(projectId, items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })))
+    resolveXrefs(projectId, items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })), expandRaw)
       .then(r => { if (!cancelled) { setXrefValues(r.values); setXrefDisplay(r.displayByRef); } })
       .catch(() => { if (!cancelled) { setXrefValues({}); setXrefDisplay({}); } });
     return () => { cancelled = true; };
@@ -311,7 +355,7 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
           // v45 — llamada a otra ficha. select/self: el `raw` guarda el CÓDIGO elegido.
           // get: el código se toma de la celda selectora (sourceRef) en resolveScopeCells;
           // `op` define la operación (agg/pick/interp).
-          cells.push({ key, kind: 'xref', targetKey: cell.targetKey, sourceRef: cell.sourceRef, op: cell.op, raw: localValues[localKey] ?? cellVals[i] ?? '' });
+          cells.push({ key, kind: 'xref', targetKey: cell.targetKey, sourceRef: cell.sourceRef, op: cell.op, raw: expandRaw(localValues[localKey] ?? cellVals[i] ?? '') });
         } else if (cell.kind === 'val') {
           // Literal de solo-lectura: lo exponemos como 'manual' fijo para que
           // las fórmulas que referencien esta celda (#1A, etc.) lo resuelvan.
@@ -320,7 +364,7 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
       }
     }
     return resolveScopeCells(cells, matrices, xrefValues, auxTables);
-  }, [frozen, mainRows, localValues, matrices, auxTables, xrefValues]);
+  }, [frozen, mainRows, localValues, matrices, auxTables, xrefValues, expandRaw]);
 
   const formulaRefsByKey = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -969,7 +1013,7 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
                         return (
                           <View style={{ alignItems: 'center' }}>
                             {codes.map((cd, k) => (
-                              <Text key={k} style={[styles.computedText, dynFont, { color: Colors.primary, fontWeight: '700', fontSize: 8.5, lineHeight: 12 }]} numberOfLines={2}>{xrefDisplay[cd] ?? cd}</Text>
+                              <Text key={k} style={[styles.computedText, dynFont, { color: Colors.primary, fontWeight: '700', fontSize: 8.5, lineHeight: 12 }]} numberOfLines={2}>{markerNames[cd] ? `▦ ${markerNames[cd]} (${(markerIds[cd] ?? []).length})` : (xrefDisplay[cd] ?? cd)}</Text>
                             ))}
                             {cell.mode === 'self' ? (
                               <Text style={[styles.computedText, dynFont, { color: err ? Colors.danger : v != null ? Colors.success : Colors.textSecondary, fontWeight: '700', fontSize: 10, marginTop: 1 }]} numberOfLines={1}>
@@ -1126,22 +1170,21 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
                     <TouchableOpacity
                       key={preset.id}
                       style={{ borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#eef2fa' }}
-                      onPress={async () => {
+                      onPress={() => {
                         const ctxPicker = xrefPicker;
                         if (!ctxPicker) return;
-                        try {
-                          const codes = await resolvePreset(preset, groupingContext, Date.now());
-                          // UNIÓN con lo ya marcado (los presets son aditivos, '＋'); y commit
-                          // EXPLÍCITO dentro del updater → persiste aunque cierren el modal antes
-                          // de que resuelva el preset (evita la carrera tap→Listo).
-                          setLocalValues(prev => {
-                            const cur = (prev[ctxPicker.inputKey] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-                            const union = Array.from(new Set([...cur, ...codes]));
-                            const newVals = { ...prev, [ctxPicker.inputKey]: union.join(',') };
-                            commitRow(ctxPicker.itemId, ctxPicker.spec, newVals);
-                            return newVals;
-                          });
-                        } catch { /* preset no resolvió → no cambia la selección */ }
+                        // v47 — Guarda el MARCADOR `@g:<presetId>` (no los ids resueltos): la regla
+                        // queda VIVA y se re-evalúa por fecha en cada apertura/cálculo (si un ensayo
+                        // se borra, trae otro). Aditivo con la selección manual ('＋'). Commit
+                        // explícito dentro del updater (persiste aunque cierren el modal).
+                        const marker = `@g:${preset.id}`;
+                        setLocalValues(prev => {
+                          const cur = (prev[ctxPicker.inputKey] ?? '').split(',').map(s => s.trim()).filter(Boolean);
+                          const union = cur.includes(marker) ? cur : [...cur, marker];
+                          const newVals = { ...prev, [ctxPicker.inputKey]: union.join(',') };
+                          commitRow(ctxPicker.itemId, ctxPicker.spec, newVals);
+                          return newVals;
+                        });
                       }}
                     >
                       <Text style={{ fontSize: 11, fontWeight: '700', color: Colors.primary }}>＋ {preset.name}</Text>

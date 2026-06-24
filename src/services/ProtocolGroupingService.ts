@@ -10,6 +10,7 @@ import { Q } from '@nozbe/watermelondb';
 import { protocolsCollection, protocolTemplatesCollection, samplesCollection, projectSectorsCollection } from '@db/index';
 import { readCellValue } from '@services/XrefResolver';
 import { clauseMatches, clauseCellKey } from '@utils/groupingFilters';
+import { parseNumericRow, splitRowComments, joinRowComments } from '@utils/numericProtocol';
 import type { GroupingPreset } from '@utils/featureFlags';
 
 /** Contexto del ensayo que está abriendo el selector (para criterios relativos). */
@@ -147,4 +148,56 @@ export async function resolvePreset(preset: GroupingPreset, ctx: GroupingContext
     for (const p of addRows) if (!have.has(p.id)) out.push(p.id);
   }
   return out;
+}
+
+const MARKER_RE = /@g:[A-Za-z0-9_-]+/g;
+
+/**
+ * v47 — Construye un EXPANSOR síncrono de marcadores de grupo `@g:<presetId>` → lista
+ * de IDS vigente. Pre-resuelve (async) solo los presets realmente presentes en `comments`
+ * usando la regla EN VIVO (por fecha). El expansor resultante es síncrono → se puede usar
+ * dentro de `scanXrefs`/`resolveScopeCells`. Identidad si no hay marcadores.
+ */
+export async function buildMarkerExpander(
+  presets: GroupingPreset[] | undefined,
+  ctx: GroupingContext,
+  commentsList: (string | null | undefined)[],
+  todayMs: number,
+): Promise<(raw: string) => string> {
+  const found = new Set<string>();
+  for (const cs of commentsList) { const mm = (cs ?? '').match(MARKER_RE); if (mm) mm.forEach(m => found.add(m)); }
+  if (found.size === 0) return (s) => s;
+  const map: Record<string, string[]> = {};
+  for (const mk of found) {
+    const preset = (presets ?? []).find(p => `@g:${p.id}` === mk);
+    map[mk] = preset ? await resolvePreset(preset, ctx, todayMs).catch(() => []) : [];
+  }
+  return (raw: string) => {
+    if (!raw || raw.indexOf('@g:') < 0) return raw;
+    const acc: string[] = [];
+    for (const tok of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+      if (tok.startsWith('@g:')) { for (const id of (map[tok] ?? [])) acc.push(id); }
+      else acc.push(tok);
+    }
+    return acc.join(',');
+  };
+}
+
+/**
+ * v47 — HORNEA los marcadores de grupo de las celdas selectoras (select/self) de una fila,
+ * reemplazándolos por la lista de IDS concreta (vía `expand`). Se usa al CONGELAR (enviar):
+ * el grupo del ensayo aprobado queda FIJO (auditable), mientras que en borrador sigue vivo.
+ */
+export function bakeMarkersInComments(validationMethod: string | null, comments: string | null, expand: (raw: string) => string): string | null {
+  if (!comments || comments.indexOf('@g:') < 0) return comments;
+  const row = parseNumericRow(validationMethod);
+  if (row?.kind !== 'row') return comments;
+  const vals = splitRowComments(comments, row.cells.length);
+  let changed = false;
+  row.cells.forEach((c, idx) => {
+    if (c.kind === 'xref' && ((c as { mode?: string }).mode === 'select' || (c as { mode?: string }).mode === 'self') && (vals[idx] ?? '').indexOf('@g:') >= 0) {
+      vals[idx] = expand(vals[idx] ?? ''); changed = true;
+    }
+  });
+  return changed ? joinRowComments(vals) : comments;
 }

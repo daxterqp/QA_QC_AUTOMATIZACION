@@ -83,7 +83,7 @@ export function compareXrefMeta(stored: Record<string, XrefMeta> | null | undefi
  *  (a) las declaradas en fórmulas `numerico-fx[...]` (estáticas, v26), y
  *  (b) v45 — las de celdas `xref`: `self` (código propio), `get` (código tomado de
  *      su celda selectora), y `select` (solo guarda el código; no emite ref). */
-export function scanXrefs(items: ScanItem[]): { code: string; key: string }[] {
+export function scanXrefs(items: ScanItem[], expand: (raw: string) => string = (s) => s): { code: string; key: string }[] {
   const seen = new Set<string>();
   const out: { code: string; key: string }[] = [];
   const add = (code: string, key: string) => {
@@ -93,7 +93,8 @@ export function scanXrefs(items: ScanItem[]): { code: string; key: string }[] {
   const vmOf = (it: ScanItem) => ((it.validationMethod ?? it.validation_method) ?? '').trim();
   const partidaOf = (it: ScanItem) => ((it.partidaItem ?? it.partida_item) ?? '').trim();
 
-  // Pass 1 — códigos de celdas SELECTORAS (select/self) por scope key.
+  // Pass 1 — valores de celdas SELECTORAS (select/self) por scope key. `expand` reemplaza
+  // marcadores de grupo `@g:<presetId>` por la lista de IDS resuelta EN VIVO (v47).
   const codeByKey: Record<string, string> = {};
   for (const it of items) {
     const m = vmOf(it);
@@ -104,7 +105,7 @@ export function scanXrefs(items: ScanItem[]): { code: string; key: string }[] {
     const vals = splitRowComments(it.comments, row.cells.length);
     row.cells.forEach((c, idx) => {
       if (c.kind === 'xref' && (c.mode === 'select' || c.mode === 'self')) {
-        const code = (vals[idx] ?? '').trim();
+        const code = expand((vals[idx] ?? '').trim());
         if (code) codeByKey[scopeKeyFor(partida, idx)] = code;
       }
     });
@@ -168,8 +169,8 @@ export async function readCellValue(sourceProtocolId: string, key: string): Prom
  * Resuelve todas las xrefs de un ensayo contra la base local.
  * @param projectId proyecto del ensayo que hace los llamados (scope de la búsqueda).
  */
-export async function resolveXrefs(projectId: string, items: ScanItem[]): Promise<XrefResolution> {
-  const refs = scanXrefs(items);
+export async function resolveXrefs(projectId: string, items: ScanItem[], expand: (raw: string) => string = (s) => s): Promise<XrefResolution> {
+  const refs = scanXrefs(items, expand);
   const values: XrefValues = {};
   const meta: Record<string, XrefMeta> = {};
   const displayByRef: Record<string, string> = {};

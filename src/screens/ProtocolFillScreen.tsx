@@ -35,6 +35,7 @@ import { pushProjectToSupabase, pushProtocolStatus, pushProtocolItem, pushPlansT
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { buildFrozenComments } from '@utils/freezeSnapshot';
 import { resolveXrefs } from '@services/XrefResolver';
+import { buildMarkerExpander, bakeMarkersInComments } from '@services/ProtocolGroupingService';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { SyncWorker } from '@services/SyncWorker';
@@ -633,10 +634,23 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       // v42 — Resolver los llamados entre ensayos `@código.celda` ANTES de congelar
       // (lee de la base local; degrada solo: pendiente/ambiguo → null, nunca lanza).
       // `meta` se guarda en xref_snapshot_json para el doble check + frescura.
+      // v47 — Grupo EN VIVO: HORNEAR los marcadores `@g:<presetId>` a ids concretos ANTES
+      // de congelar. En borrador la regla es viva (re-evalúa por fecha); al aprobar queda FIJA
+      // (auditable). El expansor pre-resuelve solo los presets presentes (regla por fecha).
+      const gpresets = (projectFlags?.grouping_presets && idProtocolo) ? projectFlags.grouping_presets[idProtocolo] : undefined;
+      const gctx = {
+        projectId: (protocol as any)?.projectId ?? '', tipoActual: idProtocolo,
+        sectorId: (protocol as any)?.sectorId ?? null, sampleId: (protocol as any)?.sampleId ?? null,
+        locationId: (protocol as any)?.locationId ?? null, ensayoDate: (protocol as any)?.ensayoDate ?? null,
+      };
+      const srcComments = (it: any) => itemState[(it as any).id]?.comments ?? it.comments ?? null;
+      const bakeExpand = await buildMarkerExpander(gpresets, gctx, items.map(srcComments), Date.now()).catch(() => ((s: string) => s));
+      const bakedComments = (it: any) => bakeMarkersInComments(it.validationMethod ?? null, srcComments(it), bakeExpand);
+
       let xrefVals: import('@utils/formulaEval').XrefValues = {};
       let xrefMeta: Record<string, unknown> = {};
       try {
-        const r = await resolveXrefs(protocol?.projectId ?? '', items.map((it: any) => ({ validationMethod: it.validationMethod ?? null, comments: it.comments ?? null, partidaItem: it.partidaItem ?? null })));
+        const r = await resolveXrefs(protocol?.projectId ?? '', items.map((it: any) => ({ validationMethod: it.validationMethod ?? null, comments: bakedComments(it), partidaItem: it.partidaItem ?? null })));
         xrefVals = r.values; xrefMeta = r.meta;
       } catch { /* sin xrefs */ }
 
@@ -655,7 +669,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
         // items sin estado, su comments de DB es la base.
         const frozen = buildFrozenComments(
           freshItems
-            .map((it: any) => ({ id: it.id, partidaItem: it.partidaItem ?? null, validationMethod: it.validationMethod ?? null, comments: itemState[it.id]?.comments ?? it.comments ?? null })),
+            .map((it: any) => ({ id: it.id, partidaItem: it.partidaItem ?? null, validationMethod: it.validationMethod ?? null, comments: bakedComments(it) })),
           auxTables,
           xrefVals,
         );
