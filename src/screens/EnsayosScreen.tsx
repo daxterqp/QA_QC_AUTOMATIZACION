@@ -58,6 +58,7 @@ import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
+import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Ensayos'>;
 
@@ -222,11 +223,17 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     }
   }, [projectId, mode]);
 
+  // Al enfocar la pantalla, bajar de la nube lo nuevo (ensayos creados en PC u otros
+  // equipos) y recargar local — así un ensayo de PC aparece sin re-abrir el proyecto.
+  const refreshFromCloud = useCallback(() => {
+    pullProjectFromCloud(projectId).catch(() => {}).finally(() => { loadData(); });
+  }, [projectId, loadData]);
+
   useEffect(() => {
-    loadData();
-    const unsubscribe = navigation.addListener('focus', loadData);
+    refreshFromCloud();
+    const unsubscribe = navigation.addListener('focus', refreshFromCloud);
     return unsubscribe;
-  }, [loadData, navigation]);
+  }, [refreshFromCloud, navigation]);
 
   useEffect(() => {
     const unsub = navigation.addListener('blur', () => {
