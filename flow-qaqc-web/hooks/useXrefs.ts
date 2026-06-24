@@ -53,7 +53,7 @@ function opMatchKeys(op: import('@lib/numericProtocol').XrefGetOp | undefined): 
  *  (b) v45 — las de celdas `xref`: `self` (código propio), `get` (código tomado de
  *      su celda selectora), y `select` (solo guarda el código; no emite ref).
  *  Devuelve el conjunto deduplicado. */
-export function scanXrefsInItems(items: ScanItem[]): XrefSpec[] {
+export function scanXrefsInItems(items: ScanItem[], expand: (raw: string) => string = (s) => s): XrefSpec[] {
   const seen = new Set<string>();
   const out: XrefSpec[] = [];
   const add = (externalId: string, key: string) => {
@@ -61,7 +61,8 @@ export function scanXrefsInItems(items: ScanItem[]): XrefSpec[] {
     if (!seen.has(k)) { seen.add(k); out.push({ externalId, key }); }
   };
 
-  // Pass 1 — códigos de celdas SELECTORAS (select/self) por scope key.
+  // Pass 1 — valores de celdas SELECTORAS (select/self) por scope key. `expand` reemplaza
+  // marcadores de grupo `@g:<presetId>` por la lista de IDS resuelta EN VIVO (v47).
   const codeByKey: Record<string, string> = {};
   for (const it of items) {
     const m = (it.validation_method ?? '').trim();
@@ -72,7 +73,7 @@ export function scanXrefsInItems(items: ScanItem[]): XrefSpec[] {
     const vals = splitRowComments(it.comments, row.cells.length);
     row.cells.forEach((c, idx) => {
       if (c.kind === 'xref' && (c.mode === 'select' || c.mode === 'self')) {
-        const code = (vals[idx] ?? '').trim();
+        const code = expand((vals[idx] ?? '').trim());
         if (code) codeByKey[scopeKeyFor(partida, idx)] = code;
       }
     });
@@ -143,8 +144,9 @@ function readCell(its: { partida_item: string | null; validation_method: string 
 export async function fetchXrefResolution(
   projectId: string,
   items: ScanItem[],
+  expand: (raw: string) => string = (s) => s,
 ): Promise<XrefResolution> {
-  const refs = scanXrefsInItems(items);
+  const refs = scanXrefsInItems(items, expand);
   if (refs.length === 0) return { values: {}, meta: {}, displayByRef: {} };
   // `token` = valor guardado en la celda: id permanente (v47) o correlativo (legacy/fórmulas).
   const tokens = Array.from(new Set(refs.map(x => x.externalId)));
@@ -242,8 +244,9 @@ export function compareXrefMeta(stored: Record<string, XrefMeta> | null | undefi
 export async function fetchXrefValues(
   projectId: string,
   items: ScanItem[],
+  expand: (raw: string) => string = (s) => s,
 ): Promise<XrefValues> {
-  const { values } = await fetchXrefResolution(projectId, items);
+  const { values } = await fetchXrefResolution(projectId, items, expand);
   return values;
 }
 

@@ -183,8 +183,10 @@ export function useDeleteEvidence(protocolId: string) {
  *  Se llama al ENVIAR/RE-ENVIAR. Best-effort: si falla, el submit continúa. */
 export async function freezeProtocolItems(protocolId: string): Promise<import('@lib/formulaEval').XrefValues> {
   try {
-    const { data: proto } = await supabase.from('protocols').select('project_id').eq('id', protocolId).single();
-    const projectId = (proto as { project_id?: string } | null)?.project_id;
+    const { data: proto } = await supabase.from('protocols')
+      .select('project_id, template_id, sector_id, sample_id, location_id, ensayo_date')
+      .eq('id', protocolId).single();
+    const projectId = (proto as any)?.project_id as string | undefined;
     const [{ data: items }, auxRes] = await Promise.all([
       supabase.from('protocol_items').select('id, partida_item, validation_method, comments').eq('protocol_id', protocolId),
       projectId
@@ -199,18 +201,44 @@ export async function freezeProtocolItems(protocolId: string): Promise<import('@
       };
     }
     const list = (items ?? []) as { id: string; partida_item: string | null; validation_method: string | null; comments: string | null }[];
+
+    // v47 — Grupo EN VIVO: HORNEAR los marcadores `@g:<presetId>` a ids concretos ANTES de
+    // congelar (en borrador la regla es viva; al aprobar queda FIJA/auditable). El expansor
+    // pre-resuelve solo los presets presentes (regla por fecha). ESPEJO del freeze móvil.
+    let bakedList = list;
+    if (projectId) {
+      try {
+        const [{ data: project }, { data: tpl }] = await Promise.all([
+          supabase.from('projects').select('feature_flags').eq('id', projectId).single(),
+          (proto as any)?.template_id
+            ? supabase.from('protocol_templates').select('id_protocolo').eq('id', (proto as any).template_id).single()
+            : Promise.resolve({ data: null as any }),
+        ]);
+        const tipo = (tpl as any)?.id_protocolo as string | undefined;
+        const presets = ((project?.feature_flags as any)?.grouping_presets?.[tipo ?? ''] ?? undefined) as import('@/types').GroupingPreset[] | undefined;
+        const { buildMarkerExpander, bakeMarkersInComments } = await import('@lib/protocolGrouping');
+        const gctx = {
+          projectId, tipoActual: tipo ?? null,
+          sectorId: (proto as any)?.sector_id ?? null, sampleId: (proto as any)?.sample_id ?? null,
+          locationId: (proto as any)?.location_id ?? null, ensayoDate: (proto as any)?.ensayo_date ?? null,
+        };
+        const expand = await buildMarkerExpander(presets, gctx, list.map(it => it.comments), Date.now());
+        bakedList = list.map(it => ({ ...it, comments: bakeMarkersInComments(it.validation_method, it.comments, expand) }));
+      } catch { /* sin grupos/flags → lista sin cambios */ }
+    }
+
     // v42 — Resolver los llamados entre ensayos `@código.celda` (degrada solo).
     let xrefVals: import('@lib/formulaEval').XrefValues = {};
     let xrefMeta: Record<string, unknown> = {};
     if (projectId) {
       try {
         const { fetchXrefResolution } = await import('@hooks/useXrefs');
-        const r = await fetchXrefResolution(projectId, list);
+        const r = await fetchXrefResolution(projectId, bakedList);
         xrefVals = r.values; xrefMeta = r.meta;
       } catch { /* sin xrefs */ }
     }
     const { buildFrozenComments } = await import('@lib/freezeSnapshot');
-    const frozen = buildFrozenComments(list, auxTables, xrefVals);
+    const frozen = buildFrozenComments(bakedList, auxTables, xrefVals);
     for (const it of list) {
       const next = frozen.get(it.id);
       if (next != null && next !== (it.comments ?? '')) {
