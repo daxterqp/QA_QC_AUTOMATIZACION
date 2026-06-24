@@ -33,6 +33,7 @@ import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import {
   buildProtocolCode, nextSeq, validateMask, todayEnsayoDate, parseEnsayoDate, pickMask, type SeqResetScope,
 } from '@utils/protocolCode';
+import { supabase } from '@config/supabase';
 
 export interface CreateInstancesArgs {
   projectId: string;
@@ -114,8 +115,22 @@ export async function createInstances(args: CreateInstancesArgs): Promise<Create
         .fetch().catch(() => [] as any[]);
       const usedCodes = [...existing.map((p: any) => p.protocolCode), ...recycled.map((r: any) => r.protocolCode)];
       const baseSeq = nextSeq(usedCodes, mask, tipo, date, args.sectorName ?? null, resetScope);
+      // v60 — HÍBRIDO: ONLINE la nube asigna el correlativo de forma ATÓMICA (cero colisión con
+      // la PC), reservando un bloque de `count`. OFFLINE/error → baseSeq local (el índice único
+      // protocols_code_uniq_per_project sigue de backstop). group_key respeta el ámbito de reinicio
+      // y coincide con la web en el caso default (`${tipo}|${año}`).
+      let startSeq = baseSeq;
+      try {
+        const sectorPart = resetScope.sector ? `|${(args.sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+        const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+        const groupKey = `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`;
+        const { data: cloudStart, error: seqErr } = await supabase.rpc('next_protocol_seq', {
+          p_project_id: args.projectId, p_group_key: groupKey, p_client_seq: baseSeq, p_count: count,
+        });
+        if (!seqErr && typeof cloudStart === 'number' && cloudStart > 0) startSeq = cloudStart;
+      } catch { /* sin red → baseSeq local */ }
       codes = Array.from({ length: count }, (_, i) =>
-        buildProtocolCode(mask, { tipo, date, seq: baseSeq + i, sector: args.sectorName ?? null }));
+        buildProtocolCode(mask, { tipo, date, seq: startSeq + i, sector: args.sectorName ?? null }));
     }
   } catch (e) {
     console.warn('[createInstances] codificación omitida:', e);
