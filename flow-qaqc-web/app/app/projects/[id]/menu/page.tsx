@@ -126,6 +126,15 @@ export default function ProjectMenuPage() {
       visible: !!flags && !!flags.fill_by_date,
     },
     {
+      key: 'ensayos-sample',
+      title: t('samples.title'),
+      subtitle: t('samples.menuSubtitle'),
+      href: `/app/projects/${projectId}/samples`,
+      icon: FlaskConical,
+      tone: 'primary',
+      visible: !!flags && !!flags.fill_by_sample,
+    },
+    {
       key: 'summary',
       title: t('webEnsayos.menu.summaryTitle'),
       subtitle: t('webEnsayos.menu.summarySubtitle'),

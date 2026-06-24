@@ -58,6 +58,10 @@ export interface ProjectFeatureFlags {
   coding_mask_by_type?: Record<string, string>;
   /** v46.1 — Ámbito de reinicio del correlativo: 'year' (def) | 'year_sector' | 'year_month'. */
   coding_seq_reset?: 'year' | 'year_sector' | 'year_month';
+  /** v43 — Filas activas del formulario de muestra (módulo "ensayos por muestra"). */
+  sample_form_rows?: { material?: boolean; condition?: boolean; depth?: boolean; coords?: boolean; layers?: boolean };
+  /** v43 — Catálogo editable de "tipo de material" para muestras. */
+  sample_materials?: string[];
 
   // ── v43 — Módulos opcionales del proyecto (visibilidad en el menú móvil) ──
   module_protocols_by_location: boolean;
@@ -102,6 +106,8 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   fill_by_type: false,
   fill_by_date: false,
   fill_by_sample: false,
+  sample_form_rows: { material: true, condition: true, depth: false, coords: true, layers: false },
+  sample_materials: [],
   protocol_codes: false,
   coding_mask_default: '{TIPO}-{AA}{SEQ:4}',
 
@@ -177,6 +183,8 @@ export interface Project {
   logo_s3_key: string | null;
   stamp_comment: string | null;
   feature_flags: ProjectFeatureFlags | null;
+  /** v46 — Identificador del proyecto para el código de muestras (ej. "123"). */
+  sample_identifier?: string | null;
   /** v26 — URL custom de tile server XYZ para ortofoto (opcional). */
   map_tile_url?: string | null;
   /** v33 — Ortofoto cargada como imagen (ImageOverlay en el mapa GIS). */
@@ -194,6 +202,36 @@ export interface Project {
   orthophoto_tiles_json?: OrthophotoTile[] | null;
   created_at: string;
   updated_at: string;
+}
+
+/** v43/v46 — Muestra física. Agrupa varios ensayos (protocols.sample_id = sample.id).
+ *  Código `M-{sample_identifier}-{ddmmyy}-{seq:4}`. Mapea 1:1 con la tabla `samples`. */
+export interface Sample {
+  id: string;
+  project_id: string;
+  sample_code: string;
+  seq: number | null;
+  sample_date: string | null;
+  location_id: string | null;
+  sector_id: string | null;
+  material_type: string | null;
+  condition: string | null;            // ALTERADA | INALTERADA
+  depth_from: number | null;
+  depth_to: number | null;
+  coord_system: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  coord_east: number | null;
+  coord_north: number | null;
+  coord_elevation: number | null;
+  coord_captured_at: number | null;
+  coord_accuracy_m: number | null;
+  layer_info_json: string | null;
+  notes: string | null;
+  created_by_id: string | null;
+  upload_status: string | null;
+  created_at: number | null;
+  updated_at: number | null;
 }
 
 /** v37 — Una tesela de ortofoto (porción georreferenciada). */
@@ -433,6 +471,8 @@ export interface Protocol {
   coord_backup_captured_at?: number | null;
   sector_id?: string | null;
   // v31 — modos de llenado + codificación correlativa (Partes D+E)
+  /** v43 — Muestra física vinculada (módulo "ensayos por muestra"). */
+  sample_id?: string | null;
   /** Código correlativo del ensayo (p.ej. PR-260032). Único por proyecto. */
   protocol_code?: string | null;
   /** Fecha del ENSAYO (YYYY-MM-DD) — agrupador del modo "por fecha". */

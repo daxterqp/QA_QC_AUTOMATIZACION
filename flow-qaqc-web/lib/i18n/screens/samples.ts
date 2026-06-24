@@ -5,6 +5,7 @@
 const samples: Record<string, { es: string; en: string; pt: string }> = {
   // Header
   'samples.title': { es: 'Ensayos por muestra', en: 'Tests by sample', pt: 'Ensaios por amostra' },
+  'samples.menuSubtitle': { es: 'Muestras físicas y sus ensayos asociados', en: 'Physical samples and their tests', pt: 'Amostras físicas e seus ensaios' },
 
   // Filtros
   'samples.filters': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },

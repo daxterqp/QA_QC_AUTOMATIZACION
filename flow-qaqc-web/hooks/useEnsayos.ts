@@ -72,6 +72,8 @@ export interface CreateEnsayosArgs {
   locationName?: string | null;
   sectorId?: string | null;
   sectorName?: string | null;
+  /** v43 — vincular los ensayos creados a una muestra física. */
+  sampleId?: string | null;
   /** YYYY-MM-DD. Default hoy. */
   ensayoDate?: string | null;
   /** v32 — HH:MM. Default: hora del sistema al guardar. */
@@ -183,6 +185,7 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
           status: 'DRAFT',
           sector_id: args.sectorId ?? null,
           ...(args.sectorId ? { sector_assigned_manually: true } : {}),
+          ...(args.sampleId ? { sample_id: args.sampleId } : {}),
           protocol_code: code,
           ensayo_date: ensayoDate,
           ensayo_time: args.ensayoTime
