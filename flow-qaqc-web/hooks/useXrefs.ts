@@ -28,8 +28,11 @@ export interface XrefMeta {
 }
 
 export interface XrefResolution {
-  values: XrefValues;               // { "code.key": number|null } para el motor
-  meta: Record<string, XrefMeta>;   // { "code.key": XrefMeta }
+  values: XrefValues;               // { "ref.key": number|null } (ref = id o código)
+  meta: Record<string, XrefMeta>;   // { "ref.key": XrefMeta }
+  /** v47 — ref-guardada → código a MOSTRAR (las que guardan el id permanente se
+   *  mapean a su código actual; las legacy por código, a sí mismas). */
+  displayByRef: Record<string, string>;
 }
 
 /** Items para el scan: `validation_method` + `comments` (código elegido en celdas
@@ -142,45 +145,43 @@ export async function fetchXrefResolution(
   items: ScanItem[],
 ): Promise<XrefResolution> {
   const refs = scanXrefsInItems(items);
-  if (refs.length === 0) return { values: {}, meta: {} };
-  const codes = Array.from(new Set(refs.map(x => x.externalId)));
+  if (refs.length === 0) return { values: {}, meta: {}, displayByRef: {} };
+  // `token` = valor guardado en la celda: id permanente (v47) o correlativo (legacy/fórmulas).
+  const tokens = Array.from(new Set(refs.map(x => x.externalId)));
 
-  const groups = new Map<string, { id: string; updated_at: number }[]>();
-  const push = (codeKey: string, p: { id: string; updated_at: number }) => {
-    if (!codeKey) return;
-    if (!groups.has(codeKey)) groups.set(codeKey, []);
-    groups.get(codeKey)!.push(p);
-  };
+  // Candidatos por id O protocol_code O external_id (3 .in() seguros, dedupe por id).
+  const sel = 'id, protocol_code, external_id, updated_at';
+  const base = () => supabase.from('protocols').select(sel).eq('project_id', projectId).eq('status', 'APPROVED');
+  const [r1, r2, r3] = await Promise.all([
+    base().in('id', tokens), base().in('protocol_code', tokens), base().in('external_id', tokens),
+  ]);
+  const all = new Map<string, any>();
+  for (const r of [r1, r2, r3]) for (const p of ((r.data ?? []) as any[])) all.set(p.id, p);
+  const candidates = Array.from(all.values());
 
-  // Primario: por protocol_code (el correlativo).
-  const { data: byCode } = await supabase
-    .from('protocols')
-    .select('id, protocol_code, external_id, updated_at')
-    .eq('project_id', projectId)
-    .eq('status', 'APPROVED')
-    .in('protocol_code', codes);
-  for (const p of (byCode ?? []) as any[]) push((p.protocol_code ?? '').trim(), { id: p.id, updated_at: p.updated_at ?? 0 });
+  const byId = new Map<string, any>(candidates.map(p => [p.id, p]));
+  const byCode = new Map<string, any[]>();
+  for (const p of candidates) { const c = (p.protocol_code ?? '').trim(); if (c) { if (!byCode.has(c)) byCode.set(c, []); byCode.get(c)!.push(p); } }
+  for (const p of candidates) { const e = (p.external_id ?? '').trim(); if (e && !byCode.has(e)) { byCode.set(e, []); byCode.get(e)!.push(p); } }
+  const codeOf = (p: any) => ((p.protocol_code ?? p.external_id ?? '') as string).trim();
 
-  // Fallback histórico: external_id para los correlativos sin match por código.
-  const unresolved = codes.filter(c => !groups.has(c));
-  if (unresolved.length > 0) {
-    const { data: byExt } = await supabase
-      .from('protocols')
-      .select('id, protocol_code, external_id, updated_at')
-      .eq('project_id', projectId)
-      .eq('status', 'APPROVED')
-      .in('external_id', unresolved);
-    for (const p of (byExt ?? []) as any[]) push((p.external_id ?? '').trim(), { id: p.id, updated_at: p.updated_at ?? 0 });
+  // Resolver fuente por token (id primero); recolectar ids resueltos sin ambigüedad.
+  const srcByToken = new Map<string, { src: any | null; status: XrefStatus }>();
+  const matchedIds = new Set<string>();
+  for (const tk of tokens) {
+    let src = byId.get(tk) ?? null;
+    let status: XrefStatus = 'ok';
+    if (!src) { const m = byCode.get(tk) ?? []; if (m.length === 1) src = m[0]; else status = m.length > 1 ? 'ambiguo' : 'pendiente'; }
+    if (src) matchedIds.add(src.id);
+    srcByToken.set(tk, { src, status });
   }
 
-  // Cargar items SOLO de las fuentes resueltas sin ambigüedad.
-  const matchedIds = Array.from(groups.values()).filter(g => g.length === 1).map(g => g[0].id);
   const itemsByProto = new Map<string, any[]>();
-  if (matchedIds.length > 0) {
+  if (matchedIds.size > 0) {
     const { data: refItems } = await supabase
       .from('protocol_items')
       .select('protocol_id, partida_item, validation_method, comments')
-      .in('protocol_id', matchedIds);
+      .in('protocol_id', Array.from(matchedIds));
     for (const it of (refItems ?? []) as any[]) {
       if (!itemsByProto.has(it.protocol_id)) itemsByProto.set(it.protocol_id, []);
       itemsByProto.get(it.protocol_id)!.push(it);
@@ -189,17 +190,22 @@ export async function fetchXrefResolution(
 
   const values: XrefValues = {};
   const meta: Record<string, XrefMeta> = {};
-  for (const { externalId: code, key } of refs) {
-    const fullKey = `${code}.${key}`;
-    const g = groups.get(code) ?? [];
-    if (g.length === 0) { meta[fullKey] = { code, key, status: 'pendiente', sourceId: null, sourceUpdatedAt: null, value: null }; values[fullKey] = null; continue; }
-    if (g.length > 1)  { meta[fullKey] = { code, key, status: 'ambiguo',   sourceId: null, sourceUpdatedAt: null, value: null }; values[fullKey] = null; continue; }
-    const src = g[0];
+  const displayByRef: Record<string, string> = {};
+  for (const { externalId: ref, key } of refs) {
+    const fullKey = `${ref}.${key}`;
+    const r = srcByToken.get(ref);
+    if (!r || !r.src) {
+      meta[fullKey] = { code: ref, key, status: (r?.status ?? 'pendiente'), sourceId: null, sourceUpdatedAt: null, value: null };
+      values[fullKey] = null; displayByRef[ref] = ref; continue;
+    }
+    const src = r.src;
+    const display = codeOf(src) || ref;
+    displayByRef[ref] = display;
     const value = readCell(itemsByProto.get(src.id) ?? [], key);
-    meta[fullKey] = { code, key, status: 'ok', sourceId: src.id, sourceUpdatedAt: src.updated_at ?? null, value };
+    meta[fullKey] = { code: display, key, status: 'ok', sourceId: src.id, sourceUpdatedAt: src.updated_at ?? null, value };
     values[fullKey] = value;
   }
-  return { values, meta };
+  return { values, meta, displayByRef };
 }
 
 export interface XrefStaleness { stale: boolean; reasons: string[]; }

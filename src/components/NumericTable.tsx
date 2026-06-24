@@ -160,6 +160,9 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
   // local (solo cuando NO está congelado; el modo frozen lee de comments). Degrada
   // solo: pendiente/ambiguo → null. No bloquea el render (resuelve async a estado).
   const [xrefValues, setXrefValues] = useState<XrefValues>({});
+  // v47 — ref-guardada → código a mostrar (las celdas guardan el ID permanente; el
+  // código es solo el nombre → renumerar no rompe la referencia).
+  const [xrefDisplay, setXrefDisplay] = useState<Record<string, string>>({});
   // Firma ESTABLE del conjunto de llamados: solo cambia si cambian las fórmulas
   // (no en cada tecleo/commit, que crea un nuevo array `items`). Evita re-consultar
   // la base en cada edición de celda.
@@ -170,13 +173,13 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
     [frozen, items],
   );
   useEffect(() => {
-    if (!projectId || xrefSig === '') { setXrefValues({}); return; }
+    if (!projectId || xrefSig === '') { setXrefValues({}); setXrefDisplay({}); return; }
     let cancelled = false;
     // `items` (closure) solo se usa para re-escanear refs (== xrefSig); los valores
     // vienen de la base, así que una referencia "vieja" de items no afecta.
     resolveXrefs(projectId, items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })))
-      .then(r => { if (!cancelled) setXrefValues(r.values); })
-      .catch(() => { if (!cancelled) setXrefValues({}); });
+      .then(r => { if (!cancelled) { setXrefValues(r.values); setXrefDisplay(r.displayByRef); } })
+      .catch(() => { if (!cancelled) { setXrefValues({}); setXrefDisplay({}); } });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, xrefSig]);
@@ -966,7 +969,7 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
                         return (
                           <View style={{ alignItems: 'center' }}>
                             {codes.map((cd, k) => (
-                              <Text key={k} style={[styles.computedText, dynFont, { color: Colors.primary, fontWeight: '700', fontSize: 8.5, lineHeight: 12 }]} numberOfLines={2}>{cd}</Text>
+                              <Text key={k} style={[styles.computedText, dynFont, { color: Colors.primary, fontWeight: '700', fontSize: 8.5, lineHeight: 12 }]} numberOfLines={2}>{xrefDisplay[cd] ?? cd}</Text>
                             ))}
                             {cell.mode === 'self' ? (
                               <Text style={[styles.computedText, dynFont, { color: err ? Colors.danger : v != null ? Colors.success : Colors.textSecondary, fontWeight: '700', fontSize: 10, marginTop: 1 }]} numberOfLines={1}>
@@ -1173,7 +1176,7 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => {
                 const curCodes = xrefPicker ? (localValues[xrefPicker.inputKey] ?? '').split(',').map(s => s.trim()).filter(Boolean) : [];
-                const selected = curCodes.includes(item.code);
+                const selected = curCodes.includes(item.code) || curCodes.includes(item.id);
                 return (
                   <TouchableOpacity
                     style={[styles.pickerOption, selected && styles.pickerOptionSelected]}
@@ -1188,9 +1191,10 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
                           return { ...prev, [xrefPicker.inputKey]: next.join(',') };
                         });
                       } else {
-                        // single: fija el código y cierra. Commit EXPLÍCITO con el valor
-                        // nuevo (setLocalValues es async → no sirve finishXrefPicker aquí).
-                        const newVals = { ...localValues, [xrefPicker.inputKey]: item.code };
+                        // single: guarda el ID PERMANENTE del ensayo (v47; el código es solo
+                        // el nombre, así renumerar no rompe la referencia) y cierra. Commit
+                        // EXPLÍCITO (setLocalValues es async → no sirve finishXrefPicker aquí).
+                        const newVals = { ...localValues, [xrefPicker.inputKey]: item.id };
                         setLocalValues(newVals);
                         commitRow(xrefPicker.itemId, xrefPicker.spec, newVals);
                         setXrefPicker(null); setXrefSearch('');

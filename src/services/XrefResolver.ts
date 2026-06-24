@@ -39,8 +39,13 @@ export interface XrefMeta {
 }
 
 export interface XrefResolution {
-  values: XrefValues;                  // { "code.key": number|null }
-  meta: Record<string, XrefMeta>;      // { "code.key": XrefMeta }
+  values: XrefValues;                  // { "ref.key": number|null }  (ref = id o código)
+  meta: Record<string, XrefMeta>;      // { "ref.key": XrefMeta }
+  /** v47 — Mapa ref-guardada → código a MOSTRAR. Para celdas que guardan el ID
+   *  permanente del ensayo, permite seguir mostrando el código (nombre) y que una
+   *  renumeración no rompa la referencia. Las refs guardadas por código se mapean a
+   *  sí mismas. */
+  displayByRef: Record<string, string>;
 }
 
 interface ScanItem { validationMethod?: string | null; validation_method?: string | null; comments?: string | null; partidaItem?: string | null; partida_item?: string | null }
@@ -167,26 +172,32 @@ export async function resolveXrefs(projectId: string, items: ScanItem[]): Promis
   const refs = scanXrefs(items);
   const values: XrefValues = {};
   const meta: Record<string, XrefMeta> = {};
-  if (refs.length === 0) return { values, meta };
+  const displayByRef: Record<string, string> = {};
+  if (refs.length === 0) return { values, meta, displayByRef };
 
-  const codes = Array.from(new Set(refs.map(r => r.code).filter(Boolean)));
-  if (codes.length === 0) return { values, meta };
+  // `ref` = valor guardado en la celda: el ID permanente del ensayo (v47, no se
+  // rompe ante renumeración) o el correlativo (legacy / fórmulas estáticas).
+  // Resolvemos por AMBOS (id primero), acotado a los pedidos.
+  const tokens = Array.from(new Set(refs.map(r => r.code).filter(Boolean)));
+  if (tokens.length === 0) return { values, meta, displayByRef };
 
-  // Consulta ACOTADA a los correlativos pedidos (rápido aunque el proyecto tenga
-  // miles de aprobados): protocol_code OR external_id ∈ codes.
   const approved: any[] = await protocolsCollection
     .query(
       Q.where('project_id', projectId),
       Q.where('status', 'APPROVED'),
-      Q.or(Q.where('protocol_code', Q.oneOf(codes)), Q.where('external_id', Q.oneOf(codes))),
+      Q.or(
+        Q.where('id', Q.oneOf(tokens)),
+        Q.where('protocol_code', Q.oneOf(tokens)),
+        Q.where('external_id', Q.oneOf(tokens)),
+      ),
     )
     .fetch()
     .catch(() => [] as any[]);
 
-  // Doble check con PRECEDENCIA del correlativo (igual que web): primero agrupa
-  // por protocol_code; external_id SOLO cubre correlativos que ningún código
-  // reclamó (evita falsos "ambiguo" cuando un external_id coincide con el
-  // protocol_code de otro ensayo).
+  const byId = new Map<string, any>();
+  for (const p of approved) byId.set(p.id, p);
+  // Doble check por correlativo (legacy): precedencia de protocol_code; external_id
+  // solo cubre correlativos que ningún código reclamó.
   const byCode = new Map<string, any[]>();
   for (const p of approved) {
     const code = (p.protocolCode ?? '').trim();
@@ -196,24 +207,26 @@ export async function resolveXrefs(projectId: string, items: ScanItem[]): Promis
     const ext = (p.externalId ?? '').trim();
     if (ext && !byCode.has(ext)) { byCode.set(ext, []); byCode.get(ext)!.push(p); }
   }
+  const codeOf = (p: any) => ((p.protocolCode ?? p.externalId ?? '') as string).trim();
 
-  for (const { code, key } of refs) {
-    const fullKey = `${code}.${key}`;
-    const matches = byCode.get(code) ?? [];
-    if (matches.length === 0) {
-      meta[fullKey] = { code, key, status: 'pendiente', sourceId: null, sourceUpdatedAt: null, value: null };
-      values[fullKey] = null;
-      continue;
+  for (const { code: ref, key } of refs) {
+    const fullKey = `${ref}.${key}`;
+    let src: any | null = byId.get(ref) ?? null;   // 1) por ID permanente
+    if (!src) {
+      const matches = byCode.get(ref) ?? [];        // 2) legacy: por correlativo
+      if (matches.length !== 1) {
+        meta[fullKey] = { code: ref, key, status: matches.length > 1 ? 'ambiguo' : 'pendiente', sourceId: null, sourceUpdatedAt: null, value: null };
+        values[fullKey] = null;
+        displayByRef[ref] = ref;
+        continue;
+      }
+      src = matches[0];
     }
-    if (matches.length > 1) {
-      meta[fullKey] = { code, key, status: 'ambiguo', sourceId: null, sourceUpdatedAt: null, value: null };
-      values[fullKey] = null;
-      continue;
-    }
-    const src = matches[0];
+    const display = codeOf(src) || ref;
+    displayByRef[ref] = display;
     const value = await readCellValue(src.id, key).catch(() => null);
     meta[fullKey] = {
-      code, key, status: 'ok',
+      code: display, key, status: 'ok',
       sourceId: src.id,
       sourceUpdatedAt: src.updatedAt instanceof Date ? src.updatedAt.getTime() : (src._raw?.updated_at ?? null),
       value,
@@ -221,5 +234,5 @@ export async function resolveXrefs(projectId: string, items: ScanItem[]): Promis
     values[fullKey] = value;
   }
 
-  return { values, meta };
+  return { values, meta, displayByRef };
 }
