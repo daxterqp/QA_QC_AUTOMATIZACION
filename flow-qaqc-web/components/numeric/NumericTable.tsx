@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useCallback, useEffect, useState, useRef, type ReactNode } from 'react';
-import { Play, AlertTriangle, FunctionSquare, Table, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { Play, AlertTriangle, FunctionSquare, Table, CheckCircle2, XCircle, RefreshCw, Dices } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 import {
@@ -118,6 +118,31 @@ interface Props {
 /** Tabla unificada para protocolos numéricos. Detecta manual / formula / graph por
  *  `validation_method` y soporta filas multi-celda separadas por `//` (cada celda
  *  se etiqueta posicionalmente con A, B, C, …). */
+/** Herramienta de DESARROLLO (autollenado): valor de prueba válido por celda. Versión
+ *  genérica (sin reglas de Proctor): manual/percent → aleatorio en rango; free → aleatorio;
+ *  text → "PRUEBA"; bool → 1. Las demás (list/equipment/date/time/comment/xref/fórmula) se
+ *  dejan sin tocar. Espejo simplificado de devGenCellValue del móvil (src/components/NumericTable). */
+function devGenWebValue(cell: { kind: string; decimals?: number; range?: { min: number; max: number } | null }): string | null {
+  const clampDec = (d: number) => Math.max(0, Math.min(6, d));
+  const dec = typeof cell.decimals === 'number' ? cell.decimals : 2;
+  const range = cell.range ?? null;
+  switch (cell.kind) {
+    case 'manual':
+    case 'percent':
+      return range
+        ? (range.min + (0.35 + Math.random() * 0.35) * (range.max - range.min)).toFixed(clampDec(dec))
+        : (Math.random() * 100).toFixed(clampDec(dec));
+    case 'free':
+      return (10 + Math.random() * 990).toFixed(clampDec(typeof cell.decimals === 'number' ? cell.decimals : 1));
+    case 'text':
+      return 'PRUEBA';
+    case 'bool':
+      return '1';
+    default:
+      return null;
+  }
+}
+
 export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, frozen, projectId, enableXrefs, protocolCode }: Props) {
   const { t } = useI18n();
   // frozen implica readOnly siempre — un histórico nunca debe permitir edición accidental.
@@ -385,6 +410,26 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
     onChangeManual({ itemId, comments, isCompliant, hasAnswer });
   }, [onChangeManual, localValues]);
 
+  // DEV: autollenar todas las celdas de entrada con valores de prueba + persistir cada fila.
+  const fillAllDev = useCallback(() => {
+    if (readOnly) return;
+    const map: Record<string, string> = { ...localValues };
+    const rowsToCommit: { itemId: string; spec: Extract<NumericRowSpec, { kind: 'row' }> }[] = [];
+    for (const { item, spec } of mainRows) {
+      if (spec?.kind !== 'row') continue;
+      let touched = false;
+      for (let i = 0; i < spec.cells.length; i++) {
+        const v = devGenWebValue(spec.cells[i] as { kind: string; decimals?: number; range?: { min: number; max: number } | null });
+        if (v == null) continue;
+        map[`${item.id}:${colLetter(i)}`] = v;
+        touched = true;
+      }
+      if (touched) rowsToCommit.push({ itemId: item.id, spec });
+    }
+    setLocalValues(map);
+    for (const { itemId, spec } of rowsToCommit) commitRow(itemId, spec, map);
+  }, [readOnly, localValues, mainRows, commitRow]);
+
   // ── Refs para inputs + navegación "Play / Enter" ─────────────────────────
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -454,6 +499,16 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
           >
             <Play size={12} fill="currentColor" />
             {t('numericTable.startFill')}
+          </button>
+        )}
+        {/* Herramienta de DESARROLLO: autollenado (oculto en producción / .exe). */}
+        {process.env.NODE_ENV !== 'production' && !readOnly && manualOrder.length > 0 && (
+          <button
+            onClick={fillAllDev}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-dashed border-warning text-warning hover:bg-warning/5"
+            title="Autollenar valores de prueba (solo desarrollo)"
+          >
+            <Dices size={12} /> Autollenar (dev)
           </button>
         )}
         {hasFormulas && (
