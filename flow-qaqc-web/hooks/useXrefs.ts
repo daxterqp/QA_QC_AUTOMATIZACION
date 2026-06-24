@@ -260,3 +260,16 @@ export function useXrefValues(projectId: string, items: ScanItem[], enabled = tr
     staleTime: 30_000,
   });
 }
+
+/** v47 — Hook que devuelve la RESOLUCIÓN completa (values + meta + displayByRef) y acepta
+ *  un `expand` (marcador de grupo `@g:` → ids vigentes). Los refs escaneados ya reflejan la
+ *  expansión, así que el queryKey cambia y re-consulta cuando el grupo vivo cambia. */
+export function useXrefResolution(projectId: string, items: ScanItem[], enabled = true, expand: (raw: string) => string = (s) => s) {
+  const xrefs = useMemo(() => scanXrefsInItems(items, expand), [items, expand]);
+  return useQuery({
+    queryKey: ['xref-resolution', projectId, xrefs.map(x => `${x.externalId}.${x.key}`).sort().join(',')],
+    queryFn: () => fetchXrefResolution(projectId, items, expand),
+    enabled: enabled && !!projectId && xrefs.length > 0,
+    staleTime: 30_000,
+  });
+}

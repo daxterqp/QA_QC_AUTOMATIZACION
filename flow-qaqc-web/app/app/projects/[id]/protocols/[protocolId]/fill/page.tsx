@@ -507,6 +507,15 @@ export default function ProtocolFillPage() {
               readOnly={isReadOnly}
               projectId={projectId}
               enableXrefs={true /* v29 — protocol_linking deprecated, siempre activo */}
+              groupingPresets={(projectFlags?.grouping_presets && fillMeta?.idProtocolo) ? projectFlags.grouping_presets[fillMeta.idProtocolo] : undefined}
+              groupingContext={{
+                projectId,
+                tipoActual: fillMeta?.idProtocolo ?? null,
+                sectorId: (fp as { sector_id?: string | null } | null)?.sector_id ?? (protocol as { sector_id?: string | null })?.sector_id ?? null,
+                sampleId: (fp as { sample_id?: string | null } | null)?.sample_id ?? (protocol as { sample_id?: string | null })?.sample_id ?? null,
+                locationId: (protocol as { location_id?: string | null })?.location_id ?? (fp as { location_id?: string | null } | null)?.location_id ?? null,
+                ensayoDate: (fp as { ensayo_date?: string | null } | null)?.ensayo_date ?? (protocol as { ensayo_date?: string | null })?.ensayo_date ?? null,
+              }}
               onChangeManual={({ itemId, comments, isCompliant, hasAnswer }) => {
                 // Persiste directo (UI ya lo refleja vía estado local en NumericTable).
                 // v42e (M8) — guardamos la promesa para que el submit la espere antes

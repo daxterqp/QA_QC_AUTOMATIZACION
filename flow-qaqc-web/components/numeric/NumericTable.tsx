@@ -15,9 +15,10 @@ import {
 import { resolveScopeCells, extractRefs, type ScopeCell, type Scope, type AuxTables } from '@lib/formulaEval';
 import { NumericChart } from './NumericChart';
 import { MatricesModal } from './MatricesModal';
-import { useXrefValues } from '@hooks/useXrefs';
+import { useXrefResolution } from '@hooks/useXrefs';
 import { useLabAuxTables } from '@hooks/useFileUpload';
-import type { ProtocolItem } from '@/types';
+import { resolvePreset, type GroupingContext } from '@lib/protocolGrouping';
+import type { ProtocolItem, GroupingPreset } from '@/types';
 
 /** Mapping de clase Tailwind de ancho a px (para spans multi-celda en el header).
  *  Debe mantenerse en sync con el `cellWidthClass` calculado abajo. */
@@ -113,6 +114,10 @@ interface Props {
   enableXrefs?: boolean;
   /** v31 (Parte E) — código correlativo del protocolo, para celdas `codigo-[]`. */
   protocolCode?: string | null;
+  /** v45.3/v47 — presets de agrupamiento del tipo de ficha + contexto del ensayo, para
+   *  resolver EN VIVO los grupos `@g:<presetId>` de las celdas multi-select. */
+  groupingPresets?: GroupingPreset[];
+  groupingContext?: GroupingContext;
 }
 
 /** Tabla unificada para protocolos numéricos. Detecta manual / formula / graph por
@@ -143,7 +148,7 @@ function devGenWebValue(cell: { kind: string; decimals?: number; range?: { min: 
   }
 }
 
-export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, frozen, projectId, enableXrefs, protocolCode }: Props) {
+export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, frozen, projectId, enableXrefs, protocolCode, groupingPresets, groupingContext }: Props) {
   const { t } = useI18n();
   // frozen implica readOnly siempre — un histórico nunca debe permitir edición accidental.
   const readOnly = readOnlyProp || frozen;
@@ -213,9 +218,54 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
     });
   }, [mainRows]);
 
-  // v26 — Preload de valores xref (`@HIS-001.5F`). Solo se hace fetch si el flag
-  // está activo y hay referencias detectadas en los items.
-  const { data: xrefValues } = useXrefValues(projectId ?? '', items, !!(enableXrefs && projectId));
+  // v47 — AGRUPAMIENTO EN VIVO (espejo móvil): una celda multi-select puede guardar un
+  // marcador `@g:<presetId>` que se re-resuelve por FECHA. En web el grupo se VE/calcula
+  // (el picker es solo móvil); al aprobar queda horneado a ids.
+  const [markerIds, setMarkerIds] = useState<Record<string, string[]>>({});
+  const markerNames = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of (groupingPresets ?? [])) m[`@g:${p.id}`] = p.name || 'Grupo';
+    return m;
+  }, [groupingPresets]);
+  const markerSig = useMemo(() => {
+    if (frozen) return '';
+    const found = new Set<string>();
+    for (const it of items) {
+      const mm = (it.comments ?? '').match(/@g:[A-Za-z0-9_-]+/g);
+      if (mm) for (const mk of mm) found.add(mk);
+    }
+    return Array.from(found).sort().join('|');
+  }, [frozen, items]);
+  useEffect(() => {
+    if (!groupingContext || markerSig === '') { setMarkerIds({}); return; }
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, string[]> = {};
+      for (const mk of markerSig.split('|').filter(Boolean)) {
+        const preset = (groupingPresets ?? []).find(p => `@g:${p.id}` === mk);
+        out[mk] = preset ? await resolvePreset(preset, groupingContext, Date.now()).catch(() => []) : [];
+      }
+      if (!cancelled) setMarkerIds(out);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markerSig, groupingContext]);
+  // Expande marcadores `@g:X` de un valor de celda a su lista de IDS vigente (identidad si no hay).
+  const expandRaw = useCallback((raw: string): string => {
+    if (!raw || raw.indexOf('@g:') < 0) return raw;
+    const acc: string[] = [];
+    for (const tok of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+      if (tok.startsWith('@g:')) { for (const id of (markerIds[tok] ?? [])) acc.push(id); }
+      else acc.push(tok);
+    }
+    return acc.join(',');
+  }, [markerIds]);
+
+  // v26/v47 — Resolución de xrefs (valores + display) con expansión de grupos vivos.
+  // Solo se hace fetch si el flag está activo y hay referencias detectadas en los items.
+  const { data: xrefResolution } = useXrefResolution(projectId ?? '', items, !!(enableXrefs && projectId), expandRaw);
+  const xrefValues = xrefResolution?.values;
+  const xrefDisplay = xrefResolution?.displayByRef;
   // v41 — Tablas auxiliares del proyecto (taras, moldes…) para BUSCAR().
   const { data: auxTables } = useLabAuxTables(projectId ?? '');
 
@@ -272,11 +322,15 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
           // Literal de solo-lectura: entra como 'manual' fijo para que las
           // fórmulas que referencien esta celda (#1A, etc.) lo resuelvan.
           cells.push({ key, kind: 'manual', raw: cell.literal });
+        } else if (cell.kind === 'xref') {
+          // v45/v47 — el `get` agrega sobre la celda selectora; `expandRaw` reemplaza el
+          // marcador de grupo `@g:` por los ids vigentes (espejo móvil).
+          cells.push({ key, kind: 'xref', targetKey: cell.targetKey, sourceRef: cell.sourceRef, op: cell.op, raw: expandRaw(localValues[localKey] ?? cellVals[i] ?? '') });
         }
       }
     }
     return resolveScopeCells(cells, matrices, xrefValues, auxTables);
-  }, [frozen, mainRows, localValues, matrices, xrefValues, auxTables]);
+  }, [frozen, mainRows, localValues, matrices, xrefValues, auxTables, expandRaw]);
 
   // Refs por fórmula (para detectar deps llenas)
   const formulaRefsByKey = useMemo(() => {
@@ -780,6 +834,9 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
                       ) : null}
                       <CellRender
                         protocolCode={protocolCode}
+                        xrefDisplay={xrefDisplay}
+                        markerNames={markerNames}
+                        markerIds={markerIds}
                         cell={cell}
                         cellKey={scopeKeyFor(partida, i)}
                         rawValue={localValues[inputKey] ?? cellVals[i] ?? ''}
@@ -839,7 +896,7 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
 }
 
 // ── Sub-componente render por celda ─────────────────────────────────────────
-function CellRender({ cell, cellKey, rawValue, scope, textValues, errors, formulaDepsFilled, readOnly, compact, matrices, auxTables, inputRef, onChange, onCommit, onEnter, protocolCode }: {
+function CellRender({ cell, cellKey, rawValue, scope, textValues, errors, formulaDepsFilled, readOnly, compact, matrices, auxTables, inputRef, onChange, onCommit, onEnter, protocolCode, xrefDisplay, markerNames, markerIds }: {
   cell: NumericCellSpec;
   cellKey: string;
   rawValue: string;
@@ -856,6 +913,10 @@ function CellRender({ cell, cellKey, rawValue, scope, textValues, errors, formul
   onCommit: () => void;
   onEnter: () => void;
   protocolCode?: string | null;
+  /** v47 — ref-guardada(id)→código a mostrar + nombre/conteo de grupos vivos `@g:`. */
+  xrefDisplay?: Record<string, string>;
+  markerNames?: Record<string, string>;
+  markerIds?: Record<string, string[]>;
 }) {
   const { t } = useI18n();
   const v = scope[cellKey];
@@ -1047,6 +1108,32 @@ function CellRender({ cell, cellKey, rawValue, scope, textValues, errors, formul
         title={protocolCode ?? undefined}
       >
         {protocolCode || '—'}
+      </span>
+    );
+  }
+
+  // v45/v47 — xref selectora (select/self): read-only en web (se ELIGE en móvil). Muestra
+  // el código del ensayo (vía displayByRef, renumber-safe) o "▦ <grupo> (N)" si es un grupo
+  // vivo `@g:`. `self` agrega además su valor traído. Las celdas `get` caen al span computado.
+  if (cell.kind === 'xref' && ((cell as { mode?: string }).mode === 'select' || (cell as { mode?: string }).mode === 'self')) {
+    const tokens = (rawValue ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    return (
+      <span
+        className={cn(
+          compact ? 'inline-block px-1 py-1 text-xs w-full text-center' : 'inline-block px-2 py-1 text-sm w-28 text-center',
+          'rounded border truncate',
+          tokens.length ? 'border-primary/30 text-primary bg-primary/5' : 'border-border text-textSecondary bg-surface',
+        )}
+        title={tokens.map(tk => markerNames?.[tk] ? `${markerNames[tk]} (grupo)` : (xrefDisplay?.[tk] ?? tk)).join(', ') || '—'}
+      >
+        {tokens.length === 0 ? '—' : tokens.map((tk, i) => (
+          <span key={i} className="block font-bold leading-tight">
+            {markerNames?.[tk] ? `▦ ${markerNames[tk]} (${(markerIds?.[tk] ?? []).length})` : (xrefDisplay?.[tk] ?? tk)}
+          </span>
+        ))}
+        {(cell as { mode?: string }).mode === 'self' && (
+          <span className="block text-textSecondary">{v == null ? '…' : formatComputed(v, cell.decimals)}</span>
+        )}
       </span>
     );
   }
