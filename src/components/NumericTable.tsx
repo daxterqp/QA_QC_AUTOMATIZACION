@@ -1187,7 +1187,9 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
                         // recálculo). El cálculo corre una sola vez al pulsar "Listo".
                         setLocalValues(prev => {
                           const cur = (prev[xrefPicker.inputKey] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-                          const next = cur.includes(item.code) ? cur.filter(c => c !== item.code) : [...cur, item.code];
+                          // v47 — guarda el ID permanente (no el código): así renumerar/cambiar el
+                          // código de un ensayo no rompe la selección. Se muestra el código vía displayByRef.
+                          const next = cur.includes(item.id) ? cur.filter(c => c !== item.id) : [...cur, item.id];
                           return { ...prev, [xrefPicker.inputKey]: next.join(',') };
                         });
                       } else {
