@@ -116,7 +116,7 @@ export function useCaptureCatalogs(projectId: string) {
         supabase.from('project_sectors').select('*').eq('project_id', projectId),
       ]);
       const eq = ((eRes.data ?? []) as Array<{ id: string; code: string; name: string; category?: string | null }>)
-        .filter(e => (e.category ?? 'maquinaria_pesada') === 'maquinaria_pesada');
+        .filter(e => (e.category ?? 'laboratorio') === 'maquinaria_pesada');
       const eqIds = new Set(eq.map(e => e.id));
       const ea = ((eaRes.data ?? []) as Array<{ equipment_id: string; activity_id: string; form_template_id: string | null }>)
         .filter(x => eqIds.has(x.equipment_id));

@@ -15,7 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import { mergeFeatureFlags, type Protocol, type ProjectSector, type ProtocolTemplate, type ProtocolTemplateItem } from '@/types';
 import {
-  buildProtocolCode, nextSeq, validateMask, todayEnsayoDate, parseEnsayoDate,
+  buildProtocolCode, nextSeq, validateMask, todayEnsayoDate, parseEnsayoDate, pickMask, type SeqResetScope,
 } from '@lib/protocolCode';
 
 const supabase = createClient();
@@ -110,16 +110,22 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
   // 1. Flags del proyecto (codificación).
   const { data: projData } = await supabase.from('projects').select('feature_flags').eq('id', args.projectId).single();
   const flags = mergeFeatureFlags((projData?.feature_flags ?? null) as Parameters<typeof mergeFeatureFlags>[0]);
-  const codesOn = flags.protocol_codes && validateMask(flags.coding_mask_default).length === 0;
   // {TIPO} = id_protocolo de la plantilla; si el caller no lo pasó (flujo
   // clásico por ubicación), se consulta — el código debe salir SIEMPRE del
   // mismo tipo para que el ámbito del correlativo sea estable.
   let tipo = (args.templateIdProtocolo ?? '').trim();
-  if (!tipo && codesOn) {
+  if (!tipo && flags.protocol_codes) {
     const { data: t } = await supabase.from('protocol_templates').select('id_protocolo').eq('id', args.templateId).single();
     tipo = ((t?.id_protocolo as string | null) ?? '').trim();
   }
   if (!tipo) tipo = (args.templateName ?? '').trim();
+  // Paridad con el móvil (ProtocolInstanceService): máscara POR TIPO si existe + ámbito de
+  // reinicio del correlativo (year_sector / year_month). Sin esto, web y móvil cuentan en
+  // ámbitos distintos y se reabre el salto/colisión que v60 viene a cerrar.
+  const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+  const resetScope: SeqResetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }
+    : flags.coding_seq_reset === 'year_month' ? { month: true } : {};
+  const codesOn = flags.protocol_codes && validateMask(mask).length === 0;
   // Sin tipo no hay ámbito de correlativo: mejor crear SIN código (y avisar)
   // que generar un código malformado tipo "-260001" que colisiona entre tipos.
   const effectiveCodesOn = codesOn && !!tipo;
@@ -147,14 +153,16 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
 
   // 3. Secuencia inicial del ámbito (tipo+año+proyecto).
   let knownCodes: string[] = effectiveCodesOn ? await fetchProjectCodes(args.projectId) : [];
-  let seq = effectiveCodesOn ? nextSeq(knownCodes, flags.coding_mask_default, tipo, date) : 0;
+  let seq = effectiveCodesOn ? nextSeq(knownCodes, mask, tipo, date, args.sectorName ?? null, resetScope) : 0;
 
   // v60 — HÍBRIDO: ONLINE la nube asigna el correlativo de forma atómica (cero colisión
   // entre PC y móvil); reserva un bloque de `count`. OFFLINE / si el RPC falla, se mantiene
   // el cálculo local (el índice único `protocols_code_uniq_per_project` sigue de backstop).
   if (effectiveCodesOn) {
     try {
-      const groupKey = `${tipo}|${date.getFullYear()}`;
+      const sectorPart = resetScope.sector ? `|${(args.sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+      const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+      const groupKey = `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`;
       const { data: cloudStart, error: seqErr } = await supabase.rpc('next_protocol_seq', {
         p_project_id: args.projectId, p_group_key: groupKey, p_client_seq: seq, p_count: count,
       });
@@ -171,7 +179,7 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
     // Retry ante colisión del índice único de códigos (máx 5 por instancia).
     for (let attempt = 0; attempt < 5; attempt++) {
       code = effectiveCodesOn
-        ? buildProtocolCode(flags.coding_mask_default, { tipo, date, seq, sector: args.sectorName ?? null })
+        ? buildProtocolCode(mask, { tipo, date, seq, sector: args.sectorName ?? null })
         : null;
       const { data, error } = await supabase
         .from('protocols')
@@ -199,7 +207,7 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
       if (effectiveCodesOn && isCodeUniqueViolation(error)) {
         // Otro dispositivo tomó este seq: re-leer y re-secuenciar.
         knownCodes = await fetchProjectCodes(args.projectId);
-        seq = nextSeq(knownCodes, flags.coding_mask_default, tipo, date);
+        seq = nextSeq(knownCodes, mask, tipo, date, args.sectorName ?? null, resetScope);
         continue;
       }
       throw error;

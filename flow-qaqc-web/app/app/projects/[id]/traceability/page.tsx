@@ -53,7 +53,9 @@ export default function TraceabilityPage() {
 
   const { currentUser } = useAuth();
   const [showCapture, setShowCapture] = useState(false);
-  const canCapture = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT' || currentUser?.role === 'SUPERVISOR';
+  // Paridad con la RLS (acc_work_sessions_ins: can_access_project AND NOT is_viewer) y con el
+  // móvil (no gatea por rol salvo lectura): cualquiera salvo VIEWER puede capturar.
+  const canCapture = !!currentUser && currentUser.role !== 'VIEWER';
 
   const { data: projects = [] } = useProjects();
   const project = projects.find(p => p.id === projectId);

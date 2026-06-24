@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FlaskConical, Plus, Search, X, ChevronRight, Layers } from 'lucide-react';
 import { useProjects, useProjectFlags } from '@hooks/useProjects';
+import { useAuth } from '@lib/auth-context';
 import { useEnsayosData } from '@hooks/useEnsayos';
 import { useSamples, useCreateSample } from '@hooks/useSamples';
 import { todaySampleDate } from '@lib/sampleCode';
@@ -20,6 +21,7 @@ import { useI18n } from '@lib/i18n';
 export default function SamplesPage() {
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
+  const { currentUser } = useAuth();
   const { data: projects = [] } = useProjects();
   const project = projects.find(p => p.id === projectId);
   const { data: flags } = useProjectFlags(projectId);
@@ -119,7 +121,7 @@ export default function SamplesPage() {
           busy={createSample.isPending}
           onClose={() => setShowAdd(false)}
           onCreate={async (args) => {
-            try { await createSample.mutateAsync(args); setShowAdd(false); }
+            try { await createSample.mutateAsync({ ...args, createdById: currentUser?.id ?? null }); setShowAdd(false); }
             catch (e) { alert((e as Error).message || t('samples.createError')); }
           }}
         />

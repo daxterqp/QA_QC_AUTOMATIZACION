@@ -129,14 +129,17 @@ export default function SampleDetailPage() {
             const tpl = templates.find(tt => tt.id === templateId);
             if (!tpl) { alert(t('sampleDetail.alert.missingTypeMsg')); return; }
             try {
+              const sectorName = (ens?.sectors ?? []).find(s => s.id === sample.sector_id)?.name ?? null;
               await createEnsayoInstances({
                 projectId, templateId: tpl.id, templateName: tpl.name,
                 templateIdProtocolo: tpl.id_protocolo ?? null,
                 count, sampleId,
-                sectorId: sample.sector_id, locationId: sample.location_id,
+                sectorId: sample.sector_id, sectorName, locationId: sample.location_id,
                 ensayoDate: sample.sample_date,
               });
               await qc.invalidateQueries({ queryKey: ['sample', projectId, sampleId] });
+              qc.invalidateQueries({ queryKey: ['samples', projectId] });
+              qc.invalidateQueries({ queryKey: ['ensayos-data', projectId] });
               setShowAdd(false);
             } catch (e) { alert((e as Error).message || t('sampleDetail.alert.createFailed')); }
           }}

@@ -65,6 +65,7 @@ export interface CreateSampleArgs {
   locationId?: string | null;
   layer?: string | null;
   notes?: string | null;
+  createdById?: string | null;     // autor (paridad con móvil)
 }
 
 /** Crea una muestra con código correlativo del proyecto. */
@@ -72,35 +73,41 @@ export function useCreateSample(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: CreateSampleArgs): Promise<Sample> => {
-      // sample_identifier del proyecto + seqs existentes → próximo correlativo.
       const { data: proj } = await supabase.from('projects').select('sample_identifier').eq('id', projectId).single();
       const sampleIdentifier = (proj as { sample_identifier?: string | null } | null)?.sample_identifier ?? '';
-      const { data: existing } = await supabase.from('samples').select('seq').eq('project_id', projectId);
-      const seq = nextSampleSeq(((existing ?? []) as { seq: number | null }[]).map(r => r.seq));
       const date = args.sampleDate ?? todaySampleDate();
       const now = Date.now();
       const layerJson = args.layer && args.layer.trim() ? JSON.stringify({ capa: args.layer.trim() }) : null;
-      const row = {
-        id: crypto.randomUUID(),
-        project_id: projectId,
-        sample_code: buildSampleCode(sampleIdentifier, date, seq),
-        seq,
-        sample_date: date,
-        location_id: args.locationId ?? null,
-        sector_id: args.sectorId ?? null,
-        material_type: args.materialType ?? null,
-        condition: args.condition ?? null,
-        depth_from: args.depthFrom ?? null,
-        depth_to: args.depthTo ?? null,
-        layer_info_json: layerJson,
-        notes: args.notes ?? null,
-        upload_status: 'SYNCED',
-        created_at: now,
-        updated_at: now,
-      };
-      const { data, error } = await supabase.from('samples').insert(row).select().single();
-      if (error) throw new Error(error.message);
-      return data as Sample;
+      // Retry ante colisión del índice único samples_code_uniq_per_project (otro
+      // dispositivo tomó el seq): re-lee los seqs, re-secuencia y reintenta (máx 5).
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { data: existing } = await supabase.from('samples').select('seq').eq('project_id', projectId);
+        const seq = nextSampleSeq(((existing ?? []) as { seq: number | null }[]).map(r => r.seq));
+        const row = {
+          id: crypto.randomUUID(),
+          project_id: projectId,
+          sample_code: buildSampleCode(sampleIdentifier, date, seq),
+          seq,
+          sample_date: date,
+          location_id: args.locationId ?? null,
+          sector_id: args.sectorId ?? null,
+          material_type: args.materialType ?? null,
+          condition: args.condition ?? null,
+          depth_from: args.depthFrom ?? null,
+          depth_to: args.depthTo ?? null,
+          layer_info_json: layerJson,
+          notes: args.notes ?? null,
+          created_by_id: args.createdById ?? null,
+          upload_status: 'SYNCED',
+          created_at: now,
+          updated_at: now,
+        };
+        const { data, error } = await supabase.from('samples').insert(row).select().single();
+        if (!error) return data as Sample;
+        if ((error as { code?: string }).code === '23505') continue;  // código duplicado → re-secuenciar
+        throw new Error(error.message);
+      }
+      throw new Error('No se pudo asignar un código de muestra único tras 5 intentos.');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['samples', projectId] });
