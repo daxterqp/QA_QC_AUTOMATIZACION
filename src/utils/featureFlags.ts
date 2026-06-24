@@ -164,7 +164,13 @@ export interface GroupingPreset {
   label?: string;                  // etiqueta/grupo manual (texto en location_reference)
   order?: 'reciente' | 'antiguo';
   filters?: GroupingFilterClause[];
+  /** @deprecated v47 — excepciones por CÓDIGO (legacy / sembradas desde Excel). Se siguen
+   *  aplicando, pero el grupo se referencia EN VIVO por id; preferir exclude_ids. */
   exclude_codes?: string[];
+  /** v47 — EXCEPCIONES por id de ensayo (quitar ensayos específicos del resultado de la regla). */
+  exclude_ids?: string[];
+  /** v47 — AÑADIDOS por id de ensayo (sumar ensayos específicos aunque la regla no los traiga). */
+  include_ids?: string[];
 }
 
 export interface ProjectFeatureFlags {

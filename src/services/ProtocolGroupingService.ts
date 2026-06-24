@@ -1,6 +1,7 @@
 /**
- * ProtocolGroupingService (v45.3) — Resuelve un AGRUPAMIENTO (preset) a una lista de
- * códigos de protocolo (snapshot), leyendo de la base LOCAL (WatermelonDB, sin red).
+ * ProtocolGroupingService (v45.3 / v47) — Resuelve un AGRUPAMIENTO (preset) a una lista de
+ * IDS de protocolo (permanentes), leyendo de la base LOCAL (WatermelonDB, sin red). La regla
+ * se re-evalúa EN VIVO (por fecha de realización); excepciones/añadidos por id.
  *
  * Un preset = selección base (tipo, contexto relativo, fechas, etiqueta) + filtros
  * (atributos y/o valores de celda) + excepciones. Ver docs/agrupaciones-de-protocolos.md.
@@ -36,7 +37,7 @@ function daysAgoISO(days: number, todayMs: number): string {
 }
 
 /**
- * Resuelve un preset a códigos de protocolo (orden + límite + exclusiones aplicados).
+ * Resuelve un preset a IDS de protocolo (orden + límite + exclusiones + añadidos aplicados).
  * @param todayMs  fecha "hoy" en ms (se inyecta para testabilidad / determinismo).
  */
 export async function resolvePreset(preset: GroupingPreset, ctx: GroupingContext, todayMs: number): Promise<string[]> {
@@ -126,9 +127,24 @@ export async function resolvePreset(preset: GroupingPreset, ctx: GroupingContext
   rows.sort((a, b) => preset.order === 'antiguo' ? sortMs(a) - sortMs(b) : sortMs(b) - sortMs(a));
   if (preset.last_n != null && preset.last_n > 0) rows = rows.slice(0, preset.last_n);
 
-  // ── Códigos + exclusiones ──
-  const excl = new Set((preset.exclude_codes ?? []).map(c => c.trim()).filter(Boolean));
-  return rows
-    .map(p => (p.protocolCode ?? p.externalId ?? '').trim())
-    .filter(c => c && !excl.has(c));
+  // ── IDS + exclusiones + añadidos (v47: el grupo se referencia por ID permanente) ──
+  const exclCodes = new Set((preset.exclude_codes ?? []).map(c => c.trim()).filter(Boolean));
+  const exclIds = new Set((preset.exclude_ids ?? []).filter(Boolean));
+  const out: string[] = [];
+  for (const p of rows) {
+    if (exclIds.has(p.id)) continue;
+    const code = (p.protocolCode ?? p.externalId ?? '').trim();
+    if (code && exclCodes.has(code)) continue;
+    out.push(p.id);
+  }
+  // Añadidos por id (ensayos específicos aunque la regla no los traiga): APPROVED + mismo proyecto.
+  const incl = (preset.include_ids ?? []).filter(Boolean).filter(id => !exclIds.has(id));
+  if (incl.length) {
+    const addRows: any[] = await protocolsCollection
+      .query(Q.where('project_id', ctx.projectId), Q.where('status', 'APPROVED'), Q.where('id', Q.oneOf(incl)))
+      .fetch().catch(() => []);
+    const have = new Set(out);
+    for (const p of addRows) if (!have.has(p.id)) out.push(p.id);
+  }
+  return out;
 }

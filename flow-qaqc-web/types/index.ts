@@ -31,7 +31,12 @@ export interface GroupingPreset {
   last_n?: number; last_days?: number; date_from?: string; date_to?: string;
   same_sector?: boolean; same_sample?: boolean; same_location?: boolean;
   label?: string; order?: 'reciente' | 'antiguo';
-  filters?: GroupingFilterClause[]; exclude_codes?: string[];
+  filters?: GroupingFilterClause[];
+  /** @deprecated v47 — excepciones por código (legacy/Excel). Preferir exclude_ids. */
+  exclude_codes?: string[];
+  /** v47 — excepciones/añadidos por id de ensayo (in-app). */
+  exclude_ids?: string[];
+  include_ids?: string[];
 }
 
 export interface ProjectFeatureFlags {
