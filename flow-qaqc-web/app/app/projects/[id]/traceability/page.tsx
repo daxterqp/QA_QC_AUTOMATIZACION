@@ -19,7 +19,8 @@ import { useState, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useProjectFlags, useProjects } from '@hooks/useProjects';
 import { useI18n } from '@lib/i18n';
-import { useTraceability } from '@hooks/useTraceability';
+import { useAuth } from '@lib/auth-context';
+import { useTraceability, useCaptureCatalogs, useCreateWorkSession } from '@hooks/useTraceability';
 import { AnonymizeMap } from '@lib/anonymize';
 import {
   effectiveDurationMs, pausedDurationMs, sumEffective,
@@ -27,7 +28,7 @@ import {
   type SessionWithIntervals,
 } from '@lib/traceabilityAggregates';
 import PageHeader from '@components/PageHeader';
-import { Activity as ActivityIcon, Clock, MapPin, Wrench, Users, BarChart3, AlertTriangle } from 'lucide-react';
+import { Activity as ActivityIcon, Clock, MapPin, Wrench, Users, BarChart3, AlertTriangle, Plus, X, Loader2 } from 'lucide-react';
 import type { Activity } from '@/types';
 
 type TabKey = 'sector' | 'timeline' | 'summary' | 'equipment' | 'personnel';
@@ -49,6 +50,10 @@ export default function TraceabilityPage() {
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
+
+  const { currentUser } = useAuth();
+  const [showCapture, setShowCapture] = useState(false);
+  const canCapture = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT' || currentUser?.role === 'SUPERVISOR';
 
   const { data: projects = [] } = useProjects();
   const project = projects.find(p => p.id === projectId);
@@ -147,6 +152,12 @@ export default function TraceabilityPage() {
         {(from || to) && (
           <button onClick={() => { setFrom(''); setTo(''); }} className="text-xs text-primary underline">{t('webDossier.clearLower')}</button>
         )}
+        {canCapture && (
+          <button onClick={() => setShowCapture(true)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary/90 transition">
+            <Plus size={13} /> Capturar sesión
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -178,7 +189,122 @@ export default function TraceabilityPage() {
         {!isLoading && tab === 'equipment' && <ByEquipmentView swi={sessionsWithIntervals} equipById={equipById} actsById={actsById} sectorsById={sectorsById} anon={anonymize} initialEq={searchParams.get('eq')} onDrillSector={(secId: string) => goToTab('sector', { sec: secId })} />}
         {!isLoading && tab === 'personnel' && <ByPersonnelView swi={sessionsWithIntervals} equipById={equipById} sectorsById={sectorsById} anon={anonymize} />}
       </div>
+
+      {showCapture && currentUser && (
+        <CaptureSessionModal projectId={projectId} userId={currentUser.id} onClose={() => setShowCapture(false)} />
+      )}
     </div>
+  );
+}
+
+// ─── Captura de sesión desde la PC (Fase 1: se crea CERRADA, sin cronómetro) ───
+function CaptureSessionModal({ projectId, userId, onClose }: { projectId: string; userId: string; onClose: () => void }) {
+  const { t } = useI18n();
+  const { data: cat, isLoading } = useCaptureCatalogs(projectId);
+  const create = useCreateWorkSession(projectId);
+
+  const [equipmentId, setEquipmentId] = useState('');
+  const [activityId, setActivityId] = useState('');
+  const [sectorId, setSectorId] = useState('');
+  const [shiftId, setShiftId] = useState('');
+  const [start, setStart] = useState('');   // datetime-local
+  const [end, setEnd] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  // Actividades válidas para el equipo elegido (equipment_activities).
+  const activities = useMemo(() => {
+    if (!cat) return [];
+    if (!equipmentId) return cat.activities;
+    const ok = new Set(cat.equipmentActivities.filter(ea => ea.equipment_id === equipmentId).map(ea => ea.activity_id));
+    return cat.activities.filter(a => ok.has(a.id));
+  }, [cat, equipmentId]);
+
+  const startMs = start ? new Date(start).getTime() : NaN;
+  const endMs = end ? new Date(end).getTime() : NaN;
+  const valid = !!equipmentId && !!activityId && Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+
+  async function submit() {
+    if (!valid) { setErr('Completá equipo, actividad y un rango de horas válido (fin > inicio).'); return; }
+    setErr(null);
+    try {
+      await create.mutateAsync({
+        userId, equipmentId, activityId,
+        sectorId: sectorId || null, shiftId: shiftId || null,
+        startedAt: startMs, endedAt: endMs,
+      });
+      onClose();
+    } catch (e) { setErr((e as Error).message); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-navy/50 flex items-center justify-center p-4" onClick={() => !create.isPending && onClose()}>
+      <div className="bg-white rounded-xl w-full max-w-md p-4 flex flex-col gap-3 shadow-modal max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-extrabold text-textPrimary flex items-center gap-2"><Wrench size={15} className="text-primary" /> Capturar sesión de tareo</h3>
+          {!create.isPending && <button onClick={onClose}><X size={16} className="text-textMuted" /></button>}
+        </div>
+        <p className="text-[11px] text-textMuted">Registra una sesión ya terminada (queda CERRADA). El cronómetro en vivo y pausa/reanudar siguen siendo del móvil.</p>
+
+        {isLoading ? (
+          <div className="py-8 flex justify-center"><Loader2 className="animate-spin text-primary" /></div>
+        ) : (
+          <>
+            <Field label="Equipo (maquinaria)">
+              <select value={equipmentId} onChange={e => { setEquipmentId(e.target.value); setActivityId(''); }} className="w-full text-sm border border-border rounded px-2 py-2 bg-white">
+                <option value="">Seleccionar…</option>
+                {(cat?.equipment ?? []).map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Actividad">
+              <select value={activityId} onChange={e => setActivityId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-2 bg-white">
+                <option value="">Seleccionar…</option>
+                {activities.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            {(cat?.sectors.length ?? 0) > 0 && (
+              <Field label="Sector (opcional)">
+                <select value={sectorId} onChange={e => setSectorId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-2 bg-white">
+                  <option value="">—</option>
+                  {(cat?.sectors ?? []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {(cat?.shifts.length ?? 0) > 0 && (
+              <Field label="Turno (opcional)">
+                <select value={shiftId} onChange={e => setShiftId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-2 bg-white">
+                  <option value="">—</option>
+                  {(cat?.shifts ?? []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </Field>
+            )}
+            <div className="flex gap-2">
+              <Field label="Inicio"><input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-2" /></Field>
+              <Field label="Fin"><input type="datetime-local" value={end} min={start || undefined} onChange={e => setEnd(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-2" /></Field>
+            </div>
+
+            {err && <p className="text-xs text-danger bg-danger/5 border border-danger/30 rounded p-2">{err}</p>}
+
+            <div className="flex justify-end gap-2 mt-1">
+              <button onClick={onClose} disabled={create.isPending} className="px-3 py-1.5 text-xs font-bold text-textSecondary hover:text-textPrimary disabled:opacity-40">{t('common.cancel')}</button>
+              <button onClick={submit} disabled={!valid || create.isPending}
+                className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90 disabled:opacity-40 flex items-center gap-1.5">
+                {create.isPending && <Loader2 size={12} className="animate-spin" />}
+                {create.isPending ? 'Guardando…' : 'Capturar'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 flex-1">
+      <span className="text-xs font-bold text-textSecondary">{label}</span>
+      {children}
+    </label>
   );
 }
 

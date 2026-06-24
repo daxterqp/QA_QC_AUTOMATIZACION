@@ -7,7 +7,7 @@
  * Filtros opcionales: rango de fechas (`from`, `to` en ms epoch).
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import type {
   WorkSession, WorkSessionInterval, Activity, WorkShift,
@@ -89,6 +89,81 @@ export function useTraceability(projectId: string, filter: TraceabilityFilter = 
         users,
       };
     },
+  });
+}
+
+// ── Fase 1: CAPTURAR sesión desde la PC (sin cronómetro; se crea ya CERRADA) ───
+export interface CaptureCatalogs {
+  equipment: { id: string; code: string; name: string }[];
+  activities: { id: string; name: string }[];
+  equipmentActivities: { equipment_id: string; activity_id: string; form_template_id: string | null }[];
+  shifts: WorkShift[];
+  sectors: ProjectSector[];
+}
+
+/** Catálogos para el wizard de captura: equipos (maquinaria pesada) + actividades
+ *  válidas por equipo (equipment_activities) + turnos + sectores del proyecto. */
+export function useCaptureCatalogs(projectId: string) {
+  return useQuery({
+    queryKey: ['trace-capture-catalogs', projectId],
+    enabled: !!projectId,
+    queryFn: async (): Promise<CaptureCatalogs> => {
+      const [eRes, aRes, eaRes, shRes, secRes] = await Promise.all([
+        supabase.from('equipment').select('id, code, name, category').eq('project_id', projectId),
+        supabase.from('activities').select('id, name').eq('project_id', projectId),
+        supabase.from('equipment_activities').select('equipment_id, activity_id, form_template_id'),
+        supabase.from('work_shifts').select('*').eq('project_id', projectId),
+        supabase.from('project_sectors').select('*').eq('project_id', projectId),
+      ]);
+      const eq = ((eRes.data ?? []) as Array<{ id: string; code: string; name: string; category?: string | null }>)
+        .filter(e => (e.category ?? 'maquinaria_pesada') === 'maquinaria_pesada');
+      const eqIds = new Set(eq.map(e => e.id));
+      const ea = ((eaRes.data ?? []) as Array<{ equipment_id: string; activity_id: string; form_template_id: string | null }>)
+        .filter(x => eqIds.has(x.equipment_id));
+      return {
+        equipment: eq.map(e => ({ id: e.id, code: e.code, name: e.name })),
+        activities: (aRes.data ?? []) as { id: string; name: string }[],
+        equipmentActivities: ea,
+        shifts: (shRes.data ?? []) as WorkShift[],
+        sectors: (secRes.data ?? []) as ProjectSector[],
+      };
+    },
+  });
+}
+
+export interface CreateWorkSessionArgs {
+  userId: string;
+  equipmentId: string;
+  activityId: string;
+  sectorId: string | null;
+  shiftId: string | null;
+  startedAt: number;  // ms epoch
+  endedAt: number;    // ms epoch
+}
+
+/** Crea una sesión de tareo ya CERRADA (capturada desde la oficina) + su intervalo
+ *  activo [started_at, ended_at]. Mismo modelo que el móvil; sin pausa/reanudar ni GPS. */
+export function useCreateWorkSession(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: CreateWorkSessionArgs): Promise<string> => {
+      const id = crypto.randomUUID();
+      const now = Date.now();
+      const { error: e1 } = await supabase.from('work_sessions').insert({
+        id, project_id: projectId, user_id: args.userId, equipment_id: args.equipmentId,
+        activity_id: args.activityId, sector_id: args.sectorId, shift_id: args.shiftId,
+        started_at: args.startedAt, ended_at: args.endedAt, status: 'CLOSED',
+        started_on_device_id: 'web', auto_closed: false, created_at: now, updated_at: now,
+      });
+      if (e1) throw new Error(e1.message);
+      const { error: e2 } = await supabase.from('work_session_intervals').insert({
+        id: crypto.randomUUID(), session_id: id, kind: 'active',
+        started_at: args.startedAt, ended_at: args.endedAt, created_at: now,
+      });
+      if (e2) throw new Error(e2.message);
+      return id;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['traceability', projectId] }); },
   });
 }
 
