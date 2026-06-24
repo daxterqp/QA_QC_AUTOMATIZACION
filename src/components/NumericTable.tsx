@@ -1166,30 +1166,33 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
               <View style={{ marginBottom: 8 }}>
                 <Text style={[styles.pickerOptionText, { fontSize: 11, fontWeight: '800', color: Colors.secondary, marginBottom: 4 }]}>{t('numericTable.xrefPicker.groupings')}</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {groupingPresets.map(preset => (
+                  {groupingPresets.map(preset => {
+                    const marker = `@g:${preset.id}`;
+                    const isActive = (localValues[xrefPicker?.inputKey ?? ''] ?? '').split(',').map(s => s.trim()).includes(marker);
+                    return (
                     <TouchableOpacity
                       key={preset.id}
-                      style={{ borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#eef2fa' }}
+                      style={{ borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: isActive ? Colors.primary : '#eef2fa' }}
                       onPress={() => {
                         const ctxPicker = xrefPicker;
                         if (!ctxPicker) return;
                         // v47 — Guarda el MARCADOR `@g:<presetId>` (no los ids resueltos): la regla
                         // queda VIVA y se re-evalúa por fecha en cada apertura/cálculo (si un ensayo
-                        // se borra, trae otro). Aditivo con la selección manual ('＋'). Commit
-                        // explícito dentro del updater (persiste aunque cierren el modal).
-                        const marker = `@g:${preset.id}`;
+                        // se borra, trae otro). TOGGLE (aplica/quita) + aditivo con la selección
+                        // manual. Commit explícito dentro del updater (persiste aunque cierren el modal).
                         setLocalValues(prev => {
                           const cur = (prev[ctxPicker.inputKey] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-                          const union = cur.includes(marker) ? cur : [...cur, marker];
+                          const union = cur.includes(marker) ? cur.filter(c => c !== marker) : [...cur, marker];
                           const newVals = { ...prev, [ctxPicker.inputKey]: union.join(',') };
                           commitRow(ctxPicker.itemId, ctxPicker.spec, newVals);
                           return newVals;
                         });
                       }}
                     >
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: Colors.primary }}>＋ {preset.name}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: isActive ? Colors.white : Colors.primary }}>{isActive ? '▦' : '＋'} {preset.name}</Text>
                     </TouchableOpacity>
-                  ))}
+                    );
+                  })}
                 </View>
               </View>
             )}
