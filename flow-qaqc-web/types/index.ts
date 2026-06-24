@@ -62,6 +62,9 @@ export interface ProjectFeatureFlags {
   sample_form_rows?: { material?: boolean; condition?: boolean; depth?: boolean; coords?: boolean; layers?: boolean };
   /** v43 — Catálogo editable de "tipo de material" para muestras. */
   sample_materials?: string[];
+  /** Modo de visualización de las páginas de ensayos (sector/tipo/fecha): 'cards'
+   *  (tarjetas desplegables, default) | 'modal' (selector → un grupo a la vez). */
+  ensayos_view_mode?: 'cards' | 'modal';
 
   // ── v43 — Módulos opcionales del proyecto (visibilidad en el menú móvil) ──
   module_protocols_by_location: boolean;

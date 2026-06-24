@@ -17,13 +17,13 @@ import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronDown, ChevronRight, Plus, Loader2, FlaskConical, Search, X,
-  CalendarDays, Grid3x3,
+  CalendarDays, Grid3x3, Settings, LayoutList, MousePointerClick,
 } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
 import PageHeader from '@components/PageHeader';
-import { useProjects } from '@hooks/useProjects';
+import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
 import { useEnsayosData, useCreateEnsayos, type EnsayosMode } from '@hooks/useEnsayos';
 import { todayEnsayoDate, parseEnsayoDate } from '@lib/protocolCode';
 import type { Protocol, ProtocolStatus } from '@/types';
@@ -86,6 +86,22 @@ export default function EnsayosPage() {
   const project = projects.find(p => p.id === projectId);
   const { data, isLoading } = useEnsayosData(projectId);
   const createEnsayos = useCreateEnsayos(projectId);
+
+  // ── Control de visualización (config por proyecto, en feature_flags) ──────────
+  const { data: flags } = useProjectFlags(projectId);
+  const updateFlags = useUpdateProjectFlags(projectId);
+  const viewMode: 'cards' | 'modal' = flags?.ensayos_view_mode === 'modal' ? 'modal' : 'cards';
+  const [showViewCfg, setShowViewCfg] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+  const [selGroupKey, setSelGroupKey] = useState<string | null>(null);   // modo modal
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const saveViewMode = async (m: 'cards' | 'modal') => {
+    if (!flags) return;
+    setSavingView(true);
+    try { await updateFlags.mutateAsync({ ...flags, ensayos_view_mode: m }); setShowViewCfg(false); }
+    catch (e) { alert((e as Error).message); }
+    finally { setSavingView(false); }
+  };
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -255,6 +271,11 @@ export default function EnsayosPage() {
       ? (data?.sectors.find(s => filterSectorIds.has(s.id))?.name ?? t('webEnsayos.list.sectorOne'))
       : t('webEnsayos.list.sectorN', { n: filterSectorIds.size });
 
+  // Modo modal: se muestra UN solo grupo a la vez (el elegido en el selector; por defecto el primero).
+  const selectedKey = selGroupKey ?? (viewMode === 'modal' ? (groups[0]?.key ?? null) : null);
+  const displayGroups = viewMode === 'modal' ? groups.filter(g => g.key === selectedKey) : groups;
+  const selectedGroup = groups.find(g => g.key === selectedKey) ?? null;
+
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <PageHeader
@@ -342,8 +363,25 @@ export default function EnsayosPage() {
                 )}
               </button>
             )}
+            {/* Tuerca: modo de visualización (config por proyecto, se guarda una vez para todos). */}
+            <button onClick={() => setShowViewCfg(true)} title="Modo de visualización"
+              className="flex items-center gap-1.5 border border-border rounded-full px-3 py-1.5 bg-white text-[11px] font-bold text-textSecondary hover:border-primary/60 transition ml-auto">
+              <Settings size={13} /> {viewMode === 'modal' ? 'Selector' : 'Tarjetas'}
+            </button>
           </div>
         </div>
+
+        {/* Modo modal: casilla de selección → abre el picker de grupo. */}
+        {viewMode === 'modal' && !isLoading && groups.length > 0 && (
+          <button onClick={() => setShowGroupPicker(true)}
+            className="flex items-center justify-between gap-2 w-full bg-white border-2 border-primary/40 rounded-lg px-3 py-2.5 text-sm font-bold text-textPrimary hover:border-primary transition">
+            <span className="flex items-center gap-2 min-w-0">
+              <MousePointerClick size={15} className="text-primary shrink-0" />
+              <span className="truncate">{selectedGroup?.label ?? 'Elegí un grupo…'}</span>
+            </span>
+            <ChevronDown size={15} className="text-primary shrink-0" />
+          </button>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-16"><Loader2 className="animate-spin text-primary" /></div>
@@ -353,9 +391,9 @@ export default function EnsayosPage() {
               ? t('webEnsayos.list.emptySectors')
               : t('webEnsayos.list.emptyTemplates')}
           </div>
-        ) : groups.map(g => {
+        ) : displayGroups.map(g => {
           const items = protosOf(g);
-          const isOpen = expanded.has(g.key) || (filtersActive && items.length > 0);
+          const isOpen = viewMode === 'modal' || expanded.has(g.key) || (filtersActive && items.length > 0);
           const approved = items.filter(p => p.status === 'APPROVED').length;
           const submitted = items.filter(p => p.status === 'SUBMITTED').length;
           return (
@@ -535,6 +573,61 @@ export default function EnsayosPage() {
                 {createEnsayos.isPending && <Loader2 size={12} className="animate-spin" />}
                 {createEnsayos.isPending ? t('webEnsayos.list.creating') : t('webEnsayos.list.create')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Config de la tuerca: modo de visualización (se guarda para TODO el proyecto). */}
+      {showViewCfg && (
+        <div className="fixed inset-0 z-[60] bg-navy/50 flex items-center justify-center p-4" onClick={() => !savingView && setShowViewCfg(false)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-4 flex flex-col gap-3 shadow-modal" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-textPrimary flex items-center gap-2"><Settings size={15} className="text-primary" /> Modo de visualización</h3>
+              {!savingView && <button onClick={() => setShowViewCfg(false)}><X size={16} className="text-textMuted" /></button>}
+            </div>
+            <p className="text-[11px] text-textMuted">Se guarda una vez para todo el proyecto (todos lo verán igual).</p>
+            <button disabled={savingView} onClick={() => saveViewMode('cards')}
+              className={cn('flex items-start gap-3 p-3 rounded-lg border text-left transition', viewMode === 'cards' ? 'border-primary bg-primary/5' : 'border-border hover:bg-surface')}>
+              <LayoutList size={18} className={cn('mt-0.5', viewMode === 'cards' ? 'text-primary' : 'text-textMuted')} />
+              <span className="flex-1">
+                <span className="block text-sm font-bold text-textPrimary">Tarjetas desplegables</span>
+                <span className="block text-[11px] text-textMuted">Todos los grupos en pantalla; se despliegan hacia abajo (modo actual).</span>
+              </span>
+              {viewMode === 'cards' && <span className="text-xs font-bold text-primary">✓</span>}
+            </button>
+            <button disabled={savingView} onClick={() => saveViewMode('modal')}
+              className={cn('flex items-start gap-3 p-3 rounded-lg border text-left transition', viewMode === 'modal' ? 'border-primary bg-primary/5' : 'border-border hover:bg-surface')}>
+              <MousePointerClick size={18} className={cn('mt-0.5', viewMode === 'modal' ? 'text-primary' : 'text-textMuted')} />
+              <span className="flex-1">
+                <span className="block text-sm font-bold text-textPrimary">Selector (un grupo a la vez)</span>
+                <span className="block text-[11px] text-textMuted">Elegís un grupo en un selector y solo se cargan esos ensayos. Menos desorden.</span>
+              </span>
+              {viewMode === 'modal' && <span className="text-xs font-bold text-primary">✓</span>}
+            </button>
+            {savingView && <p className="text-[11px] text-textMuted flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Guardando…</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Picker de grupo (modo selector). */}
+      {showGroupPicker && (
+        <div className="fixed inset-0 z-[60] bg-navy/50 flex items-center justify-center p-4" onClick={() => setShowGroupPicker(false)}>
+          <div className="bg-white rounded-xl w-full max-w-sm p-4 flex flex-col gap-2 shadow-modal max-h-[70vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-textPrimary">{t(MODE_TITLES[mode])}</h3>
+              <button onClick={() => setShowGroupPicker(false)}><X size={16} className="text-textPrimary" /></button>
+            </div>
+            <div className="overflow-y-auto flex flex-col gap-0.5">
+              {groups.map(g => (
+                <button key={g.key}
+                  onClick={() => { setSelGroupKey(g.key); setShowGroupPicker(false); }}
+                  className={cn('flex items-center justify-between gap-2 text-left text-sm px-3 py-2.5 rounded hover:bg-surface transition',
+                    g.key === selectedKey && 'bg-primary/10 text-primary font-bold')}>
+                  <span className="truncate">{g.label}</span>
+                  <span className="text-[11px] text-textMuted shrink-0">{protosOf(g).length}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
