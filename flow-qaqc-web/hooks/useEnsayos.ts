@@ -147,6 +147,19 @@ export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<Cr
   let knownCodes: string[] = effectiveCodesOn ? await fetchProjectCodes(args.projectId) : [];
   let seq = effectiveCodesOn ? nextSeq(knownCodes, flags.coding_mask_default, tipo, date) : 0;
 
+  // v60 — HÍBRIDO: ONLINE la nube asigna el correlativo de forma atómica (cero colisión
+  // entre PC y móvil); reserva un bloque de `count`. OFFLINE / si el RPC falla, se mantiene
+  // el cálculo local (el índice único `protocols_code_uniq_per_project` sigue de backstop).
+  if (effectiveCodesOn) {
+    try {
+      const groupKey = `${tipo}|${date.getFullYear()}`;
+      const { data: cloudStart, error: seqErr } = await supabase.rpc('next_protocol_seq', {
+        p_project_id: args.projectId, p_group_key: groupKey, p_client_seq: seq, p_count: count,
+      });
+      if (!seqErr && typeof cloudStart === 'number' && cloudStart > 0) seq = cloudStart;
+    } catch { /* sin red → seq local */ }
+  }
+
   const createdProtocols: Protocol[] = [];
   const codes: (string | null)[] = [];
 
