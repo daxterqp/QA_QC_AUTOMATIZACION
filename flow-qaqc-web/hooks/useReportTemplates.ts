@@ -21,6 +21,13 @@ export interface ReportScope {
   window_days?: number | null;
 }
 
+/** Un gráfico del reporte: traza la columna `yKey` del resumen sobre las fechas de ensayo. */
+export interface ReportChart {
+  yKey: string;                 // key de la columna del resumen (ej. "1:A")
+  type: 'line' | 'bars';
+  label?: string;               // etiqueta a mostrar (ej. "Densidad - MDS")
+}
+
 export interface ReportRecipient {
   id: string;
   template_id: string;
@@ -38,6 +45,8 @@ export interface ReportTemplate {
   send_dow: number | null;
   send_dom: number | null;
   scope_json: ReportScope | null;
+  report_tipo: string | null;       // id_protocolo del tipo cuya Tabla Resumen se reporta
+  charts_json: ReportChart[] | null;
   custom_message: string | null;
   status: ReportStatus;
   next_send_at: number | null;
@@ -57,6 +66,8 @@ export interface ReportTemplateInput {
   send_dow: number | null;
   send_dom: number | null;
   scope: ReportScope | null;
+  report_tipo: string | null;
+  charts: ReportChart[];
   custom_message: string | null;
   status: ReportStatus;
   recipients: { email: string; name: string | null }[];
@@ -130,7 +141,8 @@ export function useCreateReportTemplate(projectId: string) {
       const { error } = await supabase.from('report_templates').insert({
         id, project_id: projectId, name: input.name.trim(), periodicity: input.periodicity,
         send_hour: input.send_hour, send_dow: input.send_dow, send_dom: input.send_dom,
-        scope_json: input.scope, custom_message: input.custom_message?.trim() || null,
+        scope_json: input.scope, report_tipo: input.report_tipo, charts_json: input.charts,
+        custom_message: input.custom_message?.trim() || null,
         status: input.status, next_send_at: nextSend, created_at: now, updated_at: now,
       });
       if (error) throw error;
@@ -150,7 +162,8 @@ export function useUpdateReportTemplate(projectId: string) {
       const { error } = await supabase.from('report_templates').update({
         name: input.name.trim(), periodicity: input.periodicity,
         send_hour: input.send_hour, send_dow: input.send_dow, send_dom: input.send_dom,
-        scope_json: input.scope, custom_message: input.custom_message?.trim() || null,
+        scope_json: input.scope, report_tipo: input.report_tipo, charts_json: input.charts,
+        custom_message: input.custom_message?.trim() || null,
         status: input.status, next_send_at: nextSend, updated_at: now,
       }).eq('id', id);
       if (error) throw error;
