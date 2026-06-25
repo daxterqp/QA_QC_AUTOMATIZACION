@@ -314,7 +314,8 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const codingInfoOf = useCallback((p: any): { groupKey: string; seq: number | null } | null => {
     if (!projFlags) return null;
     const tpl = templates.find(t => t.id === p.templateId);
-    const tipo = tpl?.idProtocolo ?? null;
+    // Mismo fallback que la creación (ProtocolInstanceService): idProtocolo o, si falta, el nombre.
+    const tipo = (tpl?.idProtocolo ?? '').trim() || (tpl?.name ?? '').trim() || null;
     if (!tipo) return null;
     const date = parseEnsayoDate(p.ensayoDate) ?? new Date();
     const resetScope: SeqResetScope = projFlags.coding_seq_reset === 'year_sector' ? { sector: true }

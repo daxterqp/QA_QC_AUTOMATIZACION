@@ -126,7 +126,8 @@ export default function EnsayosPage() {
   const codingInfoOf = useCallback((p: any): { groupKey: string; seq: number | null } | null => {
     if (!flags || !data) return null;
     const tpl = data.templates.find(t => t.id === p.template_id);
-    const tipo = tpl?.id_protocolo ?? null;
+    // Mismo fallback que la creación: id_protocolo o, si falta, el nombre del template.
+    const tipo = (tpl?.id_protocolo ?? '').trim() || (tpl?.name ?? '').trim() || null;
     if (!tipo) return null;
     const date = parseEnsayoDate(p.ensayo_date) ?? new Date();
     const resetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }

@@ -12,7 +12,7 @@ import { Q } from '@nozbe/watermelondb';
 import { supabase } from '@config/supabase';
 import { protocolsCollection, protocolTemplatesCollection, projectsCollection, projectSectorsCollection, samplesCollection } from '@db/index';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
-import { pickMask, buildProtocolCode, parseEnsayoDate, type SeqResetScope } from '@utils/protocolCode';
+import { pickMask, buildProtocolCode, parseEnsayoDate, validateMask, type SeqResetScope } from '@utils/protocolCode';
 import { buildSampleCode } from '@utils/sampleCode';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 
@@ -37,7 +37,9 @@ export async function renumberProject(projectId: string): Promise<RenumberResult
 
     const sectorNameOf = (p: any): string | null => (p.sectorId ? (secById.get(p.sectorId)?.name ?? null) : null);
     const groupKeyOf = (p: any): { gk: string; tipo: string } | null => {
-      const tipo = p.templateId ? (tplById.get(p.templateId)?.idProtocolo ?? null) : null;
+      const tpl = p.templateId ? tplById.get(p.templateId) : null;
+      // Mismo fallback que la creación: idProtocolo o, si falta, el nombre del template.
+      const tipo = (tpl?.idProtocolo ?? '').trim() || (tpl?.name ?? '').trim() || null;
       if (!tipo) return null;
       const date = parseEnsayoDate(p.ensayoDate) ?? new Date();
       const sectorPart = resetScope.sector ? `|${(sectorNameOf(p) ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
@@ -60,6 +62,7 @@ export async function renumberProject(projectId: string): Promise<RenumberResult
     for (const [gk, list] of groups) {
       const tipo = tipoOf.get(gk)!;
       const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+      if (validateMask(mask).length) continue;   // máscara inválida → no renumerar este grupo (evita colisión/rollback)
       // Orden por FECHA DE ENSAYO asc; desempate estable por creación.
       list.sort((a, b) => {
         const da = parseEnsayoDate(a.ensayoDate)?.getTime() ?? 0;

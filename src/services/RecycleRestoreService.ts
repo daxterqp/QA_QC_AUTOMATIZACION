@@ -29,7 +29,7 @@ async function computeNextFreeCode(snap: any): Promise<string | null> {
     const flags = parseFeatureFlagsJson(projRow?.featureFlags);
     if (!flags.protocol_codes) return null;
     const tplRow: any = proto.template_id ? await protocolTemplatesCollection.find(proto.template_id).catch(() => null) : null;
-    const tipo = tplRow?.idProtocolo ?? null;
+    const tipo = (tplRow?.idProtocolo ?? '').trim() || (tplRow?.name ?? '').trim() || null;   // fallback como la creación
     if (!tipo) return null;
     const date = parseEnsayoDate(proto.ensayo_date) ?? new Date();
     const resetScope: SeqResetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }

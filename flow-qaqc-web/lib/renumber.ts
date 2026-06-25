@@ -7,10 +7,16 @@
  */
 import { createClient } from '@lib/supabase/client';
 import { mergeFeatureFlags } from '@/types';
-import { pickMask, buildProtocolCode, parseEnsayoDate } from '@lib/protocolCode';
+import { pickMask, buildProtocolCode, parseEnsayoDate, validateMask } from '@lib/protocolCode';
 import { buildSampleCode } from '@lib/sampleCode';
 
 const supabase = createClient();
+
+/** created_at en ms (bigint). Robusto si llegara como string ISO o numérico (paridad con móvil _raw.created_at). */
+function cMs(p: { created_at?: unknown }): number {
+  const n = Number(p?.created_at);
+  return Number.isFinite(n) ? n : (Date.parse(String(p?.created_at)) || 0);
+}
 
 export async function renumberProject(projectId: string): Promise<{ ok: boolean; count?: number; reason?: string }> {
   try {
@@ -26,7 +32,7 @@ export async function renumberProject(projectId: string): Promise<{ ok: boolean;
     const list = (protos ?? []) as any[];
     const tmplIds = Array.from(new Set(list.map(p => p.template_id).filter(Boolean)));
     const [{ data: tpls }, { data: secs }] = await Promise.all([
-      tmplIds.length ? supabase.from('protocol_templates').select('id, id_protocolo').in('id', tmplIds) : Promise.resolve({ data: [] as any[] }),
+      tmplIds.length ? supabase.from('protocol_templates').select('id, id_protocolo, name').in('id', tmplIds) : Promise.resolve({ data: [] as any[] }),
       supabase.from('project_sectors').select('id, name').eq('project_id', projectId),
     ]);
     const tplById = new Map(((tpls ?? []) as any[]).map(t => [t.id, t]));
@@ -36,7 +42,9 @@ export async function renumberProject(projectId: string): Promise<{ ok: boolean;
     const groups = new Map<string, any[]>();
     const tipoOf = new Map<string, string>();
     for (const p of list) {
-      const tipo = p.template_id ? (tplById.get(p.template_id)?.id_protocolo ?? null) : null;
+      const tpl = p.template_id ? tplById.get(p.template_id) : null;
+      // Mismo fallback que la creación: id_protocolo o, si falta, el nombre del template.
+      const tipo = (tpl?.id_protocolo ?? '').trim() || (tpl?.name ?? '').trim() || null;
       if (!tipo) continue;
       const date = parseEnsayoDate(p.ensayo_date) ?? new Date();
       const sectorPart = resetScope.sector ? `|${(sectorNameOf(p) ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
@@ -51,10 +59,11 @@ export async function renumberProject(projectId: string): Promise<{ ok: boolean;
     for (const [gk, g] of Array.from(groups)) {
       const tipo = tipoOf.get(gk)!;
       const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+      if (validateMask(mask).length) continue;   // máscara inválida → no renumerar este grupo
       g.sort((a: any, b: any) => {
         const da = parseEnsayoDate(a.ensayo_date)?.getTime() ?? 0;
         const db = parseEnsayoDate(b.ensayo_date)?.getTime() ?? 0;
-        return (da - db) || ((Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+        return (da - db) || (cMs(a) - cMs(b));
       });
       g.forEach((p: any, i: number) => {
         const date = parseEnsayoDate(p.ensayo_date) ?? new Date();
@@ -84,7 +93,7 @@ export async function renumberSamples(projectId: string): Promise<{ ok: boolean;
     list.sort((a, b) => {
       const da = parseEnsayoDate(a.sample_date)?.getTime() ?? 0;
       const db = parseEnsayoDate(b.sample_date)?.getTime() ?? 0;
-      return (da - db) || ((Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+      return (da - db) || (cMs(a) - cMs(b));
     });
     const codes = list.map((s, i) => ({ id: s.id, code: buildSampleCode(sampleIdentifier, s.sample_date ?? undefined, i + 1), seq: i + 1 }));
     const { data, error } = await supabase.rpc('renumber_samples', { p_project_id: projectId, p_codes: codes });

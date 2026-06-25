@@ -25,8 +25,9 @@ async function computeNextFreeCode(snap: any): Promise<string | null> {
     if (!flags.protocol_codes) return null;
     let tipo: string | null = null;
     if (proto.template_id) {
-      const { data: tpl } = await supabase.from('protocol_templates').select('id_protocolo').eq('id', proto.template_id).single();
-      tipo = (tpl as any)?.id_protocolo ?? null;
+      const { data: tpl } = await supabase.from('protocol_templates').select('id_protocolo, name').eq('id', proto.template_id).single();
+      // Mismo fallback que la creación: id_protocolo o, si falta, el nombre del template.
+      tipo = ((tpl as any)?.id_protocolo ?? '').trim() || ((tpl as any)?.name ?? '').trim() || null;
     }
     if (!tipo) return null;
     const date = parseEnsayoDate(proto.ensayo_date) ?? new Date();
