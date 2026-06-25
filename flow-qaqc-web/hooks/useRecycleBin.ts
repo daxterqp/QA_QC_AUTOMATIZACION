@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import { deleteS3Objects } from '@lib/s3Delete';
+import { mergeFeatureFlags } from '@/types';
+import { pickMask, nextSeq, buildProtocolCode, parseEnsayoDate } from '@lib/protocolCode';
 
 const supabase = createClient();
 
@@ -10,6 +12,41 @@ function s3KeysFromSnapshot(snap: any): string[] {
   for (const e of (snap?.evidences ?? [])) { const k = e?.s3_key ?? e?.s3_url_placeholder; if (k) keys.push(k); }
   for (const p of (snap?.annotation_comment_photos ?? [])) { if (p?.storage_path) keys.push(p.storage_path); }
   return keys;
+}
+
+/** v62 — "Próximo código libre" para re-codificar un ensayo restaurado cuyo código original ya
+ *  fue reusado (espejo de la creación). null → conserva el original. */
+async function computeNextFreeCode(snap: any): Promise<string | null> {
+  try {
+    const proto = snap?.protocol;
+    if (!proto?.project_id) return null;
+    const { data: project } = await supabase.from('projects').select('feature_flags').eq('id', proto.project_id).single();
+    const flags = mergeFeatureFlags(((project as any)?.feature_flags ?? null));
+    if (!flags.protocol_codes) return null;
+    let tipo: string | null = null;
+    if (proto.template_id) {
+      const { data: tpl } = await supabase.from('protocol_templates').select('id_protocolo').eq('id', proto.template_id).single();
+      tipo = (tpl as any)?.id_protocolo ?? null;
+    }
+    if (!tipo) return null;
+    const date = parseEnsayoDate(proto.ensayo_date) ?? new Date();
+    const resetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }
+      : flags.coding_seq_reset === 'year_month' ? { month: true } : {};
+    let sectorName: string | null = null;
+    if (proto.sector_id) {
+      const { data: sec } = await supabase.from('project_sectors').select('name').eq('id', proto.sector_id).single();
+      sectorName = (sec as any)?.name ?? null;
+    }
+    const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+    const { data: codeRows } = await supabase.from('protocols').select('protocol_code').eq('project_id', proto.project_id);
+    const baseSeq = nextSeq(((codeRows ?? []) as any[]).map(r => r.protocol_code), mask, tipo, date, sectorName, resetScope);
+    const sectorPart = resetScope.sector ? `|${(sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+    const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+    const groupKey = `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`;
+    const { data: cloudStart } = await supabase.rpc('next_protocol_seq', { p_project_id: proto.project_id, p_group_key: groupKey, p_client_seq: baseSeq, p_count: 1 });
+    const seq = (typeof cloudStart === 'number' && cloudStart > 0) ? cloudStart : baseSeq;
+    return buildProtocolCode(mask, { tipo, date, seq, sector: sectorName });
+  } catch { return null; }
 }
 
 /**
@@ -62,10 +99,18 @@ export function useRecycleBin(projectId: string) {
 export function useRestoreRecycle(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (recycleId: string) => {
-      const { data, error } = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: recycleId, p_new_code: null });
+    mutationFn: async (entry: RecycleBinEntry) => {
+      const { data, error } = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: entry.id, p_new_code: null });
       if (error) {
-        if (/23505|duplicate|uniq/i.test(error.message)) throw new Error('code_in_use');
+        if (/23505|duplicate|uniq/i.test(error.message)) {
+          // Código original reusado → recodificar con el próximo libre y reintentar.
+          const newCode = await computeNextFreeCode(entry.snapshot_json);
+          if (newCode) {
+            const retry = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: entry.id, p_new_code: newCode });
+            if (!retry.error) return retry.data;
+          }
+          throw new Error('code_in_use');
+        }
         throw error;
       }
       return data;

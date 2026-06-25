@@ -5,11 +5,48 @@
  * can_access_project) y convergen con `pullProjectFromCloud`. El borrado del ensayo ya
  * es "soft" (vive en recycle_bin); esto agrega la vuelta (restaurar) y el definitivo (purge).
  */
+import { Q } from '@nozbe/watermelondb';
 import { supabase } from '@config/supabase';
+import { protocolsCollection, protocolTemplatesCollection, projectsCollection, projectSectorsCollection } from '@db/index';
+import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { pickMask, nextSeq, buildProtocolCode, parseEnsayoDate, type SeqResetScope } from '@utils/protocolCode';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { deleteFromS3 } from '@services/S3Service';
 
 export type RestoreResult = { ok: boolean; reason?: 'code_in_use' | 'offline' | string; code?: string };
+
+/**
+ * v62 — Calcula el "próximo código libre" para re-codificar un ensayo restaurado cuyo código
+ * original ya fue reusado. Espejo de la codificación de creación (pickMask + nextSeq + RPC
+ * next_protocol_seq + buildProtocolCode). Devuelve null si el proyecto no usa codificación o
+ * falta el tipo (en cuyo caso se conserva el código original).
+ */
+async function computeNextFreeCode(snap: any): Promise<string | null> {
+  try {
+    const proto = snap?.protocol;
+    if (!proto?.project_id) return null;
+    const projRow: any = await projectsCollection.find(proto.project_id).catch(() => null);
+    const flags = parseFeatureFlagsJson(projRow?.featureFlags);
+    if (!flags.protocol_codes) return null;
+    const tplRow: any = proto.template_id ? await protocolTemplatesCollection.find(proto.template_id).catch(() => null) : null;
+    const tipo = tplRow?.idProtocolo ?? null;
+    if (!tipo) return null;
+    const date = parseEnsayoDate(proto.ensayo_date) ?? new Date();
+    const resetScope: SeqResetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }
+      : flags.coding_seq_reset === 'year_month' ? { month: true } : {};
+    const sectorRow: any = proto.sector_id ? await projectSectorsCollection.find(proto.sector_id).catch(() => null) : null;
+    const sectorName = sectorRow?.name ?? null;
+    const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+    const allProtos: any[] = await protocolsCollection.query(Q.where('project_id', proto.project_id)).fetch().catch(() => []);
+    const baseSeq = nextSeq(allProtos.map(p => p.protocolCode), mask, tipo, date, sectorName, resetScope);
+    const sectorPart = resetScope.sector ? `|${(sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+    const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+    const groupKey = `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`;
+    const { data: cloudStart } = await supabase.rpc('next_protocol_seq', { p_project_id: proto.project_id, p_group_key: groupKey, p_client_seq: baseSeq, p_count: 1 });
+    const seq = (typeof cloudStart === 'number' && cloudStart > 0) ? cloudStart : baseSeq;
+    return buildProtocolCode(mask, { tipo, date, seq, sector: sectorName });
+  } catch { return null; }
+}
 export type PurgeResult = { ok: boolean; reason?: 'forbidden' | 'offline' | string };
 
 /** Claves S3 (evidencias + fotos de comentarios) desde un snapshot de papelera. Mismos
@@ -27,11 +64,21 @@ function s3KeysFromSnapshot(snap: any): string[] {
  * índice único lo rechaza → devuelve `code_in_use` para que la UI lo informe. Tras el éxito,
  * converge con pull (reaparece el ensayo) y la entrada local de papelera desaparece sola.
  */
-export async function restoreFromRecycle(recycleId: string, projectId: string): Promise<RestoreResult> {
+export async function restoreFromRecycle(recycleId: string, projectId: string, snapshotJson?: string | null): Promise<RestoreResult> {
   const { data, error } = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: recycleId, p_new_code: null });
   if (error) {
     const msg = error.message ?? '';
-    if (/23505|duplicate|uniq/i.test(msg)) return { ok: false, reason: 'code_in_use' };
+    if (/23505|duplicate|uniq/i.test(msg)) {
+      // El código original ya fue reusado → recodificar con el PRÓXIMO LIBRE y reintentar
+      // (la elección del usuario: "restaurar = próximo código libre, nunca colisiona").
+      let newCode: string | null = null;
+      try { if (snapshotJson) newCode = await computeNextFreeCode(JSON.parse(snapshotJson)); } catch { /* sin recodificación */ }
+      if (newCode) {
+        const retry = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: recycleId, p_new_code: newCode });
+        if (!retry.error) { await pullProjectFromCloud(projectId).catch(() => {}); return { ok: true, code: newCode }; }
+      }
+      return { ok: false, reason: 'code_in_use' };
+    }
     if (/network|fetch|offline/i.test(msg)) return { ok: false, reason: 'offline' };
     return { ok: false, reason: msg || 'error' };
   }

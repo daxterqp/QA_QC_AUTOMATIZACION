@@ -71,7 +71,7 @@ export default function PapeleraPage() {
     const code = e.protocol_code ?? e.protocol_number ?? 'este ensayo';
     if (!window.confirm(`¿Restaurar ${code}? Vuelve a la lista con su código.`)) return;
     setBusyId(e.id);
-    try { await restore.mutateAsync(e.id); }
+    try { await restore.mutateAsync(e); }
     catch (err: any) {
       window.alert(err?.message === 'code_in_use'
         ? 'Ese código ya fue reusado por otro ensayo. Crea espacio o usa el modo de numeración flexible para renumerar.'

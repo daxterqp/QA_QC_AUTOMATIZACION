@@ -124,7 +124,7 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Restaurar', onPress: async () => {
           setBusyId(e.id);
-          const r = await restoreFromRecycle(e.id, projectId);
+          const r = await restoreFromRecycle(e.id, projectId, e.snapshotJson);
           setBusyId(null);
           if (!r.ok) {
             Alert.alert('No se pudo restaurar',
