@@ -51,6 +51,7 @@ import { useAuth } from '@context/AuthContext';
 import { createInstances } from '@services/ProtocolInstanceService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { todayEnsayoDate, parseEnsayoDate, pickMask, seqFromCode, type SeqResetScope } from '@utils/protocolCode';
+import { renumberProject } from '@services/RenumberService';
 import { isValidTimeText } from '@utils/numericProtocol';
 import type Protocol from '@models/Protocol';
 import type { ProtocolStatus } from '@models/Protocol';
@@ -129,6 +130,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const [templates, setTemplates] = useState<TemplateLite[]>([]);
   const [sectorsLite, setSectorsLite] = useState<SectorLite[]>([]);
   const [projFlags, setProjFlags] = useState<ProjectFeatureFlags | null>(null);
+  const [renumbering, setRenumbering] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // ── v32: buscador + filtros cruzados (default: todos) ────────────────────
@@ -559,6 +561,30 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     );
   };
 
+  const onRenumber = () => {
+    if (renumbering) return;
+    Alert.alert(
+      'Restablecer numeración',
+      'Reasigna los códigos desde 1 dentro de cada grupo, por FECHA DE ENSAYO, eliminando los huecos que dejaron los borrados. Las referencias entre ensayos NO se rompen (son por id). ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Restablecer', style: 'destructive', onPress: async () => {
+          setRenumbering(true);
+          const r = await renumberProject(projectId);
+          setRenumbering(false);
+          if (!r.ok) {
+            Alert.alert('No se pudo renumerar', r.reason === 'no_coding'
+              ? 'El proyecto no usa codificación correlativa de ensayos.'
+              : (r.reason ?? 'Ocurrió un error.'));
+          } else {
+            Alert.alert('Numeración restablecida', `${r.count ?? 0} ensayo(s) recodificados.`);
+            await loadData();
+          }
+        } },
+      ],
+    );
+  };
+
   const sections = useMemo(() => groups.map((g, idx) => {
     const items = protosOf(g);
     const isOpen = expanded.has(g.key) || (filtersActive && items.length > 0);
@@ -635,6 +661,12 @@ export default function EnsayosScreen({ navigation, route }: Props) {
           </View>
         </TouchableOpacity>
       </Modal>
+      {projFlags?.deletion_mode === 'in_list_reassignable' && (
+        <TouchableOpacity onPress={onRenumber} disabled={renumbering} style={styles.renumberBtn} activeOpacity={0.8}>
+          {renumbering ? <ActivityIndicator size="small" color={Colors.primary} /> : <Ionicons name="git-compare-outline" size={15} color={Colors.primary} />}
+          <Text style={styles.renumberBtnText}>Restablecer numeración</Text>
+        </TouchableOpacity>
+      )}
       {!showFilters ? null : (
       <>
       {/* Buscador */}
@@ -1177,6 +1209,8 @@ const styles = StyleSheet.create({
   sortDirText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   sortDone: { marginTop: 12, backgroundColor: Colors.primary, borderRadius: Radius.sm, paddingVertical: 11, alignItems: 'center' },
   sortDoneText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
+  renumberBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, paddingVertical: 9, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: '#eef2fa' },
+  renumberBtnText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
   modalRow: { flexDirection: 'row', gap: 10 },
   modalInput: {
     fontSize: 13, padding: 9, borderRadius: 4, borderWidth: 1, borderColor: Colors.border,

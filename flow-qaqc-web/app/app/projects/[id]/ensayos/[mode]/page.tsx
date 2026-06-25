@@ -17,14 +17,16 @@ import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronDown, ChevronRight, Plus, Loader2, FlaskConical, Search, X,
-  CalendarDays, Grid3x3, Settings, LayoutList, MousePointerClick,
+  CalendarDays, Grid3x3, Settings, LayoutList, MousePointerClick, ArrowDownUp,
 } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
 import PageHeader from '@components/PageHeader';
+import { useQueryClient } from '@tanstack/react-query';
 import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
 import { useEnsayosData, useCreateEnsayos, type EnsayosMode } from '@hooks/useEnsayos';
+import { renumberProject } from '@lib/renumber';
 import { todayEnsayoDate, parseEnsayoDate } from '@lib/protocolCode';
 import type { Protocol, ProtocolStatus } from '@/types';
 
@@ -92,6 +94,22 @@ export default function EnsayosPage() {
   const updateFlags = useUpdateProjectFlags(projectId);
   const viewMode: 'cards' | 'modal' = flags?.ensayos_view_mode === 'modal' ? 'modal' : 'cards';
   const [showViewCfg, setShowViewCfg] = useState(false);
+  // v63 — Restablecer numeración (modo B).
+  const qc = useQueryClient();
+  const [renumbering, setRenumbering] = useState(false);
+  const onRenumber = async () => {
+    if (renumbering) return;
+    if (!window.confirm('Reasigna los códigos desde 1 dentro de cada grupo, por fecha de ensayo, eliminando los huecos. Las referencias entre ensayos NO se rompen (son por id). ¿Continuar?')) return;
+    setRenumbering(true);
+    const r = await renumberProject(projectId);
+    setRenumbering(false);
+    if (!r.ok) {
+      window.alert(r.reason === 'no_coding' ? 'El proyecto no usa codificación correlativa de ensayos.' : 'No se pudo renumerar. Revisa tu conexión.');
+    } else {
+      window.alert(`Numeración restablecida: ${r.count ?? 0} ensayo(s) recodificados.`);
+      qc.invalidateQueries({ predicate: q => Array.isArray(q.queryKey) && q.queryKey[0] === 'ensayos' });
+    }
+  };
   const [savingView, setSavingView] = useState(false);
   const [selGroupKey, setSelGroupKey] = useState<string | null>(null);   // modo modal
   const [showGroupPicker, setShowGroupPicker] = useState(false);
@@ -401,6 +419,15 @@ export default function EnsayosPage() {
             </button>
           </div>
         </div>
+
+        {/* v63 — Restablecer numeración (modo B / código flexible). */}
+        {flags?.deletion_mode === 'in_list_reassignable' && (
+          <button onClick={onRenumber} disabled={renumbering}
+            className="flex items-center justify-center gap-1.5 mt-2 w-full border-[1.5px] border-primary bg-primary/5 text-primary text-xs font-extrabold rounded-lg py-2 hover:bg-primary/10 disabled:opacity-50 transition">
+            {renumbering ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownUp size={14} />}
+            Restablecer numeración
+          </button>
+        )}
 
         {/* Modo modal: casilla de selección → abre el picker de grupo. */}
         {viewMode === 'modal' && !isLoading && groups.length > 0 && (
