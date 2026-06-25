@@ -31,6 +31,7 @@ import { useTour } from '@context/TourContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { buildSampleCode, nextSampleSeq, todaySampleDate } from '@utils/sampleCode';
 import { parseFeatureFlagsJson, type CoordinateSystem } from '@utils/featureFlags';
+import { deleteSampleToRecycle } from '@services/RecycleRestoreService';
 import { wgs84ToUtm, wgs84ToPsad56Utm, wgs84ToPsad56LatLng, findSectorByPoint } from '@utils/CoordinateSystem';
 import { pushSample, pullSamples, mergeAndSaveFeatureFlags } from '@services/SupabaseSyncService';
 import { exportSampleDossierPdf } from '@services/DossierExportService';
@@ -91,6 +92,8 @@ export default function SamplesScreen({ route, navigation }: Props) {
   const { captureMany } = useCroquisCapture();
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletionMode, setDeletionMode] = useState<'last_only' | 'in_list_immutable' | 'in_list_reassignable'>('last_only');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [exportingDossier, setExportingDossier] = useState(false);
   const toggleSelected = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -142,6 +145,7 @@ export default function SamplesScreen({ route, navigation }: Props) {
         protocolsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]),
       ]);
       const flags = parseFeatureFlagsJson((proj as any)?.featureFlags);
+      setDeletionMode(flags.deletion_mode ?? 'last_only');
       // v43.3 FIX — Las muestras usan sectores si el proyecto TIENE sectores definidos,
       // independientemente del modo "ensayos por sector" (fill_by_sector). Antes el filtro
       // y el campo de sector no aparecían aunque las muestras sí tuvieran sector asignado.
@@ -171,6 +175,41 @@ export default function SamplesScreen({ route, navigation }: Props) {
     pullSamples(projectId).catch(() => {}).finally(() => { if (active) loadData(); });
     return () => { active = false; };
   }, [projectId, loadData]));
+
+  // v64 — Última muestra creada (mayor seq). En modo 'last_only' solo ESTA es borrable.
+  const lastSampleId = useMemo(() => {
+    let best: any = null;
+    for (const s of samples as any[]) if (!best || (s.seq ?? 0) > (best.seq ?? 0)) best = s;
+    return best?.id ?? null;
+  }, [samples]);
+  const canDelete = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
+
+  const onDeleteSample = (item: any) => {
+    if (!canDelete) { Alert.alert('Sin permiso', 'Solo el Jefe o el Creador pueden eliminar muestras.'); return; }
+    const cnt = countBySample[item.id] ?? 0;
+    if (cnt > 0) {
+      Alert.alert('No se puede eliminar', `Esta muestra tiene ${cnt} ensayo(s) vinculados. Elimínalos o muévelos primero.`);
+      return;
+    }
+    Alert.alert(
+      deletionMode === 'last_only' ? 'Eliminar última muestra' : 'Eliminar muestra',
+      `¿Eliminar ${item.sampleCode}? Va a la papelera (se puede restaurar).`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: async () => {
+          setDeletingId(item.id);
+          const r = await deleteSampleToRecycle(item.id, projectId, { deletedById: currentUser?.id ?? null, deletedByName: currentUser?.name ?? null });
+          setDeletingId(null);
+          if (!r.ok) {
+            Alert.alert('No se pudo eliminar',
+              r.reason === 'has_protocols' ? `La muestra tiene ${r.count ?? ''} ensayo(s) vinculados.`
+              : r.reason === 'offline' ? 'Necesitas conexión para eliminar.'
+              : (r.reason ?? 'Ocurrió un error.'));
+          } else { loadData(); }
+        } },
+      ],
+    );
+  };
 
   const sectorName = (id: string | null) => sectors.find(s => s.id === id)?.name ?? '—';
   const locationName = (id: string | null) => locations.find(l => l.id === id)?.name ?? '—';
@@ -418,6 +457,11 @@ export default function SamplesScreen({ route, navigation }: Props) {
                 </Text>
               </View>
               <View style={styles.countBadge}><Text style={styles.countText}>{countBySample[item.id] ?? 0}</Text><Text style={styles.countLabel}>{t('samples.testsLabel')}</Text></View>
+              {!selectMode && canDelete && (deletionMode !== 'last_only' || item.id === lastSampleId) ? (
+                <TouchableOpacity onPress={() => onDeleteSample(item)} disabled={deletingId === item.id} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginLeft: 6 }}>
+                  {deletingId === item.id ? <ActivityIndicator size="small" color={Colors.danger} /> : <Ionicons name="trash-outline" size={18} color={Colors.danger} />}
+                </TouchableOpacity>
+              ) : null}
               {!selectMode ? <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} /> : null}
             </TouchableOpacity>
             );

@@ -17,7 +17,7 @@ import NumericTable from '@components/NumericTable';
 import { Colors, Radius } from '../theme/colors';
 import { recycleBinCollection, labAuxTablesCollection } from '@db/index';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
-import { restoreFromRecycle, purgeRecycleEntry } from '@services/RecycleRestoreService';
+import { restoreFromRecycle, restoreSampleFromRecycle, purgeRecycleEntry } from '@services/RecycleRestoreService';
 import { useAuth } from '@context/AuthContext';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { useTourStep } from '@hooks/useTourStep';
@@ -124,7 +124,11 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Restaurar', onPress: async () => {
           setBusyId(e.id);
-          const r = await restoreFromRecycle(e.id, projectId, e.snapshotJson);
+          // v64 — las entradas de MUESTRA usan el RPC de muestras (id 'recycle-sample-…').
+          const isSample = e.id.startsWith('recycle-sample-');
+          const r = isSample
+            ? await restoreSampleFromRecycle(e.id, projectId)
+            : await restoreFromRecycle(e.id, projectId, e.snapshotJson);
           setBusyId(null);
           if (!r.ok) {
             Alert.alert('No se pudo restaurar',

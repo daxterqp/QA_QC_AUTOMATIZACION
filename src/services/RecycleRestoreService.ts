@@ -88,8 +88,44 @@ export async function restoreFromRecycle(recycleId: string, projectId: string, s
 }
 
 /**
+ * v64 — Borra una MUESTRA → papelera (soft). BLOQUEA si tiene ensayos vinculados (la RPC aborta
+ * con `sample_has_protocols:<n>`). Online (converge con pull).
+ */
+export async function deleteSampleToRecycle(
+  sampleId: string, projectId: string,
+  meta?: { deletedById?: string | null; deletedByName?: string | null },
+): Promise<{ ok: boolean; reason?: 'has_protocols' | 'offline' | string; count?: number }> {
+  const { error } = await supabase.rpc('delete_sample_to_recycle', {
+    p_sample_id: sampleId, p_deleted_by_id: meta?.deletedById ?? null, p_deleted_by_name: meta?.deletedByName ?? null,
+  });
+  if (error) {
+    const m = error.message ?? '';
+    const hp = m.match(/sample_has_protocols:(\d+)/);
+    if (hp) return { ok: false, reason: 'has_protocols', count: Number(hp[1]) };
+    if (/network|fetch|offline/i.test(m)) return { ok: false, reason: 'offline' };
+    return { ok: false, reason: m || 'error' };
+  }
+  await pullProjectFromCloud(projectId).catch(() => {});
+  return { ok: true };
+}
+
+/** v64 — Restaura una MUESTRA desde la papelera (RPC v64). */
+export async function restoreSampleFromRecycle(recycleId: string, projectId: string): Promise<RestoreResult> {
+  const { data, error } = await supabase.rpc('restore_sample_from_recycle', { p_recycle_id: recycleId, p_new_code: null });
+  if (error) {
+    const m = error.message ?? '';
+    if (/23505|duplicate|uniq/i.test(m)) return { ok: false, reason: 'code_in_use' };
+    if (/network|fetch|offline/i.test(m)) return { ok: false, reason: 'offline' };
+    return { ok: false, reason: m || 'error' };
+  }
+  await pullProjectFromCloud(projectId).catch(() => {});
+  const r = (data ?? {}) as { sample_code?: string };
+  return { ok: true, code: r.sample_code ?? undefined };
+}
+
+/**
  * Elimina DEFINITIVAMENTE una entrada de papelera (RPC v62, solo CREATOR) y libera las fotos
- * S3 del snapshot. Irreversible.
+ * S3 del snapshot. Irreversible. Genérico (sirve para ensayos y muestras).
  */
 export async function purgeRecycleEntry(recycleId: string, projectId: string, snapshotJson: string): Promise<PurgeResult> {
   const { error } = await supabase.rpc('purge_recycle_entry', { p_recycle_id: recycleId });
