@@ -132,6 +132,11 @@ export default function EnsayosScreen({ navigation, route }: Props) {
 
   // ── v32: buscador + filtros cruzados (default: todos) ────────────────────
   const [search, setSearch] = useState('');
+  // v62 — Orden de la lista. Por defecto: CREACIÓN ascendente (antiguos arriba, nuevos abajo →
+  // el "+ Añadir" queda al final). El usuario lo cambia con el modal de orden.
+  const [sortBy, setSortBy] = useState<'creation' | 'ensayo' | 'code'>('creation');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [showSortModal, setShowSortModal] = useState(false);
   // Fecha: RANGO desde/hasta (mismo día = filtra solo ese día).
   const [filterFromMs, setFilterFromMs] = useState<number | null>(null);
   const [filterToMs, setFilterToMs] = useState<number | null>(null);
@@ -286,11 +291,19 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       }
       return true;
     });
-    // Código desc (los más nuevos arriba), fallback creación desc.
-    return list.sort((a, b) =>
-      (b.protocolCode ?? '').localeCompare(a.protocolCode ?? '') ||
-      (b._raw?.created_at ?? 0) - (a._raw?.created_at ?? 0)) as Protocol[];
-  }, [protos, search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds]);
+    // v62 — Orden configurable. Default: creación ascendente (antiguos arriba). Desempate
+    // SIEMPRE por creación (estable). El "último creado" queda abajo en el default.
+    const createdMs = (p: any) => (p._raw?.created_at ?? 0);
+    const ensayoMs = (p: any) => parseEnsayoDate(p.ensayoDate)?.getTime() ?? 0;
+    return list.sort((a, b) => {
+      let cmp: number;
+      if (sortBy === 'ensayo') cmp = ensayoMs(a) - ensayoMs(b);
+      else if (sortBy === 'code') cmp = (a.protocolCode ?? '').localeCompare(b.protocolCode ?? '');
+      else cmp = createdMs(a) - createdMs(b);
+      if (cmp === 0) cmp = createdMs(a) - createdMs(b);
+      return sortAsc ? cmp : -cmp;
+    }) as Protocol[];
+  }, [protos, search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds, sortBy, sortAsc]);
 
   const toggleGroup = (key: string) =>
     setExpanded(prev => {
@@ -532,8 +545,46 @@ export default function EnsayosScreen({ navigation, route }: Props) {
         <Text style={[styles.filterToggleText, filtersActive && { color: Colors.primary }]}>{filtersActive ? t('ensayos.filters.labelActive') : t('ensayos.filters.label')}</Text>
         <View style={{ flex: 1 }} />
         {filtersActive && <TouchableOpacity onPress={() => { setSearch(''); setFilterFromMs(null); setFilterToMs(null); setFilterTemplateIds(new Set()); setFilterSectorIds(new Set()); setFilterSampleIds(new Set()); setSampleFrom(''); setSampleTo(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Text style={styles.filterClearLink}>{t('ensayos.filters.clear')}</Text></TouchableOpacity>}
+        <TouchableOpacity onPress={() => setShowSortModal(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 12 }}>
+          <Ionicons name="swap-vertical-outline" size={15} color={Colors.textSecondary} />
+          <Text style={styles.filterClearLink}>Orden</Text>
+        </TouchableOpacity>
         <Ionicons name={showFilters ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} style={{ marginLeft: 10 }} />
       </TouchableOpacity>
+      <Modal visible={showSortModal} transparent animationType="fade" onRequestClose={() => setShowSortModal(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowSortModal(false)} style={styles.sortBackdrop}>
+          <View style={styles.sortSheet}>
+            <Text style={styles.sortTitle}>Ordenar ensayos por</Text>
+            {([
+              ['creation', 'Fecha de creación'],
+              ['ensayo', 'Fecha del ensayo'],
+              ['code', 'Código'],
+            ] as const).map(([val, label]) => {
+              const active = sortBy === val;
+              return (
+                <TouchableOpacity key={val} onPress={() => setSortBy(val)} style={[styles.optionRow, active && styles.optionRowActive]}>
+                  <View style={[styles.radio, active && styles.radioActive]}>{active && <View style={styles.radioInner} />}</View>
+                  <Text style={[styles.optionText, active && { color: Colors.primary, fontWeight: '700' }]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            <View style={styles.sortDivider} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={() => setSortAsc(true)} style={[styles.sortDirBtn, sortAsc && styles.sortDirBtnActive]}>
+                <Ionicons name="arrow-up" size={14} color={sortAsc ? Colors.primary : Colors.textSecondary} />
+                <Text style={[styles.sortDirText, sortAsc && { color: Colors.primary, fontWeight: '800' }]}>Ascendente</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setSortAsc(false)} style={[styles.sortDirBtn, !sortAsc && styles.sortDirBtnActive]}>
+                <Ionicons name="arrow-down" size={14} color={!sortAsc ? Colors.primary : Colors.textSecondary} />
+                <Text style={[styles.sortDirText, !sortAsc && { color: Colors.primary, fontWeight: '800' }]}>Descendente</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={() => setShowSortModal(false)} style={styles.sortDone}>
+              <Text style={styles.sortDoneText}>Listo</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
       {!showFilters ? null : (
       <>
       {/* Buscador */}
@@ -1064,6 +1115,18 @@ const styles = StyleSheet.create({
   radio: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center' },
   radioActive: { borderColor: Colors.primary },
   radioInner: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: Colors.primary },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 8, borderRadius: Radius.sm },
+  optionRowActive: { backgroundColor: '#eef2fa' },
+  optionText: { fontSize: 13, color: Colors.textPrimary },
+  sortBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 28 },
+  sortSheet: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 16, gap: 4 },
+  sortTitle: { fontSize: 14, fontWeight: '800', color: Colors.navy, marginBottom: 6 },
+  sortDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: 8 },
+  sortDirBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 9, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.border },
+  sortDirBtnActive: { borderColor: Colors.primary, backgroundColor: '#eef2fa' },
+  sortDirText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  sortDone: { marginTop: 12, backgroundColor: Colors.primary, borderRadius: Radius.sm, paddingVertical: 11, alignItems: 'center' },
+  sortDoneText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
   modalRow: { flexDirection: 'row', gap: 10 },
   modalInput: {
     fontSize: 13, padding: 9, borderRadius: 4, borderWidth: 1, borderColor: Colors.border,
