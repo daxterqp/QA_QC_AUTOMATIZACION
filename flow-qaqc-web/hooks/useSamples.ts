@@ -114,3 +114,26 @@ export function useCreateSample(projectId: string) {
     },
   });
 }
+
+/** v64 — Borra una muestra → papelera. BLOQUEA si tiene ensayos (la RPC aborta con
+ *  `sample_has_protocols:<n>`, que aquí se traduce a Error('has_protocols:<n>')). */
+export function useDeleteSample(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { sampleId: string; deletedById?: string | null; deletedByName?: string | null }) => {
+      const { error } = await supabase.rpc('delete_sample_to_recycle', {
+        p_sample_id: args.sampleId, p_deleted_by_id: args.deletedById ?? null, p_deleted_by_name: args.deletedByName ?? null,
+      });
+      if (error) {
+        const hp = (error.message ?? '').match(/sample_has_protocols:(\d+)/);
+        if (hp) throw new Error(`has_protocols:${hp[1]}`);
+        throw error;
+      }
+      return true;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['samples', projectId] });
+      qc.invalidateQueries({ queryKey: ['recycle-bin', projectId] });
+    },
+  });
+}

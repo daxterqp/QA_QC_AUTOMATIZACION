@@ -9,11 +9,11 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { FlaskConical, Plus, Search, X, ChevronRight, Layers } from 'lucide-react';
+import { FlaskConical, Plus, Search, X, ChevronRight, Layers, Trash2, Loader2 } from 'lucide-react';
 import { useProjects, useProjectFlags } from '@hooks/useProjects';
 import { useAuth } from '@lib/auth-context';
 import { useEnsayosData } from '@hooks/useEnsayos';
-import { useSamples, useCreateSample } from '@hooks/useSamples';
+import { useSamples, useCreateSample, useDeleteSample } from '@hooks/useSamples';
 import { todaySampleDate } from '@lib/sampleCode';
 import PageHeader from '@components/PageHeader';
 import { useI18n } from '@lib/i18n';
@@ -28,6 +28,10 @@ export default function SamplesPage() {
   const { data: ens } = useEnsayosData(projectId);
   const { data, isLoading } = useSamples(projectId);
   const createSample = useCreateSample(projectId);
+  const deleteSample = useDeleteSample(projectId);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const canDelete = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
+  const deletionMode = flags?.deletion_mode ?? 'last_only';
 
   const sectors = ens?.sectors ?? [];
   const samples = data?.samples ?? [];
@@ -50,6 +54,27 @@ export default function SamplesPage() {
   }, [samples, search, filterSector]);
 
   const sectorName = (sid: string | null) => sectors.find(s => s.id === sid)?.name ?? '';
+
+  // v64 — Última muestra creada (mayor seq). En 'last_only' solo ESTA es borrable.
+  const lastSampleId = useMemo(() => {
+    let best: { id: string; seq: number | null } | null = null;
+    for (const s of samples) if (!best || ((s.seq ?? 0) > (best.seq ?? 0))) best = s;
+    return best?.id ?? null;
+  }, [samples]);
+
+  const onDeleteSample = async (s: { id: string; sample_code: string | null }) => {
+    if (!canDelete) { window.alert('Solo el Jefe o el Creador pueden eliminar muestras.'); return; }
+    const cnt = counts[s.id] ?? 0;
+    if (cnt > 0) { window.alert(`Esta muestra tiene ${cnt} ensayo(s) vinculados. Elimínalos o muévelos primero.`); return; }
+    if (!window.confirm(`¿Eliminar ${s.sample_code ?? 'la muestra'}? Va a la papelera (se puede restaurar).`)) return;
+    setDeletingId(s.id);
+    try {
+      await deleteSample.mutateAsync({ sampleId: s.id, deletedById: currentUser?.id ?? null, deletedByName: (currentUser as { name?: string } | null)?.name ?? null });
+    } catch (e: any) {
+      const hp = (e?.message ?? '').match(/has_protocols:(\d+)/);
+      window.alert(hp ? `La muestra tiene ${hp[1]} ensayo(s) vinculados.` : 'No se pudo eliminar. Revisa tu conexión.');
+    } finally { setDeletingId(null); }
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
@@ -108,6 +133,15 @@ export default function SamplesPage() {
                 <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-primary/10 text-primary shrink-0">
                   {counts[s.id] ?? 0} {t('samples.testsLabel')}
                 </span>
+                {canDelete && (deletionMode !== 'last_only' || s.id === lastSampleId) && (
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDeleteSample(s); }}
+                    disabled={deletingId === s.id}
+                    title="Eliminar muestra"
+                    className="shrink-0 text-danger hover:bg-danger/10 rounded p-1 disabled:opacity-50">
+                    {deletingId === s.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  </button>
+                )}
                 <ChevronRight size={18} className="text-textMuted group-hover:text-primary transition" />
               </Link>
             ))}

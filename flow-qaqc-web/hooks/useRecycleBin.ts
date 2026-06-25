@@ -100,6 +100,15 @@ export function useRestoreRecycle(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (entry: RecycleBinEntry) => {
+      // v64 — las entradas de MUESTRA usan el RPC de muestras (id 'recycle-sample-…').
+      if (entry.id.startsWith('recycle-sample-')) {
+        const { data, error } = await supabase.rpc('restore_sample_from_recycle', { p_recycle_id: entry.id, p_new_code: null });
+        if (error) {
+          if (/23505|duplicate|uniq/i.test(error.message)) throw new Error('code_in_use');
+          throw error;
+        }
+        return data;
+      }
       const { data, error } = await supabase.rpc('restore_protocol_from_recycle', { p_recycle_id: entry.id, p_new_code: null });
       if (error) {
         if (/23505|duplicate|uniq/i.test(error.message)) {
