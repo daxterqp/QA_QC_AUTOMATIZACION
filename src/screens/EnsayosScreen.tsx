@@ -563,6 +563,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
 
   const onRenumber = () => {
     if (renumbering) return;
+    if (!isJefe && !isCreator) { Alert.alert(t('ensayos.alert.noPermission.title'), t('ensayos.alert.noPermission.msg')); return; }
     Alert.alert(
       'Restablecer numeración',
       'Reasigna los códigos desde 1 dentro de cada grupo, por FECHA DE ENSAYO, eliminando los huecos que dejaron los borrados. Las referencias entre ensayos NO se rompen (son por id). ¿Continuar?',
@@ -661,7 +662,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
           </View>
         </TouchableOpacity>
       </Modal>
-      {projFlags?.deletion_mode === 'in_list_reassignable' && (
+      {projFlags?.deletion_mode === 'in_list_reassignable' && (isJefe || isCreator) && (
         <TouchableOpacity onPress={onRenumber} disabled={renumbering} style={styles.renumberBtn} activeOpacity={0.8}>
           {renumbering ? <ActivityIndicator size="small" color={Colors.primary} /> : <Ionicons name="git-compare-outline" size={15} color={Colors.primary} />}
           <Text style={styles.renumberBtnText}>Restablecer numeración</Text>

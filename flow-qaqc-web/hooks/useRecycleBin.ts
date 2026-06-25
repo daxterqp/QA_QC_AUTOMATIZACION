@@ -125,8 +125,10 @@ export function useRestoreRecycle(projectId: string) {
       return data;
     },
     onSuccess: () => {
+      // El restaurado puede ser ensayo O muestra; invalidamos ambas listas + papelera.
       qc.invalidateQueries({ queryKey: ['recycle-bin', projectId] });
-      qc.invalidateQueries({ predicate: q => Array.isArray(q.queryKey) && q.queryKey[0] === 'ensayos' });
+      qc.invalidateQueries({ queryKey: ['ensayos-data', projectId] });
+      qc.invalidateQueries({ queryKey: ['samples', projectId] });
     },
   });
 }

@@ -76,6 +76,12 @@ function nowHHMM(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** v62 — created_at en ms (bigint). Robusto si llegara como string ISO o numérico. */
+function createdMs(p: { created_at?: unknown }): number {
+  const n = Number(p?.created_at);
+  return Number.isFinite(n) ? n : (Date.parse(String(p?.created_at)) || 0);
+}
+
 export default function EnsayosPage() {
   const { t } = useI18n();
   const { id: projectId, mode: modeParam } = useParams<{ id: string; mode: string }>();
@@ -99,6 +105,7 @@ export default function EnsayosPage() {
   const [renumbering, setRenumbering] = useState(false);
   const onRenumber = async () => {
     if (renumbering) return;
+    if (!(currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR')) { window.alert('Solo el Jefe o el Creador pueden renumerar.'); return; }
     if (!window.confirm('Reasigna los códigos desde 1 dentro de cada grupo, por fecha de ensayo, eliminando los huecos. Las referencias entre ensayos NO se rompen (son por id). ¿Continuar?')) return;
     setRenumbering(true);
     const r = await renumberProject(projectId);
@@ -135,7 +142,7 @@ export default function EnsayosPage() {
     const top = new Map<string, { id: string; created: number }>();
     for (const p of (data?.protocols ?? [])) {
       const gk = codingInfoOf(p)?.groupKey ?? `__t:${p.template_id}`;
-      const created = Number(p.created_at) || 0;
+      const created = createdMs(p);
       const cur = top.get(gk);
       if (!cur || created > cur.created) top.set(gk, { id: p.id, created });
     }
@@ -266,13 +273,12 @@ export default function EnsayosPage() {
     });
     // v62 — Orden configurable. Default: creación ascendente (antiguos arriba). Desempate estable
     // por creación. El "último creado" queda al final en el default.
-    const createdN = (p: any) => Number(p.created_at) || 0;
     return list.sort((a, b) => {
       let cmp: number;
       if (sortBy === 'ensayo') cmp = (a.ensayo_date ?? '').localeCompare(b.ensayo_date ?? '');
       else if (sortBy === 'code') cmp = (a.protocol_code ?? '').localeCompare(b.protocol_code ?? '');
-      else cmp = createdN(a) - createdN(b);
-      if (cmp === 0) cmp = createdN(a) - createdN(b);
+      else cmp = createdMs(a) - createdMs(b);
+      if (cmp === 0) cmp = createdMs(a) - createdMs(b);
       return sortAsc ? cmp : -cmp;
     });
   };
@@ -472,7 +478,7 @@ export default function EnsayosPage() {
         </div>
 
         {/* v63 — Restablecer numeración (modo B / código flexible). */}
-        {flags?.deletion_mode === 'in_list_reassignable' && (
+        {flags?.deletion_mode === 'in_list_reassignable' && canDeleteEnsayo && (
           <button onClick={onRenumber} disabled={renumbering}
             className="flex items-center justify-center gap-1.5 mt-2 w-full border-[1.5px] border-primary bg-primary/5 text-primary text-xs font-extrabold rounded-lg py-2 hover:bg-primary/10 disabled:opacity-50 transition">
             {renumbering ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownUp size={14} />}

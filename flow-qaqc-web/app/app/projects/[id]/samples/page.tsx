@@ -76,6 +76,7 @@ export default function SamplesPage() {
   }, [samples]);
 
   const onDeleteSample = async (s: { id: string; sample_code: string | null }) => {
+    if (deletingId) return;   // borrado en curso → ignora (el botón vive dentro de un <Link>)
     if (!canDelete) { window.alert('Solo el Jefe o el Creador pueden eliminar muestras.'); return; }
     const cnt = counts[s.id] ?? 0;
     if (cnt > 0) { window.alert(`Esta muestra tiene ${cnt} ensayo(s) vinculados. Elimínalos o muévelos primero.`); return; }
@@ -157,9 +158,8 @@ export default function SamplesPage() {
                 {canDelete && (deletionMode !== 'last_only' || s.id === lastSampleId) && (
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDeleteSample(s); }}
-                    disabled={deletingId === s.id}
                     title="Eliminar muestra"
-                    className="shrink-0 text-danger hover:bg-danger/10 rounded p-1 disabled:opacity-50">
+                    className={`shrink-0 text-danger hover:bg-danger/10 rounded p-1 ${deletingId === s.id ? 'opacity-50' : ''}`}>
                     {deletingId === s.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   </button>
                 )}
