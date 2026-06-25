@@ -198,6 +198,11 @@ export interface ProjectFeatureFlags {
   /** v46.1 — Ámbito de reinicio del correlativo (además de tipo+año, siempre): 'year'
    *  (def, comparten mes/día/sector), 'year_sector' (reinicia por sector), 'year_month'. */
   coding_seq_reset?: 'year' | 'year_sector' | 'year_month';
+  /** v62 — Modo de eliminación de ensayos/muestras:
+   *  'last_only' (def): solo se puede eliminar el ÚLTIMO creado → cero huecos + reuso del código.
+   *  'in_list_immutable': borrar cualquiera; los huecos en el correlativo son permanentes.
+   *  'in_list_reassignable': borrar cualquiera + botón "Restablecer numeración" (renumera por fecha). */
+  deletion_mode?: 'last_only' | 'in_list_immutable' | 'in_list_reassignable';
 
   // ── v43 — Módulos OPCIONALES del proyecto (visibilidad en el menú) ────────
   //    El CREADOR los activa/desactiva; se propagan a todos (feature_flags).
@@ -266,6 +271,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   fill_by_sample: false,
   protocol_codes: false,
   coding_mask_default: '{TIPO}-{AA}{SEQ:4}',
+  deletion_mode: 'last_only',
 
   // v43 — Módulos opcionales: ubicación ON por defecto; el resto OFF.
   module_protocols_by_location: true,

@@ -63,6 +63,10 @@ export interface ProjectFeatureFlags {
   coding_mask_by_type?: Record<string, string>;
   /** v46.1 — Ámbito de reinicio del correlativo: 'year' (def) | 'year_sector' | 'year_month'. */
   coding_seq_reset?: 'year' | 'year_sector' | 'year_month';
+  /** v62 — Modo de eliminación: 'last_only' (def, solo el último creado, sin huecos) |
+   *  'in_list_immutable' (borrar cualquiera, huecos permanentes) | 'in_list_reassignable'
+   *  (borrar cualquiera + Restablecer numeración). */
+  deletion_mode?: 'last_only' | 'in_list_immutable' | 'in_list_reassignable';
   /** v43 — Filas activas del formulario de muestra (módulo "ensayos por muestra"). */
   sample_form_rows?: { material?: boolean; condition?: boolean; depth?: boolean; coords?: boolean; layers?: boolean };
   /** v43 — Catálogo editable de "tipo de material" para muestras. */
@@ -118,6 +122,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   sample_materials: [],
   protocol_codes: false,
   coding_mask_default: '{TIPO}-{AA}{SEQ:4}',
+  deletion_mode: 'last_only',
 
   // v43 — Módulos opcionales: ubicación ON; resto OFF.
   module_protocols_by_location: true,

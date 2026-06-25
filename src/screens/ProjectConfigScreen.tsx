@@ -402,6 +402,25 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               )}
             </>
           )}
+          {/* v62 — Modo de eliminación de ensayos/muestras. */}
+          <Text style={styles.fieldLabel}>Eliminación de ensayos</Text>
+          <View style={styles.optionList}>
+            {([
+              ['last_only', 'Solo el último creado (sin huecos)'],
+              ['in_list_immutable', 'Dentro de la lista — código rígido (huecos)'],
+              ['in_list_reassignable', 'Dentro de la lista — código flexible (renumera)'],
+            ] as const).map(([val, label]) => {
+              const active = (flags.deletion_mode ?? 'last_only') === val;
+              return (
+                <TouchableOpacity key={val} onPress={() => setFlag('deletion_mode', val)}
+                  style={[styles.optionRow, active && styles.optionRowActive]}>
+                  <View style={[styles.radio, active && styles.radioActive]}>{active && <View style={styles.radioInner} />}</View>
+                  <Text style={[styles.optionText, active && { color: Colors.primary, fontWeight: '700' }]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={styles.helperText}>Por defecto solo se elimina el ÚLTIMO ensayo creado (cero huecos, reusa el código). "Dentro de la lista" permite borrar cualquiera.</Text>
         </SectionBox>
         </View>
 

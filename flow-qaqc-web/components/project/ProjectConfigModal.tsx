@@ -225,6 +225,18 @@ export function ProjectConfigModal({
                 </p>
               </div>
             )}
+            {/* v62 — Modo de eliminación de ensayos/muestras. */}
+            <SelectField
+              label="Eliminación de ensayos"
+              helper="Por defecto solo se elimina el ÚLTIMO ensayo creado (cero huecos, reusa el código). 'Dentro de la lista' permite borrar cualquiera: rígido deja huecos permanentes; flexible habilita 'Restablecer numeración'."
+              value={flags.deletion_mode ?? 'last_only'}
+              onChange={v => setFlag('deletion_mode', v as any)}
+              options={[
+                { value: 'last_only', label: 'Solo el último creado (sin huecos)' },
+                { value: 'in_list_immutable', label: 'Dentro de la lista — código rígido (huecos)' },
+                { value: 'in_list_reassignable', label: 'Dentro de la lista — código flexible (renumera)' },
+              ]}
+            />
           </Section>
 
           {/* ── 2. Módulo de Trazabilidad ──────────────────────────── */}
