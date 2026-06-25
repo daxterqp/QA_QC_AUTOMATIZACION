@@ -11,10 +11,11 @@
  */
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Trash2, ChevronDown, ChevronUp, Info, Loader2 } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, Info, Loader2, RotateCcw } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
 import { useProjects } from '@hooks/useProjects';
-import { useRecycleBin, type RecycleBinEntry } from '@hooks/useRecycleBin';
+import { useRecycleBin, useRestoreRecycle, usePurgeRecycle, type RecycleBinEntry } from '@hooks/useRecycleBin';
+import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
 
 function fmtDateTime(ms: number): string {
@@ -59,7 +60,36 @@ export default function PapeleraPage() {
   const { data: projects = [] } = useProjects();
   const project = projects.find(p => p.id === projectId);
   const { data: entries = [], isLoading } = useRecycleBin(projectId);
+  const { currentUser } = useAuth();
+  const isCreator = currentUser?.role === 'CREATOR';
+  const restore = useRestoreRecycle(projectId);
+  const purge = usePurgeRecycle(projectId);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const onRestore = async (e: RecycleBinEntry) => {
+    const code = e.protocol_code ?? e.protocol_number ?? 'este ensayo';
+    if (!window.confirm(`¿Restaurar ${code}? Vuelve a la lista con su código.`)) return;
+    setBusyId(e.id);
+    try { await restore.mutateAsync(e.id); }
+    catch (err: any) {
+      window.alert(err?.message === 'code_in_use'
+        ? 'Ese código ya fue reusado por otro ensayo. Crea espacio o usa el modo de numeración flexible para renumerar.'
+        : 'No se pudo restaurar. Revisa tu conexión.');
+    } finally { setBusyId(null); }
+  };
+
+  const onPurge = async (e: RecycleBinEntry) => {
+    const code = e.protocol_code ?? e.protocol_number ?? 'el ensayo';
+    if (!window.confirm(`Esto borra ${code} y sus fotos para SIEMPRE. No se puede deshacer. ¿Continuar?`)) return;
+    setBusyId(e.id);
+    try { await purge.mutateAsync(e); }
+    catch (err: any) {
+      window.alert(err?.message === 'forbidden'
+        ? 'Solo el Creador puede eliminar definitivamente.'
+        : 'No se pudo eliminar. Revisa tu conexión.');
+    } finally { setBusyId(null); }
+  };
 
   const statusLabel = (s: string | null): string => {
     switch (s) {
@@ -128,6 +158,26 @@ export default function PapeleraPage() {
                       {isOpen ? <ChevronUp size={16} className="text-textMuted" /> : <ChevronDown size={16} className="text-textMuted" />}
                     </div>
                   </button>
+                  <div className="flex gap-2 px-3 pb-3 pt-0">
+                    <button
+                      disabled={busyId === e.id}
+                      onClick={() => onRestore(e)}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border-[1.5px] border-primary bg-primary/5 text-primary text-xs font-extrabold py-2 hover:bg-primary/10 disabled:opacity-50"
+                    >
+                      {busyId === e.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                      Restaurar
+                    </button>
+                    {isCreator && (
+                      <button
+                        disabled={busyId === e.id}
+                        onClick={() => onPurge(e)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border-[1.5px] border-danger bg-danger/5 text-danger text-xs font-extrabold py-2 hover:bg-danger/10 disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                        Eliminar definitivo
+                      </button>
+                    )}
+                  </div>
                   {isOpen && <Detail entry={e} />}
                 </div>
               );
