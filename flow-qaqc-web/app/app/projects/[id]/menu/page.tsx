@@ -21,7 +21,7 @@ import PageHeader from '@components/PageHeader';
 import {
   List, Timer, Map as MapIcon, ChevronRight,
   FolderOpen, FileUp, Phone, FileText, BookOpen,
-  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2, RefreshCw,
+  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2, RefreshCw, Mail,
 } from 'lucide-react';
 
 /** Botón "Actualizar": re-trae de la nube TODO lo cacheado de este proyecto
@@ -169,6 +169,15 @@ export default function ProjectMenuPage() {
       icon: Phone,
       tone: 'warning',
       visible: true,
+    },
+    {
+      key: 'report-templates',
+      title: 'Reportes por correo',
+      subtitle: 'Envía la Tabla Resumen + gráficos por email, programado.',
+      href: `/app/projects/${projectId}/report-templates`,
+      icon: Mail,
+      tone: 'secondary',
+      visible: !!flags && !!flags.module_email_reports && isJefeOrCreator,
     },
     {
       key: 'recycle-bin',

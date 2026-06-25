@@ -175,6 +175,8 @@ export function ProjectConfigModal({
               value={flags.module_contacts} onToggle={() => toggleFlag('module_contacts')} />
             <Check label={t('projectConfig.moduleSummaryLabel')} description={t('projectConfig.moduleSummaryDesc')}
               value={flags.module_summary_tables} onToggle={() => toggleFlag('module_summary_tables')} />
+            <Check label="Reportes por correo" description="Habilita el panel para programar el envío de la Tabla Resumen + gráficos por email (AWS SES)."
+              value={!!flags.module_email_reports} onToggle={() => toggleFlag('module_email_reports')} />
 
             {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}
             <p className="text-[11px] font-bold uppercase tracking-wider text-textMuted mt-2">{t('projectConfig.fillModeLabel')}</p>

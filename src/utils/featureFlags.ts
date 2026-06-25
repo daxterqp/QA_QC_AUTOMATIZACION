@@ -214,6 +214,8 @@ export interface ProjectFeatureFlags {
   module_contacts: boolean;
   /** Módulo de Tablas Resumen. Default OFF. */
   module_summary_tables: boolean;
+  /** v67 — Módulo de Reportes por Correo (panel web). Default OFF. */
+  module_email_reports?: boolean;
   /** v43.1 — Filas activas del formulario de muestra (config por proyecto, edita
    *  creador/jefe). Se guarda en feature_flags para propagarse sin migración. */
   sample_form_rows?: { material?: boolean; condition?: boolean; depth?: boolean; coords?: boolean; layers?: boolean };
@@ -278,6 +280,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_plans: false,
   module_contacts: false,
   module_summary_tables: false,
+  module_email_reports: false,
   // v43.1 — Formulario de muestra: filas activas por defecto + catálogo de materiales.
   sample_form_rows: { material: true, condition: true, depth: false, coords: true, layers: false },
   sample_materials: [],

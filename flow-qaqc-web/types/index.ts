@@ -80,6 +80,8 @@ export interface ProjectFeatureFlags {
   module_plans: boolean;
   module_contacts: boolean;
   module_summary_tables: boolean;
+  /** v67 — Módulo de Reportes por Correo (panel web de plantillas de reporte programado). Default OFF. */
+  module_email_reports?: boolean;
 
   /** v45.3 — Agrupamientos del selector de llamadas entre fichas, por tipo de ficha. */
   grouping_presets?: Record<string, GroupingPreset[]>;
@@ -129,6 +131,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_plans: false,
   module_contacts: false,
   module_summary_tables: false,
+  module_email_reports: false,
 
   traceability_module: false,
   equipment_catalog: false,
