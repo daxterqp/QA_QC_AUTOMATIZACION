@@ -115,6 +115,9 @@ export default function EnsayosPage() {
   const [filterTemplateIds, setFilterTemplateIds] = useState<Set<string>>(new Set());
   const [filterSectorIds, setFilterSectorIds] = useState<Set<string>>(new Set());
   const [showFilterPicker, setShowFilterPicker] = useState<null | 'tipo' | 'sector'>(null);
+  // v62 — Orden de la lista. Default: CREACIÓN ascendente (antiguos arriba, nuevos abajo).
+  const [sortBy, setSortBy] = useState<'creation' | 'ensayo' | 'code'>('creation');
+  const [sortAsc, setSortAsc] = useState(true);
 
   const toggleInSet = (set: Set<string>, id: string): Set<string> => {
     const next = new Set(set);
@@ -192,9 +195,17 @@ export default function EnsayosPage() {
       }
       return true;
     });
-    return list.sort((a, b) =>
-      (b.protocol_code ?? '').localeCompare(a.protocol_code ?? '') ||
-      String(b.created_at).localeCompare(String(a.created_at)));
+    // v62 — Orden configurable. Default: creación ascendente (antiguos arriba). Desempate estable
+    // por creación. El "último creado" queda al final en el default.
+    const createdN = (p: any) => Number(p.created_at) || 0;
+    return list.sort((a, b) => {
+      let cmp: number;
+      if (sortBy === 'ensayo') cmp = (a.ensayo_date ?? '').localeCompare(b.ensayo_date ?? '');
+      else if (sortBy === 'code') cmp = (a.protocol_code ?? '').localeCompare(b.protocol_code ?? '');
+      else cmp = createdN(a) - createdN(b);
+      if (cmp === 0) cmp = createdN(a) - createdN(b);
+      return sortAsc ? cmp : -cmp;
+    });
   };
 
   const toggle = (key: string) => setExpanded(prev => {
@@ -363,9 +374,29 @@ export default function EnsayosPage() {
                 )}
               </button>
             )}
+            {/* v62 — Orden de la lista. */}
+            <div className="flex items-center gap-1 ml-auto">
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as 'creation' | 'ensayo' | 'code')}
+                title="Ordenar por"
+                className="border border-border rounded-full px-2.5 py-1.5 bg-white text-[11px] font-bold text-textSecondary focus:outline-none focus:border-primary"
+              >
+                <option value="creation">Orden: Creación</option>
+                <option value="ensayo">Orden: Fecha ensayo</option>
+                <option value="code">Orden: Código</option>
+              </select>
+              <button
+                onClick={() => setSortAsc(v => !v)}
+                title={sortAsc ? 'Ascendente' : 'Descendente'}
+                className="flex items-center border border-border rounded-full px-2.5 py-1.5 bg-white text-[11px] font-bold text-textSecondary hover:border-primary/60 transition"
+              >
+                {sortAsc ? '↑' : '↓'}
+              </button>
+            </div>
             {/* Tuerca: modo de visualización (config por proyecto, se guarda una vez para todos). */}
             <button onClick={() => setShowViewCfg(true)} title="Modo de visualización"
-              className="flex items-center gap-1.5 border border-border rounded-full px-3 py-1.5 bg-white text-[11px] font-bold text-textSecondary hover:border-primary/60 transition ml-auto">
+              className="flex items-center gap-1.5 border border-border rounded-full px-3 py-1.5 bg-white text-[11px] font-bold text-textSecondary hover:border-primary/60 transition">
               <Settings size={13} /> {viewMode === 'modal' ? 'Selector' : 'Tarjetas'}
             </button>
           </div>
