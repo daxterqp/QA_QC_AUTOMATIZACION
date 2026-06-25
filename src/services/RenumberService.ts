@@ -10,9 +10,10 @@
  */
 import { Q } from '@nozbe/watermelondb';
 import { supabase } from '@config/supabase';
-import { protocolsCollection, protocolTemplatesCollection, projectsCollection, projectSectorsCollection } from '@db/index';
+import { protocolsCollection, protocolTemplatesCollection, projectsCollection, projectSectorsCollection, samplesCollection } from '@db/index';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import { pickMask, buildProtocolCode, parseEnsayoDate, type SeqResetScope } from '@utils/protocolCode';
+import { buildSampleCode } from '@utils/sampleCode';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 
 export type RenumberResult = { ok: boolean; count?: number; reason?: 'no_coding' | string };
@@ -76,6 +77,31 @@ export async function renumberProject(projectId: string): Promise<RenumberResult
     if (codes.length === 0) return { ok: true, count: 0 };
 
     const { data, error } = await supabase.rpc('renumber_protocols', { p_project_id: projectId, p_codes: codes, p_counters: counters });
+    if (error) return { ok: false, reason: error.message };
+    await pullProjectFromCloud(projectId).catch(() => {});
+    return { ok: true, count: (data as any)?.renumbered ?? codes.length };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message ?? 'error' };
+  }
+}
+
+/**
+ * v65 — "Restablecer numeración" de MUESTRAS (modo B). Las muestras usan un correlativo GLOBAL
+ * por proyecto (sin group_key): reasigna seq + sample_code desde 1, ordenando por FECHA DE MUESTRA.
+ */
+export async function renumberSamples(projectId: string): Promise<RenumberResult> {
+  try {
+    const projRow: any = await projectsCollection.find(projectId).catch(() => null);
+    const sampleIdentifier = ((projRow?.sampleIdentifier ?? '') as string).trim();
+    const samples: any[] = await samplesCollection.query(Q.where('project_id', projectId)).fetch();
+    if (samples.length === 0) return { ok: true, count: 0 };
+    samples.sort((a, b) => {
+      const da = parseEnsayoDate(a.sampleDate)?.getTime() ?? 0;
+      const db = parseEnsayoDate(b.sampleDate)?.getTime() ?? 0;
+      return (da - db) || ((a._raw?.created_at ?? 0) - (b._raw?.created_at ?? 0));
+    });
+    const codes = samples.map((s, i) => ({ id: s.id, code: buildSampleCode(sampleIdentifier, s.sampleDate ?? undefined, i + 1), seq: i + 1 }));
+    const { data, error } = await supabase.rpc('renumber_samples', { p_project_id: projectId, p_codes: codes });
     if (error) return { ok: false, reason: error.message };
     await pullProjectFromCloud(projectId).catch(() => {});
     return { ok: true, count: (data as any)?.renumbered ?? codes.length };

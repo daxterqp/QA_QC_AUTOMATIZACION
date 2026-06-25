@@ -9,8 +9,10 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { FlaskConical, Plus, Search, X, ChevronRight, Layers, Trash2, Loader2 } from 'lucide-react';
+import { FlaskConical, Plus, Search, X, ChevronRight, Layers, Trash2, Loader2, ArrowDownUp } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useProjects, useProjectFlags } from '@hooks/useProjects';
+import { renumberSamples } from '@lib/renumber';
 import { useAuth } from '@lib/auth-context';
 import { useEnsayosData } from '@hooks/useEnsayos';
 import { useSamples, useCreateSample, useDeleteSample } from '@hooks/useSamples';
@@ -32,6 +34,17 @@ export default function SamplesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const canDelete = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
   const deletionMode = flags?.deletion_mode ?? 'last_only';
+  const qc = useQueryClient();
+  const [renumbering, setRenumbering] = useState(false);
+  const onRenumberSamples = async () => {
+    if (renumbering) return;
+    if (!window.confirm('Reasigna los códigos de las muestras desde 1, por fecha de muestra, eliminando los huecos. ¿Continuar?')) return;
+    setRenumbering(true);
+    const r = await renumberSamples(projectId);
+    setRenumbering(false);
+    if (!r.ok) window.alert('No se pudo renumerar. Revisa tu conexión.');
+    else { window.alert(`Numeración restablecida: ${r.count ?? 0} muestra(s) recodificadas.`); qc.invalidateQueries({ queryKey: ['samples', projectId] }); }
+  };
 
   const sectors = ens?.sectors ?? [];
   const samples = data?.samples ?? [];
@@ -109,6 +122,14 @@ export default function SamplesPage() {
           className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-bold bg-primary/5 border border-primary/30 text-primary hover:bg-primary/10 transition">
           <Plus size={15} /> {t('samples.addSample')}
         </button>
+
+        {deletionMode === 'in_list_reassignable' && canDelete && (
+          <button onClick={onRenumberSamples} disabled={renumbering}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-extrabold bg-primary/5 border-[1.5px] border-primary text-primary hover:bg-primary/10 disabled:opacity-50 transition">
+            {renumbering ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownUp size={14} />}
+            Restablecer numeración
+          </button>
+        )}
 
         {/* Lista */}
         {isLoading ? (

@@ -154,7 +154,7 @@ export default function PapeleraPage() {
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="text-[9px] font-extrabold text-textSecondary bg-surface border border-border rounded px-1.5 py-0.5">{statusLabel(e.status)}</span>
+                      <span className="text-[9px] font-extrabold text-textSecondary bg-surface border border-border rounded px-1.5 py-0.5">{e.id.startsWith('recycle-sample-') ? 'Muestra' : statusLabel(e.status)}</span>
                       {isOpen ? <ChevronUp size={16} className="text-textMuted" /> : <ChevronDown size={16} className="text-textMuted" />}
                     </div>
                   </button>

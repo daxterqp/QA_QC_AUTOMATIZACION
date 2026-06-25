@@ -217,7 +217,7 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <Text style={styles.statusBadge}>{statusLabel(e.status)}</Text>
+                  <Text style={styles.statusBadge}>{e.id.startsWith('recycle-sample-') ? 'Muestra' : statusLabel(e.status)}</Text>
                   <Ionicons name="eye-outline" size={18} color={Colors.primary} />
                 </View>
               </TouchableOpacity>

@@ -32,6 +32,7 @@ import { useTourStep } from '@hooks/useTourStep';
 import { buildSampleCode, nextSampleSeq, todaySampleDate } from '@utils/sampleCode';
 import { parseFeatureFlagsJson, type CoordinateSystem } from '@utils/featureFlags';
 import { deleteSampleToRecycle } from '@services/RecycleRestoreService';
+import { renumberSamples } from '@services/RenumberService';
 import { wgs84ToUtm, wgs84ToPsad56Utm, wgs84ToPsad56LatLng, findSectorByPoint } from '@utils/CoordinateSystem';
 import { pushSample, pullSamples, mergeAndSaveFeatureFlags } from '@services/SupabaseSyncService';
 import { exportSampleDossierPdf } from '@services/DossierExportService';
@@ -94,6 +95,7 @@ export default function SamplesScreen({ route, navigation }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletionMode, setDeletionMode] = useState<'last_only' | 'in_list_immutable' | 'in_list_reassignable'>('last_only');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [renumberingSamples, setRenumberingSamples] = useState(false);
   const [exportingDossier, setExportingDossier] = useState(false);
   const toggleSelected = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -183,6 +185,24 @@ export default function SamplesScreen({ route, navigation }: Props) {
     return best?.id ?? null;
   }, [samples]);
   const canDelete = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
+
+  const onRenumberSamples = () => {
+    if (renumberingSamples) return;
+    Alert.alert(
+      'Restablecer numeración',
+      'Reasigna los códigos de las muestras desde 1, por FECHA DE MUESTRA, eliminando los huecos. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Restablecer', style: 'destructive', onPress: async () => {
+          setRenumberingSamples(true);
+          const r = await renumberSamples(projectId);
+          setRenumberingSamples(false);
+          if (!r.ok) Alert.alert('No se pudo renumerar', r.reason ?? 'Ocurrió un error.');
+          else { Alert.alert('Numeración restablecida', `${r.count ?? 0} muestra(s) recodificadas.`); loadData(); }
+        } },
+      ],
+    );
+  };
 
   const onDeleteSample = (item: any) => {
     if (!canDelete) { Alert.alert('Sin permiso', 'Solo el Jefe o el Creador pueden eliminar muestras.'); return; }
@@ -436,6 +456,13 @@ export default function SamplesScreen({ route, navigation }: Props) {
         {/* Filtros + botón añadir FUERA del FlatList (fijos): si fueran ListHeaderComponent
             inline, se recrearían en cada tecla y los TextInput del filtro perderían el foco. */}
         <View style={{ paddingHorizontal: 12, paddingTop: 12 }}>{ListHeader}</View>
+        {deletionMode === 'in_list_reassignable' && canDelete && (
+          <TouchableOpacity onPress={onRenumberSamples} disabled={renumberingSamples}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginHorizontal: 12, marginTop: 4, paddingVertical: 9, borderRadius: 8, borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: '#eef2fa' }}>
+            {renumberingSamples ? <ActivityIndicator size="small" color={Colors.primary} /> : <Ionicons name="git-compare-outline" size={15} color={Colors.primary} />}
+            <Text style={{ fontSize: 12, fontWeight: '800', color: Colors.primary }}>Restablecer numeración</Text>
+          </TouchableOpacity>
+        )}
         <FlatList
           data={filtered}
           keyExtractor={(s: any) => s.id}

@@ -8,6 +8,7 @@
 import { createClient } from '@lib/supabase/client';
 import { mergeFeatureFlags } from '@/types';
 import { pickMask, buildProtocolCode, parseEnsayoDate } from '@lib/protocolCode';
+import { buildSampleCode } from '@lib/sampleCode';
 
 const supabase = createClient();
 
@@ -64,6 +65,29 @@ export async function renumberProject(projectId: string): Promise<{ ok: boolean;
     if (codes.length === 0) return { ok: true, count: 0 };
 
     const { data, error } = await supabase.rpc('renumber_protocols', { p_project_id: projectId, p_codes: codes, p_counters: counters });
+    if (error) return { ok: false, reason: error.message };
+    return { ok: true, count: (data as any)?.renumbered ?? codes.length };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message ?? 'error' };
+  }
+}
+
+/** v65 — "Restablecer numeración" de MUESTRAS (modo B). Seq global por proyecto: reasigna desde 1
+ *  ordenando por FECHA DE MUESTRA. Espejo de RenumberService.renumberSamples. */
+export async function renumberSamples(projectId: string): Promise<{ ok: boolean; count?: number; reason?: string }> {
+  try {
+    const { data: project } = await supabase.from('projects').select('sample_identifier').eq('id', projectId).single();
+    const sampleIdentifier = (((project as any)?.sample_identifier ?? '') as string).trim();
+    const { data: samples } = await supabase.from('samples').select('id, sample_date, created_at').eq('project_id', projectId);
+    const list = (samples ?? []) as any[];
+    if (list.length === 0) return { ok: true, count: 0 };
+    list.sort((a, b) => {
+      const da = parseEnsayoDate(a.sample_date)?.getTime() ?? 0;
+      const db = parseEnsayoDate(b.sample_date)?.getTime() ?? 0;
+      return (da - db) || ((Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+    });
+    const codes = list.map((s, i) => ({ id: s.id, code: buildSampleCode(sampleIdentifier, s.sample_date ?? undefined, i + 1), seq: i + 1 }));
+    const { data, error } = await supabase.rpc('renumber_samples', { p_project_id: projectId, p_codes: codes });
     if (error) return { ok: false, reason: error.message };
     return { ok: true, count: (data as any)?.renumbered ?? codes.length };
   } catch (e: any) {
