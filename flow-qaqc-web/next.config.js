@@ -6,7 +6,7 @@ const nextConfig = {
   experimental: {
     // sharp/geotiff son nativos / resueltos dinámicamente: no bundlearlos con
     // webpack y resolverlos en runtime desde node_modules.
-    serverComponentsExternalPackages: ['sharp', 'geotiff'],
+    serverComponentsExternalPackages: ['sharp', 'geotiff', '@resvg/resvg-js'],
     // CRÍTICO (build desktop): el file-tracing de Next NO incluye solo los
     // binarios nativos de sharp (@img/sharp-*). Sin esto, en la app empaquetada
     // `require('sharp')` falla y /api/orthophoto/process devuelve 500 siempre.

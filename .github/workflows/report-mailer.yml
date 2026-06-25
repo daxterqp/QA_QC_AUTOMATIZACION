@@ -1,0 +1,32 @@
+name: Report Mailer
+
+# Envía los reportes por correo programados. Barre cada hora los modelos vencidos
+# (report_templates.status='active' AND next_send_at <= now) y manda cada uno por AWS SES.
+# Mismo patrón que backup.yml. Manual con "Run workflow" (workflow_dispatch).
+on:
+  schedule:
+    - cron: '0 * * * *'   # cada hora en punto (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flow-qaqc-web
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SES_REGION: ${{ secrets.SES_REGION }}
+      SES_FROM: ${{ secrets.SES_FROM }}
+      SES_AWS_ACCESS_KEY_ID: ${{ secrets.SES_AWS_ACCESS_KEY_ID }}
+      SES_AWS_SECRET_ACCESS_KEY: ${{ secrets.SES_AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: npm ci
+      - name: Send due reports
+        run: npx tsx scripts/reportMailer.ts
