@@ -264,11 +264,12 @@ export function useDeleteEnsayo(projectId: string) {
       protocolId: string; deletedById?: string | null; deletedByName?: string | null;
       releaseGroupKey?: string | null; releaseSeq?: number | null;
     }) => {
-      const { error } = await supabase.rpc('delete_protocol_to_recycle', {
+      const { data, error } = await supabase.rpc('delete_protocol_to_recycle', {
         p_protocol_id: args.protocolId, p_deleted_by_id: args.deletedById ?? null, p_deleted_by_name: args.deletedByName ?? null,
       });
       if (error) throw error;
-      if (args.releaseGroupKey && args.releaseSeq != null) {
+      // v66 — liberar el correlativo solo si el borrado REALMENTE ocurrió (no idempotente).
+      if ((data as { deleted?: boolean } | null)?.deleted === true && args.releaseGroupKey && args.releaseSeq != null) {
         const { error: relErr } = await supabase.rpc('release_protocol_seq', {
           p_project_id: projectId, p_group_key: args.releaseGroupKey, p_seq: args.releaseSeq,
         });

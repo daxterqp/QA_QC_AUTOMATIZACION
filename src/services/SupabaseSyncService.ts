@@ -657,23 +657,28 @@ export async function deleteProtocolStrict(
   // Camino ROBUSTO (v44): función transaccional en Postgres → copia a papelera
   // + hard delete en UNA transacción atómica (o todo o nada; imposible dejar
   // tablas a medias). Si la función aún no está migrada, caemos al camino manual.
-  const { error } = await supabase.rpc('delete_protocol_to_recycle', {
+  const { data, error } = await supabase.rpc('delete_protocol_to_recycle', {
     p_protocol_id: protocolId,
     p_deleted_by_id: meta?.deletedById ?? null,
     p_deleted_by_name: meta?.deletedByName ?? null,
   });
+  // v66 — la RPC devuelve {deleted}: solo liberamos el correlativo si el borrado REALMENTE ocurrió
+  // (no en un reintento idempotente, que volvería a bajar el contador y duplicaría el código).
+  let didDelete = (data as { deleted?: boolean } | null)?.deleted === true;
   if (error) {
     const fnMissing = /could not find the function|does not exist|42883|schema cache/i.test(error.message ?? '');
     if (!fnMissing) throw new Error(`[deleteProtocolStrict:rpc] ${error.message}`);
     console.warn('[deleteProtocolStrict] RPC no migrada (v44) — usando camino manual no-transaccional.');
     await deleteProtocolManual(protocolId, meta);
+    didDelete = true;   // el camino manual sí borra
   }
   // v62 — El soft-delete YA NO borra S3: las fotos quedan en el snapshot/papelera para que
   // RESTAURAR las recupere. El S3 se libera recién en "Eliminar definitivo" (purgeRecycleEntry).
 
-  // v62 — Liberar el correlativo si el ensayo borrado era el TOPE de su grupo (la RPC baja
-  // el contador 1 solo si coincide) → el próximo creado reusa el código (sin huecos).
-  if (meta?.releaseProjectId && meta.releaseGroupKey && meta.releaseSeq != null) {
+  // v62/v66 — Liberar el correlativo si el ensayo borrado era el TOPE de su grupo (la RPC baja
+  // el contador 1 solo si coincide) → el próximo creado reusa el código (sin huecos). Solo si
+  // didDelete (evita doble-release ante reintentos del SyncWorker).
+  if (didDelete && meta?.releaseProjectId && meta.releaseGroupKey && meta.releaseSeq != null) {
     const { error: relErr } = await supabase.rpc('release_protocol_seq', {
       p_project_id: meta.releaseProjectId, p_group_key: meta.releaseGroupKey, p_seq: meta.releaseSeq,
     });
