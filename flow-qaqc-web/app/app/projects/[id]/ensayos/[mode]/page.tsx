@@ -13,11 +13,11 @@
  * (default: hora del sistema al guardar; editable).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronDown, ChevronRight, Plus, Loader2, FlaskConical, Search, X,
-  CalendarDays, Grid3x3, Settings, LayoutList, MousePointerClick, ArrowDownUp,
+  CalendarDays, Grid3x3, Settings, LayoutList, MousePointerClick, ArrowDownUp, Trash2,
 } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useAuth } from '@lib/auth-context';
@@ -25,9 +25,9 @@ import { useI18n } from '@lib/i18n';
 import PageHeader from '@components/PageHeader';
 import { useQueryClient } from '@tanstack/react-query';
 import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
-import { useEnsayosData, useCreateEnsayos, type EnsayosMode } from '@hooks/useEnsayos';
+import { useEnsayosData, useCreateEnsayos, useDeleteEnsayo, type EnsayosMode } from '@hooks/useEnsayos';
 import { renumberProject } from '@lib/renumber';
-import { todayEnsayoDate, parseEnsayoDate } from '@lib/protocolCode';
+import { todayEnsayoDate, parseEnsayoDate, pickMask, seqFromCode } from '@lib/protocolCode';
 import type { Protocol, ProtocolStatus } from '@/types';
 
 // Paridad EXACTA con el móvil (EnsayosScreen): mismo hue + tinte ~10% (móvil usa color+'18').
@@ -107,9 +107,60 @@ export default function EnsayosPage() {
       window.alert(r.reason === 'no_coding' ? 'El proyecto no usa codificación correlativa de ensayos.' : 'No se pudo renumerar. Revisa tu conexión.');
     } else {
       window.alert(`Numeración restablecida: ${r.count ?? 0} ensayo(s) recodificados.`);
-      qc.invalidateQueries({ predicate: q => Array.isArray(q.queryKey) && q.queryKey[0] === 'ensayos' });
+      qc.invalidateQueries({ queryKey: ['ensayos-data', projectId] });
     }
   };
+
+  // v62 — Borrado de ensayos (paridad con móvil): gating por deletion_mode + liberar correlativo.
+  const deleteEnsayo = useDeleteEnsayo(projectId);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const canDeleteEnsayo = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
+  const deletionMode = flags?.deletion_mode ?? 'last_only';
+  const codingInfoOf = useCallback((p: any): { groupKey: string; seq: number | null } | null => {
+    if (!flags || !data) return null;
+    const tpl = data.templates.find(t => t.id === p.template_id);
+    const tipo = tpl?.id_protocolo ?? null;
+    if (!tipo) return null;
+    const date = parseEnsayoDate(p.ensayo_date) ?? new Date();
+    const resetScope = flags.coding_seq_reset === 'year_sector' ? { sector: true }
+      : flags.coding_seq_reset === 'year_month' ? { month: true } : {};
+    const sectorName = p.sector_id ? (data.sectors.find(s => s.id === p.sector_id)?.name ?? null) : null;
+    const mask = pickMask(flags.coding_mask_default, flags.coding_mask_by_type, tipo);
+    const sectorPart = resetScope.sector ? `|${(sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+    const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+    return { groupKey: `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`, seq: seqFromCode(p.protocol_code, mask, tipo, date, sectorName, resetScope) };
+  }, [flags, data]);
+  const deletableIds = useMemo<Set<string> | null>(() => {
+    if ((flags?.deletion_mode ?? 'last_only') !== 'last_only') return null;
+    const top = new Map<string, { id: string; created: number }>();
+    for (const p of (data?.protocols ?? [])) {
+      const gk = codingInfoOf(p)?.groupKey ?? `__t:${p.template_id}`;
+      const created = Number(p.created_at) || 0;
+      const cur = top.get(gk);
+      if (!cur || created > cur.created) top.set(gk, { id: p.id, created });
+    }
+    return new Set(Array.from(top.values()).map(v => v.id));
+  }, [data, flags, codingInfoOf]);
+  const onDeleteEnsayo = async (p: any) => {
+    if (!canDeleteEnsayo) { window.alert('Solo el Jefe o el Creador pueden eliminar ensayos.'); return; }
+    if (deletableIds && !deletableIds.has(p.id)) {
+      window.alert('En este proyecto solo se puede eliminar el ÚLTIMO ensayo creado de su grupo (evita huecos). Para borrar dentro de la lista, cambia el "Modo de eliminación" en la Configuración del proyecto.');
+      return;
+    }
+    const label = p.protocol_code ?? p.protocol_number ?? 'este ensayo';
+    if (!window.confirm(`¿Eliminar ${label}? Va a la papelera (se puede restaurar).`)) return;
+    setDeletingId(p.id);
+    const info = codingInfoOf(p);
+    try {
+      await deleteEnsayo.mutateAsync({
+        protocolId: p.id, deletedById: currentUser?.id ?? null,
+        deletedByName: (currentUser as { name?: string } | null)?.name ?? null,
+        releaseGroupKey: info?.groupKey ?? null, releaseSeq: info?.seq ?? null,
+      });
+    } catch { window.alert('No se pudo eliminar. Revisa tu conexión.'); }
+    finally { setDeletingId(null); }
+  };
+
   const [savingView, setSavingView] = useState(false);
   const [selGroupKey, setSelGroupKey] = useState<string | null>(null);   // modo modal
   const [showGroupPicker, setShowGroupPicker] = useState(false);
@@ -489,26 +540,34 @@ export default function EnsayosPage() {
                     </p>
                   )}
                   {items.map(p => (
-                    <button key={p.id} onClick={() => openProtocol(p)}
-                      className="flex items-center gap-3 border border-border bg-white rounded-md px-3 py-3 hover:border-primary/40 hover:bg-primary/5 transition text-left shadow-subtle">
-                      <div className="flex-1 flex flex-col gap-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {p.protocol_code && (
-                            <span className="bg-navy text-white text-[10px] font-black rounded px-1.5 py-0.5 tracking-wide shrink-0">{p.protocol_code}</span>
-                          )}
-                          <span className={cn('text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0', STATUS_COLORS[p.status])}>
-                            {t(STATUS_LABELS[p.status])}
+                    <div key={p.id} className="flex items-stretch gap-1">
+                      <button onClick={() => openProtocol(p)}
+                        className="flex-1 flex items-center gap-3 border border-border bg-white rounded-md px-3 py-3 hover:border-primary/40 hover:bg-primary/5 transition text-left shadow-subtle min-w-0">
+                        <div className="flex-1 flex flex-col gap-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {p.protocol_code && (
+                              <span className="bg-navy text-white text-[10px] font-black rounded px-1.5 py-0.5 tracking-wide shrink-0">{p.protocol_code}</span>
+                            )}
+                            <span className={cn('text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0', STATUS_COLORS[p.status])}>
+                              {t(STATUS_LABELS[p.status])}
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold text-textPrimary truncate">{p.protocol_number}</span>
+                          <span className="text-[10px] text-textMuted truncate">
+                            {p.ensayo_date ? fmtFecha(p.ensayo_date) : '—'}
+                            {(p as { ensayo_time?: string | null }).ensayo_time ? `  ·  ${(p as { ensayo_time?: string | null }).ensayo_time}` : ''}
+                            {p.location_reference ? `  ·  ${p.location_reference}` : ''}
                           </span>
                         </div>
-                        <span className="text-xs font-bold text-textPrimary truncate">{p.protocol_number}</span>
-                        <span className="text-[10px] text-textMuted truncate">
-                          {p.ensayo_date ? fmtFecha(p.ensayo_date) : '—'}
-                          {(p as { ensayo_time?: string | null }).ensayo_time ? `  ·  ${(p as { ensayo_time?: string | null }).ensayo_time}` : ''}
-                          {p.location_reference ? `  ·  ${p.location_reference}` : ''}
-                        </span>
-                      </div>
-                      <ChevronRight size={15} className="text-textMuted shrink-0" />
-                    </button>
+                        <ChevronRight size={15} className="text-textMuted shrink-0" />
+                      </button>
+                      {canDeleteEnsayo && (deletionMode !== 'last_only' || deletableIds?.has(p.id)) && (
+                        <button onClick={() => onDeleteEnsayo(p)} disabled={deletingId === p.id} title="Eliminar ensayo"
+                          className="shrink-0 flex items-center justify-center px-2.5 border border-danger/40 bg-white text-danger rounded-md hover:bg-danger/10 disabled:opacity-50 transition">
+                          {deletingId === p.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

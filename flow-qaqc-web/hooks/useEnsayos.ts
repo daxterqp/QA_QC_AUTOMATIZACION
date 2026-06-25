@@ -252,3 +252,35 @@ export function useCreateEnsayos(projectId: string) {
     },
   });
 }
+
+/**
+ * v62 — Borra un ensayo → Papelera (soft, RPC transaccional v44) + libera el correlativo si era el
+ * tope de su grupo (release_protocol_seq → reuso sin huecos). El caller calcula group_key/seq.
+ */
+export function useDeleteEnsayo(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      protocolId: string; deletedById?: string | null; deletedByName?: string | null;
+      releaseGroupKey?: string | null; releaseSeq?: number | null;
+    }) => {
+      const { error } = await supabase.rpc('delete_protocol_to_recycle', {
+        p_protocol_id: args.protocolId, p_deleted_by_id: args.deletedById ?? null, p_deleted_by_name: args.deletedByName ?? null,
+      });
+      if (error) throw error;
+      if (args.releaseGroupKey && args.releaseSeq != null) {
+        const { error: relErr } = await supabase.rpc('release_protocol_seq', {
+          p_project_id: projectId, p_group_key: args.releaseGroupKey, p_seq: args.releaseSeq,
+        });
+        if (relErr) console.warn('[useDeleteEnsayo] release_protocol_seq:', relErr.message);
+      }
+      return true;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ensayos-data', projectId] });
+      qc.invalidateQueries({ queryKey: ['location-progress', projectId] });
+      qc.invalidateQueries({ queryKey: ['project-metrics', projectId] });
+      qc.invalidateQueries({ queryKey: ['recycle-bin', projectId] });
+    },
+  });
+}

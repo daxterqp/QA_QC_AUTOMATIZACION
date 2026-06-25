@@ -123,6 +123,15 @@ export function nextSeq(codes: (string | null | undefined)[], mask: string, tipo
   return max + 1;
 }
 
+/** v62 — Extrae el SEQ (correlativo) de UN código según la máscara del ámbito. null si no matchea. */
+export function seqFromCode(code: string | null | undefined, mask: string, tipo: string, date: Date, sector?: string | null, scope: SeqResetScope = {}): number | null {
+  if (!code) return null;
+  const m = maskToRegex(mask, tipo, date, sector, scope).exec(code.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Fecha local YYYY-MM-DD (para ensayo_date). */
 export function todayEnsayoDate(now = new Date()): string {
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
