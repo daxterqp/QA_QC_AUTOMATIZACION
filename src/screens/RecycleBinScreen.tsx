@@ -8,7 +8,7 @@
  * eliminó un ensayo por error.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Q } from '@nozbe/watermelondb';
@@ -17,6 +17,8 @@ import NumericTable from '@components/NumericTable';
 import { Colors, Radius } from '../theme/colors';
 import { recycleBinCollection, labAuxTablesCollection } from '@db/index';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { restoreFromRecycle, purgeRecycleEntry } from '@services/RecycleRestoreService';
+import { useAuth } from '@context/AuthContext';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
@@ -62,10 +64,13 @@ function statusLabel(s: string | null): string {
 export default function RecycleBinScreen({ navigation, route }: Props) {
   const { t } = useI18n();
   const { projectId, projectName } = route.params;
+  const { currentUser } = useAuth();
+  const isCreator = currentUser?.role === 'CREATOR';
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [preview, setPreview] = useState<Entry | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   // Tour refs
   const { jumpToStep } = useTour();
@@ -109,6 +114,50 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
   }, [projectId]);
 
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+
+  const onRestore = useCallback((e: Entry) => {
+    const code = e.protocolCode ?? e.protocolNumber ?? 'este ensayo';
+    Alert.alert(
+      'Restaurar ensayo',
+      `¿Restaurar ${code}? Vuelve a la lista con su código.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Restaurar', onPress: async () => {
+          setBusyId(e.id);
+          const r = await restoreFromRecycle(e.id, projectId);
+          setBusyId(null);
+          if (!r.ok) {
+            Alert.alert('No se pudo restaurar',
+              r.reason === 'code_in_use' ? 'Ese código ya fue reusado por otro ensayo. Crea espacio o usa el modo de numeración flexible para renumerar.'
+              : r.reason === 'offline' ? 'Necesitas conexión para restaurar.'
+              : (r.reason ?? 'Ocurrió un error.'));
+          } else { refresh(); }
+        } },
+      ],
+    );
+  }, [projectId, refresh]);
+
+  const onPurge = useCallback((e: Entry) => {
+    const code = e.protocolCode ?? e.protocolNumber ?? 'el ensayo';
+    Alert.alert(
+      'Eliminar definitivamente',
+      `Esto borra ${code} y sus fotos para SIEMPRE. No se puede deshacer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar definitivo', style: 'destructive', onPress: async () => {
+          setBusyId(e.id);
+          const r = await purgeRecycleEntry(e.id, projectId, e.snapshotJson);
+          setBusyId(null);
+          if (!r.ok) {
+            Alert.alert('No se pudo eliminar',
+              r.reason === 'forbidden' ? 'Solo el Creador puede eliminar definitivamente.'
+              : r.reason === 'offline' ? 'Necesitas conexión.'
+              : (r.reason ?? 'Ocurrió un error.'));
+          } else { refresh(); }
+        } },
+      ],
+    );
+  }, [projectId, refresh]);
 
   return (
     <View style={styles.container}>
@@ -168,6 +217,32 @@ export default function RecycleBinScreen({ navigation, route }: Props) {
                   <Ionicons name="eye-outline" size={18} color={Colors.primary} />
                 </View>
               </TouchableOpacity>
+              <View style={styles.cardActions}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.actionRestore]}
+                  disabled={busyId === e.id}
+                  onPress={() => onRestore(e)}
+                >
+                  {busyId === e.id ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <>
+                      <Ionicons name="arrow-undo-outline" size={15} color={Colors.primary} />
+                      <Text style={styles.actionRestoreText}>Restaurar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                {isCreator && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.actionPurge]}
+                    disabled={busyId === e.id}
+                    onPress={() => onPurge(e)}
+                  >
+                    <Ionicons name="trash-outline" size={15} color={Colors.danger} />
+                    <Text style={styles.actionPurgeText}>Eliminar definitivo</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           ))}
         </ScrollView>
@@ -284,6 +359,12 @@ const styles = StyleSheet.create({
   empty: { fontSize: 13, color: Colors.textMuted },
   card: { backgroundColor: Colors.white, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
+  cardActions: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingBottom: 12, paddingTop: 2 },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: Radius.sm, paddingVertical: 9, borderWidth: 1.5 },
+  actionRestore: { borderColor: Colors.primary, backgroundColor: '#eef2fa' },
+  actionRestoreText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
+  actionPurge: { borderColor: Colors.danger, backgroundColor: '#fdecec' },
+  actionPurgeText: { fontSize: 12, fontWeight: '800', color: Colors.danger },
   iconWrap: { width: 38, height: 38, borderRadius: Radius.sm, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
   code: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   meta: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },

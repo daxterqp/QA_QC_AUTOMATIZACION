@@ -650,9 +650,6 @@ export async function deleteProtocolStrict(
   // Guardia: nunca operar con un id vacío.
   if (!protocolId || !protocolId.trim()) return;
 
-  // Recolectar claves S3 ANTES de borrar (después las filas ya no existen).
-  const s3Keys = await collectProtocolS3Keys(protocolId).catch(() => [] as string[]);
-
   // Camino ROBUSTO (v44): función transaccional en Postgres → copia a papelera
   // + hard delete en UNA transacción atómica (o todo o nada; imposible dejar
   // tablas a medias). Si la función aún no está migrada, caemos al camino manual.
@@ -667,8 +664,8 @@ export async function deleteProtocolStrict(
     console.warn('[deleteProtocolStrict] RPC no migrada (v44) — usando camino manual no-transaccional.');
     await deleteProtocolManual(protocolId, meta);
   }
-  // Limpieza S3 best-effort (la BD ya quedó consistente y respaldada).
-  for (const k of s3Keys) await deleteFromS3(k);
+  // v62 — El soft-delete YA NO borra S3: las fotos quedan en el snapshot/papelera para que
+  // RESTAURAR las recupere. El S3 se libera recién en "Eliminar definitivo" (purgeRecycleEntry).
 }
 
 /** Recolecta las claves S3 (fotos de evidencias + fotos de comentarios) de un
