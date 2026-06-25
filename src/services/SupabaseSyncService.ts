@@ -645,7 +645,11 @@ export async function pushSummaryRowStrict(protocolId: string): Promise<void> {
  *  el caller. */
 export async function deleteProtocolStrict(
   protocolId: string,
-  meta?: { deletedById?: string | null; deletedByName?: string | null } | null,
+  meta?: {
+    deletedById?: string | null; deletedByName?: string | null;
+    // v62 — liberar el correlativo al borrar el TOPE del grupo (reuso del código sin huecos).
+    releaseProjectId?: string | null; releaseGroupKey?: string | null; releaseSeq?: number | null;
+  } | null,
 ): Promise<void> {
   // Guardia: nunca operar con un id vacío.
   if (!protocolId || !protocolId.trim()) return;
@@ -666,6 +670,15 @@ export async function deleteProtocolStrict(
   }
   // v62 — El soft-delete YA NO borra S3: las fotos quedan en el snapshot/papelera para que
   // RESTAURAR las recupere. El S3 se libera recién en "Eliminar definitivo" (purgeRecycleEntry).
+
+  // v62 — Liberar el correlativo si el ensayo borrado era el TOPE de su grupo (la RPC baja
+  // el contador 1 solo si coincide) → el próximo creado reusa el código (sin huecos).
+  if (meta?.releaseProjectId && meta.releaseGroupKey && meta.releaseSeq != null) {
+    const { error: relErr } = await supabase.rpc('release_protocol_seq', {
+      p_project_id: meta.releaseProjectId, p_group_key: meta.releaseGroupKey, p_seq: meta.releaseSeq,
+    });
+    if (relErr) console.warn('[deleteProtocolStrict] release_protocol_seq:', relErr.message);
+  }
 }
 
 /** Recolecta las claves S3 (fotos de evidencias + fotos de comentarios) de un

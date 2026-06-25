@@ -186,8 +186,8 @@ class _SyncWorker {
       case 'PUSH_PROTOCOL_STATUS':
         return pushProtocolStatusStrict(entityId);
       case 'DELETE_PROTOCOL': {
-        // v43 — payload trae quién eliminó, para registrarlo en la papelera.
-        let meta: { deletedById?: string | null; deletedByName?: string | null } | null = null;
+        // v43 — payload trae quién eliminó (papelera). v62 — + datos para liberar el correlativo.
+        let meta: any = null;
         try { meta = _payloadJson ? JSON.parse(_payloadJson) : null; } catch { /* sin meta */ }
         return deleteProtocolStrict(entityId, meta);
       }

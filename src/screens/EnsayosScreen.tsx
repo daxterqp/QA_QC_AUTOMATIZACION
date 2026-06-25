@@ -43,14 +43,14 @@ import {
   samplesCollection,
   projectsCollection,
 } from '@db/index';
-import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, type ProjectFeatureFlags } from '@utils/featureFlags';
 import { Q } from '@nozbe/watermelondb';
 import { Ionicons } from '@expo/vector-icons';
 import { DateRangePicker } from '@components/DateRangePicker';
 import { useAuth } from '@context/AuthContext';
 import { createInstances } from '@services/ProtocolInstanceService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
-import { todayEnsayoDate, parseEnsayoDate } from '@utils/protocolCode';
+import { todayEnsayoDate, parseEnsayoDate, pickMask, seqFromCode, type SeqResetScope } from '@utils/protocolCode';
 import { isValidTimeText } from '@utils/numericProtocol';
 import type Protocol from '@models/Protocol';
 import type { ProtocolStatus } from '@models/Protocol';
@@ -128,6 +128,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const [protos, setProtos] = useState<Protocol[]>([]);
   const [templates, setTemplates] = useState<TemplateLite[]>([]);
   const [sectorsLite, setSectorsLite] = useState<SectorLite[]>([]);
+  const [projFlags, setProjFlags] = useState<ProjectFeatureFlags | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // ── v32: buscador + filtros cruzados (default: todos) ────────────────────
@@ -180,6 +181,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
         samplesCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]),
       ]);
       const flags = parseFeatureFlagsJson((proj as any)?.featureFlags);
+      setProjFlags(flags);
       setFillBySample(!!flags.fill_by_sample);
       setSamplesLite([...smps].sort((a: any, b: any) => (a.seq ?? 0) - (b.seq ?? 0))
         .map((s: any) => ({ id: s.id, code: s.sampleCode, seq: s.seq ?? 0 })));
@@ -304,6 +306,39 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       return sortAsc ? cmp : -cmp;
     }) as Protocol[];
   }, [protos, search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds, sortBy, sortAsc]);
+
+  // v62 — Info de codificación de un ensayo (group_key del correlativo + su seq), espejo de la
+  // creación. Para gatear "eliminar último creado" y liberar el contador al borrar el tope.
+  const codingInfoOf = useCallback((p: any): { groupKey: string; seq: number | null } | null => {
+    if (!projFlags) return null;
+    const tpl = templates.find(t => t.id === p.templateId);
+    const tipo = tpl?.idProtocolo ?? null;
+    if (!tipo) return null;
+    const date = parseEnsayoDate(p.ensayoDate) ?? new Date();
+    const resetScope: SeqResetScope = projFlags.coding_seq_reset === 'year_sector' ? { sector: true }
+      : projFlags.coding_seq_reset === 'year_month' ? { month: true } : {};
+    const sectorName = sectorsLite.find(s => s.id === p.sectorId)?.name ?? null;
+    const mask = pickMask(projFlags.coding_mask_default, projFlags.coding_mask_by_type, tipo);
+    const sectorPart = resetScope.sector ? `|${(sectorName ?? '').trim().toUpperCase().replace(/\s+/g, '')}` : '';
+    const monthPart = resetScope.month ? `|M${date.getMonth() + 1}` : '';
+    const groupKey = `${tipo}|${date.getFullYear()}${sectorPart}${monthPart}`;
+    return { groupKey, seq: seqFromCode(p.protocolCode, mask, tipo, date, sectorName, resetScope) };
+  }, [projFlags, templates, sectorsLite]);
+
+  // v62 — En 'last_only' solo es borrable el ÚLTIMO CREADO de cada grupo de correlativo
+  // (max created_at). En 'in_list_*' es borrable cualquiera → null (sin gating).
+  const deletableIds = useMemo<Set<string> | null>(() => {
+    const mode = projFlags?.deletion_mode ?? 'last_only';
+    if (mode !== 'last_only') return null;
+    const top = new Map<string, { id: string; created: number }>();
+    for (const p of protos as any[]) {
+      const gk = codingInfoOf(p)?.groupKey ?? `__t:${p.templateId}`;
+      const created = p._raw?.created_at ?? 0;
+      const cur = top.get(gk);
+      if (!cur || created > cur.created) top.set(gk, { id: p.id, created });
+    }
+    return new Set(Array.from(top.values()).map(v => v.id));
+  }, [protos, projFlags, codingInfoOf]);
 
   const toggleGroup = (key: string) =>
     setExpanded(prev => {
@@ -433,9 +468,18 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       Alert.alert(t('ensayos.alert.noPermission.title'), t('ensayos.alert.noPermission.msg'));
       return;
     }
+    // v62 — Modo 'last_only': solo se puede eliminar el ÚLTIMO ensayo creado de su grupo (sin huecos).
+    const lastOnly = deletableIds != null;
+    if (lastOnly && !deletableIds!.has(manageProto.id)) {
+      Alert.alert(
+        'Solo el último creado',
+        'En este proyecto solo se puede eliminar el ÚLTIMO ensayo creado de su grupo (evita huecos en la numeración). Para borrar dentro de la lista, cambia el "Modo de eliminación" en la Configuración del proyecto.',
+      );
+      return;
+    }
     const label = manageProto.protocolCode ?? manageProto.protocolNumber ?? t('ensayos.alert.delete.defaultLabel');
     Alert.alert(
-      t('ensayos.alert.delete.title'),
+      lastOnly ? 'Eliminar último ensayo creado' : t('ensayos.alert.delete.title'),
       t('ensayos.alert.delete.msg', { label }),
       [
         { text: t('ensayos.btn.cancel'), style: 'cancel' },
@@ -492,9 +536,15 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               //    luego hace hard delete ATÓMICO en la nube (RPC transaccional).
               //    Si el encolado fallara, el ensayo sigue en la nube y un pull
               //    futuro lo restaura local → auto-recuperación, sin estado falso.
+              // v62 — Datos para liberar el correlativo si era el TOPE del grupo (la RPC solo
+              // actúa si coincide → seguro en cualquier modo).
+              const relInfo = codingInfoOf(manageProto);
               await enqueueSync({
                 opType: 'DELETE_PROTOCOL', entityId: pid, projectId,
-                payload: { deletedById: currentUser?.id ?? null, deletedByName: currentUser?.name ?? null },
+                payload: {
+                  deletedById: currentUser?.id ?? null, deletedByName: currentUser?.name ?? null,
+                  releaseProjectId: projectId, releaseGroupKey: relInfo?.groupKey ?? null, releaseSeq: relInfo?.seq ?? null,
+                },
               });
               setManageProto(null);
               await loadData();
