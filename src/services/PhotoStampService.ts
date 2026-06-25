@@ -37,16 +37,23 @@ function ensureFileUri(uri: string): string {
 export async function applyPhotoStamps(
   imageUri: string,
   logoUri: string | null,
-  comment?: string | null
+  comment?: string | null,
+  /** v68 — Coordenadas GPS crudas (WGS84 lat/lng del celular). Se estampan en una línea
+   *  ADICIONAL al final del bloque superior-izquierdo (debajo de fecha + comentario). Opcional:
+   *  si es null/undefined no se agrega nada (los flujos de galería no la pasan). */
+  coords?: { lat: number; lng: number } | null
 ): Promise<string> {
   const timestamp = formatTimestamp(new Date());
 
-  // ── Paso 1: timestamp (y comentario opcional en segunda línea) ───────────
-  // Se usa un único texto con \n para que la librería renderice el salto de
-  // línea de forma nativa, con el mismo fondo y estilo, sin superposición.
-  const labelText = comment?.trim()
-    ? `${timestamp}\n${comment.trim()}`
-    : timestamp;
+  // ── Paso 1: bloque superior-izquierdo, una línea por dato (fecha, comentario, coords) ──
+  // Un único texto con \n → la librería renderiza los saltos de línea de forma nativa, con el
+  // mismo fondo/estilo, sin superposición. Las coordenadas van ÚLTIMAS (debajo del resto).
+  const lines = [timestamp];
+  if (comment?.trim()) lines.push(comment.trim());
+  if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+    lines.push(`${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`);
+  }
+  const labelText = lines.join('\n');
 
   const withText: string = await Marker.markText({
     backgroundImage: { src: ensureFileUri(imageUri) },

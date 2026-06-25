@@ -18,7 +18,27 @@ import { applyPhotoStamps } from '@services/PhotoStampService';
 import { getProjectSettings, type ProjectStampSettings } from '@services/ProjectSettings';
 import { downloadFromS3, s3FileExists } from '@services/S3Service';
 import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
 import { useI18n } from '@i18n/index';
+
+/** v68 — Coordenadas GPS crudas (lat/lng WGS84) del celular para estampar en la foto. Best-effort:
+ *  no pide permiso (no interrumpe la captura) ni bloquea — si no hay permiso/fix devuelve null y la
+ *  foto se estampa igual sin coords. Prefiere el fix actual; cae a la última conocida. */
+async function getStampCoords(): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const perm = await Location.getForegroundPermissionsAsync();
+    if (!perm.granted) return null;
+    const fresh = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise<null>((res) => setTimeout(() => res(null), 4000)),
+    ]).catch(() => null);
+    const pos: any = fresh ?? (await Location.getLastKnownPositionAsync().catch(() => null));
+    if (!pos?.coords) return null;
+    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  } catch {
+    return null;
+  }
+}
 
 interface CameraScreenProps {
   protocolItemId?: string;
@@ -98,6 +118,10 @@ export default function CameraScreen({
       setLastPhotoUri(rawUri);
       setPhotoCount((n) => n + 1);
 
+      // v68 — GPS en paralelo (best-effort) para estampar coords. Solo si el estampado está activo;
+      // se resuelve mientras se comprime la foto (no añade latencia perceptible). Si falla → null.
+      const coordsP = settings.stampEnabled ? getStampCoords() : Promise.resolve(null);
+
       if (annotationCommentId) {
         // ── Foto de observación ────────────────────────────────────────────
         // Guardar con URI original AHORA → el usuario puede seguir tomando fotos.
@@ -118,7 +142,7 @@ export default function CameraScreen({
           try {
             const { uri: compressed } = await compressImage(rawUri);
             const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
               : compressed;
 
             await database.write(async () => {
@@ -167,7 +191,7 @@ export default function CameraScreen({
           try {
             const { uri: compressed } = await compressImage(rawUri);
             const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
               : compressed;
             await database.write(async () => {
               const r2 = await evidencesCollection.find(evidenceId);
@@ -189,7 +213,7 @@ export default function CameraScreen({
           try {
             const { uri: compressed } = await compressImage(rawUri);
             const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment)
+              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
               : compressed;
             const key = `protocol_extra_photos_${extraPhotoProtocolId}`;
             const prev: string[] = JSON.parse((await AsyncStorage.getItem(key)) ?? '[]');
