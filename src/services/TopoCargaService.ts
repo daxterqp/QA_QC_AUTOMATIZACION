@@ -155,14 +155,15 @@ export async function createCarga(args: {
   return id;
 }
 
-/** Reemplaza las filas de una carga ("chancar") y re-aplica. Revierte primero los
- *  protocolos que dejaron de estar en la carga. */
+/** Reemplaza las filas de una carga ("chancar") y re-aplica. Revierte lo previo y
+ *  re-bindea TODO el proyecto: la carga editada con sus nuevas filas + las demás (para
+ *  que un ensayo que esta carga soltó vuelva a su DUEÑO previo, no quede en null). */
 export async function updateCarga(cargaId: string, rows: TopoRow[], columns?: unknown): Promise<void> {
   const carga = await topoCargasCollection.find(cargaId).catch(() => null);
   if (!carga) return;
   const projectId = (carga as any).projectId as string;
-  // 1. Revertir lo que esta carga tenía (collect oldIds).
-  const oldIds = await revertCargaProtocolsWrite(cargaId);
+  // 1. Revertir lo que esta carga tenía (los ensayos soltados se re-bindean abajo).
+  await revertCargaProtocolsWrite(cargaId);
   // 2. Actualizar rows_json/columns_json.
   await database.write(async () => {
     await (carga as any).update((rec: any) => {
@@ -170,13 +171,9 @@ export async function updateCarga(cargaId: string, rows: TopoRow[], columns?: un
       if (columns !== undefined) rec.columnsJson = columns ? JSON.stringify(columns) : null;
     });
   });
-  // 3. Re-aplicar (encola PUSH_TOPO_CARGA + nuevos touched).
-  const { touchedIds } = await applyCargaToProtocols(cargaId);
-  // 4. Encolar push de los que se revirtieron y ya no están (para subir el null).
-  const touchedSet = new Set(touchedIds);
-  for (const id of oldIds) {
-    if (!touchedSet.has(id)) await enqueue({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId });
-  }
+  // 3. Re-aplicar TODAS las cargas (created_at asc): la editada con sus nuevas filas +
+  //    las demás (restaura el dueño previo de ensayos que esta carga dejó de referenciar).
+  await rebindProjectCargas(projectId);
 }
 
 /** Borra una carga revirtiendo sus columnas topo_* en los protocolos. */
@@ -188,10 +185,15 @@ export async function deleteCargaWithRevert(cargaId: string): Promise<void> {
   await database.write(async () => {
     await (carga as any).markAsDeleted();
   });
-  await enqueue({ opType: 'DELETE_TOPO_CARGA', entityId: cargaId, projectId });
+  // #5 — Encolar los push de protocolos (null) ANTES del delete de la carga para no
+  // dejar una referencia colgante transitoria en la nube.
   for (const id of revertedIds) {
     await enqueue({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId });
   }
+  await enqueue({ opType: 'DELETE_TOPO_CARGA', entityId: cargaId, projectId });
+  // #3 — Re-bind: si otra carga (más antigua) referenciaba alguno de estos ensayos,
+  // re-aplicar las cargas restantes para que el dueño previo recupere su escritura.
+  await rebindProjectCargas(projectId).catch(() => {});
 }
 
 /** Re-enlaza TODAS las cargas del proyecto (al aparecer ensayos nuevos). Aplica en

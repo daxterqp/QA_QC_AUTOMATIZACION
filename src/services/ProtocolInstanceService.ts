@@ -29,6 +29,7 @@ import {
 } from '@db/index';
 import { expandTemplateItems } from '@utils/parametricExpand';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
+import { rebindProjectCargas } from '@services/TopoCargaService';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import {
   buildProtocolCode, nextSeq, validateMask, todayEnsayoDate, parseEnsayoDate, pickMask, type SeqResetScope,
@@ -183,6 +184,10 @@ export async function createInstances(args: CreateInstancesArgs): Promise<Create
   for (const id of ids) {
     enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId: args.projectId }).catch(() => {});
   }
+
+  // v44 — Binding diferido: si hay cargas topográficas con códigos pendientes que
+  // coinciden con estos ensayos recién creados, enlazarlas (best-effort, no bloquea).
+  rebindProjectCargas(args.projectId).catch(() => {});
 
   return { ids, codes, warnings };
 }

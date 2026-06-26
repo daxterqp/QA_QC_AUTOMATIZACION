@@ -62,6 +62,20 @@ export async function applyCargaWeb(
   return { touchedIds, pending };
 }
 
+/** Re-aplica TODAS las cargas del proyecto (created_at asc): la más nueva gana en
+ *  solapamientos de código, y un ensayo que una carga dejó de referenciar vuelve a su
+ *  dueño previo. Se usa tras editar/borrar una carga (restaura al dueño anterior) y
+ *  para enlazar ensayos nuevos a cargas con códigos pendientes. */
+export async function rebindProjectCargasWeb(supabase: SupabaseClient, projectId: string): Promise<void> {
+  const { data: cargas } = await supabase
+    .from('topo_cargas').select('id, rows_json, created_at').eq('project_id', projectId)
+    .order('created_at', { ascending: true });
+  for (const c of ((cargas ?? []) as { id: string; rows_json: unknown }[])) {
+    const rows = Array.isArray(c.rows_json) ? (c.rows_json as TopoRow[]) : [];
+    await applyCargaWeb(supabase, projectId, c.id, rows);
+  }
+}
+
 /** Revierte (null) las columnas topo_* de los protocolos cuyo dueño es `cargaId`.
  *  Devuelve los ids afectados. */
 export async function revertCargaWeb(

@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import { buildTopoCargaCode, topoSeqGroupKey, nextTopoSeqLocal, cargaDateKey } from '@lib/topoCargaCode';
 import { bindCargaToProtocols, type TopoRow } from '@lib/topoBinding';
-import { applyCargaWeb, revertCargaWeb, buildProtocolCodeMapWeb } from '@lib/topoCargaShared';
+import { applyCargaWeb, revertCargaWeb, rebindProjectCargasWeb, buildProtocolCodeMapWeb } from '@lib/topoCargaShared';
 
 const supabase = createClient();
 
@@ -122,7 +122,9 @@ export function useUpdateTopoCarga(projectId: string) {
         updated_at: Date.now(),
       }).eq('id', args.cargaId);
       if (error) throw new Error(error.message);
-      await applyCargaWeb(supabase, projectId, args.cargaId, args.rows ?? []);
+      // Re-bind de TODO el proyecto: re-aplica la editada + restaura el dueño previo de
+      // los ensayos que esta carga dejó de referenciar (no quedan en null).
+      await rebindProjectCargasWeb(supabase, projectId);
       return true;
     },
     onSuccess: () => {
@@ -139,6 +141,8 @@ export function useDeleteTopoCarga(projectId: string) {
       await revertCargaWeb(supabase, projectId, cargaId);
       const { error } = await supabase.from('topo_cargas').delete().eq('id', cargaId);
       if (error) throw new Error(error.message);
+      // Re-bind: restaura el dueño previo de los ensayos que esta carga referenciaba.
+      await rebindProjectCargasWeb(supabase, projectId);
       return true;
     },
     onSuccess: () => {

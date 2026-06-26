@@ -608,9 +608,19 @@ export async function deleteTopoCargaStrict(cargaId: string): Promise<void> {
 export async function pullTopoCargas(projectId: string): Promise<void> {
   const { data, error } = await supabase.from('topo_cargas').select('*').eq('project_id', projectId);
   if (error || !data) return;
+  // v44 — Anti-zombie: excluir cargas con DELETE_TOPO_CARGA pendiente en cola (el
+  // delete aún no se pusheó → la fila sigue en la nube; no re-crearla local).
+  let pendingDeleteIds = new Set<string>();
+  try {
+    const pd = await syncQueueCollection
+      .query(Q.where('op_type', 'DELETE_TOPO_CARGA'), Q.where('status', Q.oneOf(['PENDING', 'PROCESSING'])))
+      .fetch();
+    pendingDeleteIds = new Set((pd as any[]).map((r) => r.entityId));
+  } catch { /* sin cola */ }
+  const live = pendingDeleteIds.size > 0 ? data.filter((r: any) => !pendingDeleteIds.has(r.id)) : data;
   const local = await topoCargasCollection.query(Q.where('project_id', projectId)).fetch();
-  const remoteIds = new Set<string>(data.map((r: any) => r.id));
-  const prepares: any[] = prepareFreshOverride(topoCargasCollection, data, local);
+  const remoteIds = new Set<string>(live.map((r: any) => r.id));
+  const prepares: any[] = prepareFreshOverride(topoCargasCollection, live, local);
   for (const rec of local) {
     if ((rec as any)._raw?._status === 'synced' && !remoteIds.has(rec.id)) {
       prepares.push((rec as any).prepareDestroyPermanently());
@@ -1694,13 +1704,25 @@ async function pullProject(projectId: string): Promise<number> {
     // pusheadas). filterToLocalSchema serializa rows_json/columns_json (JSONB) a string.
     const remoteTopoCargas = await fetchAll('topo_cargas', 'project_id', projectId);
     const localTopoCargas = await topoCargasCollection.query(Q.where('project_id', projectId)).fetch();
+    // v44 — Anti-zombie: si hay DELETE_TOPO_CARGA pendiente en cola, la carga sigue en
+    // la nube (no se pusheó el delete) → excluirla del remoto para NO re-crearla.
+    let pendingTopoDeleteIds = new Set<string>();
+    try {
+      const pd = await syncQueueCollection
+        .query(Q.where('op_type', 'DELETE_TOPO_CARGA'), Q.where('status', Q.oneOf(['PENDING', 'PROCESSING'])))
+        .fetch();
+      pendingTopoDeleteIds = new Set((pd as any[]).map((r) => r.entityId));
+    } catch { /* sin cola → nada que excluir */ }
+    const remoteTopoCargasLive = pendingTopoDeleteIds.size > 0
+      ? remoteTopoCargas.filter((c: any) => !pendingTopoDeleteIds.has(c.id))
+      : remoteTopoCargas;
 
     const allPrepares = [
       ...prepareOverride(projectsCollection,              remoteProject ?? [],  localProject),
       ...prepareOverride(labAuxTablesCollection,          remoteAuxTables,      localAuxTables),
       ...prepareOverride(recycleBinCollection,            remoteRecycleBin,     localRecycleBin),
       ...prepareFreshOverride(samplesCollection,          remoteSamples,        localSamples),
-      ...prepareFreshOverride(topoCargasCollection,       remoteTopoCargas,     localTopoCargas),
+      ...prepareFreshOverride(topoCargasCollection,       remoteTopoCargasLive, localTopoCargas),
       ...prepareOverride(locationsCollection,             remoteLocations,      localLocs),
       // v32 — Dominio de protocolos: fresh-override (no pisar ediciones locales
       // más nuevas; ver doc de prepareFreshOverride). Resto: cloud-wins clásico.
@@ -1834,6 +1856,16 @@ async function pullProject(projectId: string): Promise<number> {
     );
     if (orphanSectors.length > 0) {
       await database.batch(orphanSectors.map((s: any) => s.prepareDestroyPermanently()));
+    }
+
+    // v44 — Cargas topográficas eliminadas desde otro dispositivo/web. Sin esto, el
+    // pull masivo (ruta principal) NUNCA borraba la copia local → resurrección.
+    const remoteTopoCargaIdSet = new Set(remoteTopoCargasLive.map((c: any) => c.id));
+    const orphanTopoCargas = fetchFailed.has('topo_cargas') ? [] : localTopoCargas.filter(
+      (c: any) => !remoteTopoCargaIdSet.has(c.id) && c._raw._status !== 'created',
+    );
+    if (orphanTopoCargas.length > 0) {
+      await database.batch(orphanTopoCargas.map((c: any) => c.prepareDestroyPermanently()));
     }
 
     // Ubicaciones huérfanas
