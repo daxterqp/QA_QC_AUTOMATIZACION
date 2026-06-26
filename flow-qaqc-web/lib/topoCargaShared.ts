@@ -9,6 +9,43 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bindCargaToProtocols, normalizeCode, type TopoRow } from '@lib/topoBinding';
+import { mergeFeatureFlags, topoColumns } from '@/types';
+import {
+  topoCoordsToLatLng, utmFrameFromSectors, findSectorByPointWithTolerance,
+  type LatLng, type CoordinateSystem,
+} from '@lib/coordinateTopo';
+
+interface ProcessingCtxWeb {
+  processing: boolean;
+  coordSystem: CoordinateSystem;
+  sectors: { id: string; name: string; points: LatLng[] | null }[];
+  frame: { zone: number; hemisphere: 'N' | 'S' } | null;
+  sectorEnabled: boolean;
+  sectorTolerance: number;
+}
+
+/** Contexto del motor web: flags (coord_system + procesamiento) + sectores + zona UTM. */
+async function loadProcessingCtxWeb(supabase: SupabaseClient, projectId: string): Promise<ProcessingCtxWeb> {
+  const { data: proj } = await supabase.from('projects').select('feature_flags').eq('id', projectId).single();
+  const flags = mergeFeatureFlags(((proj as { feature_flags?: unknown } | null)?.feature_flags ?? null) as any);
+  if (!flags.topo_processing_enabled) {
+    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0 };
+  }
+  const { data: secs } = await supabase.from('project_sectors').select('id, name, points_json').eq('project_id', projectId);
+  const sectors = ((secs ?? []) as { id: string; name: string; points_json: unknown }[]).map((s) => ({
+    id: s.id, name: s.name,
+    points: Array.isArray(s.points_json) ? (s.points_json as LatLng[]) : null,
+  }));
+  const sectorCol = topoColumns(flags).find((c) => c.builtin === 'sector' && c.enabled);
+  return {
+    processing: true,
+    coordSystem: flags.coordinate_system,
+    sectors,
+    frame: utmFrameFromSectors(sectors),
+    sectorEnabled: !!sectorCol,
+    sectorTolerance: sectorCol?.tolerance_m ?? 0,
+  };
+}
 
 function toNum(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -44,16 +81,33 @@ export async function applyCargaWeb(
     .from('protocols').select('id, protocol_code, external_id').eq('project_id', projectId);
   const codeMap = buildProtocolCodeMapWeb((protos ?? []) as ProtoCodeRow[]);
   const { applied, pending } = bindCargaToProtocols(rows, codeMap);
+  const ctx = await loadProcessingCtxWeb(supabase, projectId);
   const now = Date.now();
   const touchedIds: string[] = [];
   for (const b of applied) {
     const custom = b.row.custom && Object.keys(b.row.custom).length > 0 ? b.row.custom : null;
+    const east = toNum(b.row.c1), north = toNum(b.row.c2);
+    // Motor: lat/lng + sector (polígono con tolerancia) cuando el procesamiento está ON.
+    let lat: number | null = null, lng: number | null = null, sectorId: string | null = null;
+    if (ctx.processing && east != null && north != null) {
+      const ll = topoCoordsToLatLng(east, north, ctx.coordSystem, ctx.frame);
+      if (ll) {
+        lat = ll.lat; lng = ll.lng;
+        if (ctx.sectorEnabled && ctx.sectors.length > 0) {
+          sectorId = findSectorByPointWithTolerance(ll, ctx.sectors, ctx.sectorTolerance)?.id ?? null;
+        }
+      }
+    }
     const { error } = await supabase.from('protocols').update({
       topo_source_carga_id: cargaId,
-      topo_coord_east: toNum(b.row.c1),
-      topo_coord_north: toNum(b.row.c2),
+      topo_coord_east: east,
+      topo_coord_north: north,
       topo_coord_elevation: toNum(b.row.cota),
       topo_values_json: custom,
+      topo_latitude: lat,
+      topo_longitude: lng,
+      topo_sector_id: sectorId,
+      topo_coord_system: ctx.coordSystem,
       topo_updated_at: now,
       updated_at: now,
     }).eq('id', b.protocolId);

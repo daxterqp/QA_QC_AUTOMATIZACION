@@ -212,3 +212,34 @@ export function findSectorByPointWithTolerance(
   if (best && Number.isFinite(toleranceM) && best.distanceM <= toleranceM) return best;
   return null;
 }
+
+// ─── v44 — Coordenadas topográficas → WGS84 lat/lng (para el motor de sector) ──
+
+/** Zona UTM + hemisferio del proyecto, derivados del CENTROIDE de los polígonos de
+ *  sectores (todos en WGS84 lat/lng). Necesario para convertir Este/Norte (UTM) → lat/lng. */
+export function utmFrameFromSectors(sectors: { points: LatLng[] | null }[]): { zone: number; hemisphere: 'N' | 'S' } | null {
+  let sumLat = 0, sumLng = 0, n = 0;
+  for (const s of sectors) {
+    for (const p of (s.points ?? [])) {
+      if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) { sumLat += p.lat; sumLng += p.lng; n++; }
+    }
+  }
+  if (n === 0) return null;
+  const lat = sumLat / n, lng = sumLng / n;
+  return { zone: autoDetectUtmZone(lng), hemisphere: lat < 0 ? 'S' : 'N' };
+}
+
+/** Convierte las 2 coords topográficas (c1=Este/X/lng, c2=Norte/Y/lat) a WGS84 lat/lng
+ *  según el sistema del proyecto. `frame` (zona/hemisferio, de los sectores) solo se usa
+ *  para UTM. Devuelve null si faltan datos o no se puede convertir. */
+export function topoCoordsToLatLng(
+  c1: number, c2: number, system: CoordinateSystem,
+  frame: { zone: number; hemisphere: 'N' | 'S' } | null,
+): LatLng | null {
+  if (!Number.isFinite(c1) || !Number.isFinite(c2)) return null;
+  if (system === 'WGS84_LATLNG') return { lat: c2, lng: c1 };
+  if (system === 'PSAD56_LATLNG') return psad56LatLngToWgs84(c2, c1);
+  if (!frame) return null; // UTM sin zona conocida (no hay sectores) → no se puede ubicar
+  const datum = system === 'PSAD56_UTM' ? 'PSAD56' : 'WGS84';
+  try { return utmToWgs84(c1, c2, frame.zone, datum, frame.hemisphere); } catch { return null; }
+}

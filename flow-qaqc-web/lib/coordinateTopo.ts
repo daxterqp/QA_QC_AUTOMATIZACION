@@ -65,3 +65,63 @@ export function findSectorByPointWithTolerance(
   if (best && Number.isFinite(toleranceM) && best.distanceM <= toleranceM) return best;
   return null;
 }
+
+// ─── v44 — Conversión de coordenadas topográficas → WGS84 (espejo del móvil) ───
+import proj4 from 'proj4';
+
+export type CoordinateSystem = 'WGS84_LATLNG' | 'WGS84_UTM' | 'PSAD56_LATLNG' | 'PSAD56_UTM';
+
+proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
+proj4.defs('EPSG:4248', '+proj=longlat +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +no_defs');
+
+function utmEpsgCode(datum: 'WGS84' | 'PSAD56', zone: number, hemisphere: 'N' | 'S'): string {
+  if (!Number.isInteger(zone) || zone < 1 || zone > 60) throw new Error(`Zona UTM fuera de rango: ${zone}`);
+  let code: string;
+  if (datum === 'WGS84') code = `EPSG:${hemisphere === 'N' ? 32600 + zone : 32700 + zone}`;
+  else code = `EPSG:PSAD56_UTM_${hemisphere}_${zone}`;
+  if (!proj4.defs(code)) {
+    const south = hemisphere === 'S' ? ' +south' : '';
+    if (datum === 'WGS84') proj4.defs(code, `+proj=utm +zone=${zone}${south} +datum=WGS84 +units=m +no_defs`);
+    else proj4.defs(code, `+proj=utm +zone=${zone}${south} +ellps=intl +towgs84=-288,175,-376,0,0,0,0 +units=m +no_defs`);
+  }
+  return code;
+}
+
+export function autoDetectUtmZone(lng: number): number {
+  const z = Math.floor((lng + 180) / 6) + 1;
+  return z < 1 ? 1 : z > 60 ? 60 : z;
+}
+
+export function utmToWgs84(easting: number, northing: number, zone: number, datum: 'WGS84' | 'PSAD56' = 'WGS84', hemisphere: 'N' | 'S' = 'S'): LatLng {
+  const [lng, lat] = proj4(utmEpsgCode(datum, zone, hemisphere), 'EPSG:4326', [easting, northing]);
+  return { lat, lng };
+}
+
+export function psad56LatLngToWgs84(lat: number, lng: number): LatLng {
+  const [wgsLng, wgsLat] = proj4('EPSG:4248', 'EPSG:4326', [lng, lat]);
+  return { lat: wgsLat, lng: wgsLng };
+}
+
+/** Zona UTM + hemisferio del proyecto, del centroide de los polígonos de sectores. */
+export function utmFrameFromSectors(sectors: { points: LatLng[] | null }[]): { zone: number; hemisphere: 'N' | 'S' } | null {
+  let sumLat = 0, sumLng = 0, n = 0;
+  for (const s of sectors) for (const p of (s.points ?? [])) {
+    if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) { sumLat += p.lat; sumLng += p.lng; n++; }
+  }
+  if (n === 0) return null;
+  const lat = sumLat / n, lng = sumLng / n;
+  return { zone: autoDetectUtmZone(lng), hemisphere: lat < 0 ? 'S' : 'N' };
+}
+
+/** Convierte (c1=Este/X/lng, c2=Norte/Y/lat) a WGS84 lat/lng según el sistema del proyecto. */
+export function topoCoordsToLatLng(
+  c1: number, c2: number, system: CoordinateSystem,
+  frame: { zone: number; hemisphere: 'N' | 'S' } | null,
+): LatLng | null {
+  if (!Number.isFinite(c1) || !Number.isFinite(c2)) return null;
+  if (system === 'WGS84_LATLNG') return { lat: c2, lng: c1 };
+  if (system === 'PSAD56_LATLNG') return psad56LatLngToWgs84(c2, c1);
+  if (!frame) return null;
+  const datum = system === 'PSAD56_UTM' ? 'PSAD56' : 'WGS84';
+  try { return utmToWgs84(c1, c2, frame.zone, datum, frame.hemisphere); } catch { return null; }
+}

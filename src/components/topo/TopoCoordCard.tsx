@@ -4,9 +4,10 @@
  * marcadas "Mostrar en ficha" de la config: coordenadas + cota + custom/computadas.
  * Si no hay datos topográficos, muestra el estado de espera.
  */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors, Radius } from '../../theme/colors';
+import { projectSectorsCollection } from '@db/index';
 import type { TopoColumn } from '@utils/featureFlags';
 
 interface TopoProtocol {
@@ -38,6 +39,19 @@ export function TopoCoordCard({ protocol, columns, sectorName, embedded }: Props
     try { return JSON.parse(protocol.topoValuesJson) ?? {}; } catch { return {}; }
   }, [protocol.topoValuesJson]);
 
+  // Resuelve el nombre del sector calculado (topoSectorId) si no lo pasó el caller.
+  const [resolvedSector, setResolvedSector] = useState<string | null>(sectorName ?? null);
+  useEffect(() => {
+    if (sectorName != null) { setResolvedSector(sectorName); return; }
+    const sid = protocol.topoSectorId;
+    if (!sid) { setResolvedSector(null); return; }
+    let cancelled = false;
+    projectSectorsCollection.find(sid)
+      .then((s: any) => { if (!cancelled) setResolvedSector(s?.name ?? null); })
+      .catch(() => { if (!cancelled) setResolvedSector(null); });
+    return () => { cancelled = true; };
+  }, [protocol.topoSectorId, sectorName]);
+
   // Columnas a mostrar (las marcadas "mostrar en ficha"); si no hay config, defaults.
   const shown = columns.filter((c) => c.show_in_ficha);
   const rows: { label: string; value: string }[] = [];
@@ -45,7 +59,7 @@ export function TopoCoordCard({ protocol, columns, sectorName, embedded }: Props
     if (c.builtin === 'coord1') rows.push({ label: c.name, value: fmt(protocol.topoCoordEast) });
     else if (c.builtin === 'coord2') rows.push({ label: c.name, value: fmt(protocol.topoCoordNorth) });
     else if (c.builtin === 'cota') rows.push({ label: c.name, value: fmt(protocol.topoCoordElevation) });
-    else if (c.builtin === 'sector') rows.push({ label: c.name, value: sectorName ?? (protocol.topoSectorId ? '—' : '—') });
+    else if (c.builtin === 'sector') rows.push({ label: c.name, value: resolvedSector ?? '—' });
     else {
       const v = custom[c.id];
       rows.push({ label: c.name, value: v == null || v === '' ? '—' : String(v) });
@@ -54,7 +68,7 @@ export function TopoCoordCard({ protocol, columns, sectorName, embedded }: Props
 
   const hasAnyValue =
     protocol.topoCoordEast != null || protocol.topoCoordNorth != null ||
-    protocol.topoCoordElevation != null || Object.keys(custom).length > 0;
+    protocol.topoCoordElevation != null || Object.keys(custom).length > 0 || !!protocol.topoSectorId;
 
   return (
     <View style={[styles.bar, embedded && styles.barEmbedded]}>

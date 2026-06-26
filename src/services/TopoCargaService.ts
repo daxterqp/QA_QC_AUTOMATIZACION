@@ -11,11 +11,13 @@
  * `computeTopoPayload` más adelante sin cambiar la firma.
  */
 import { Q } from '@nozbe/watermelondb';
-import { database, topoCargasCollection, protocolsCollection } from '@db/index';
+import { database, topoCargasCollection, protocolsCollection, projectsCollection, projectSectorsCollection } from '@db/index';
 import { enqueue } from './SyncQueueService';
 import { supabase } from '@config/supabase';
 import { bindCargaToProtocols, normalizeCode, type TopoRow } from '@utils/topoBinding';
 import { buildTopoCargaCode, topoSeqGroupKey, nextTopoSeqLocal, cargaDateKey } from '@utils/topoCargaCode';
+import { parseFeatureFlagsJson, topoColumns } from '@utils/featureFlags';
+import { topoCoordsToLatLng, utmFrameFromSectors, findSectorByPointWithTolerance, type LatLng } from '@utils/CoordinateSystem';
 
 function toNum(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -74,7 +76,39 @@ async function revertCargaProtocolsWrite(cargaId: string): Promise<string[]> {
   return owned.map((p) => p.id);
 }
 
+interface ProcessingCtx {
+  processing: boolean;
+  coordSystem: import('@utils/featureFlags').ProjectFeatureFlags['coordinate_system'];
+  sectors: { id: string; name: string; points: LatLng[] | null }[];
+  frame: { zone: number; hemisphere: 'N' | 'S' } | null;
+  sectorEnabled: boolean;
+  sectorTolerance: number;
+}
+
+/** Contexto del motor: flags (coord_system + procesamiento) + sectores del proyecto +
+ *  zona UTM derivada, para calcular el sector con tolerancia. */
+async function loadProcessingCtx(projectId: string): Promise<ProcessingCtx> {
+  const proj = await projectsCollection.find(projectId).catch(() => null);
+  const flags = parseFeatureFlagsJson((proj as any)?.featureFlags);
+  if (!flags.topo_processing_enabled) {
+    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0 };
+  }
+  const secRecs = await projectSectorsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]);
+  const sectors = (secRecs as any[]).map((s) => ({ id: s.id, name: s.name, points: s.points ?? null }));
+  const cols = topoColumns(flags);
+  const sectorCol = cols.find((c) => c.builtin === 'sector' && c.enabled);
+  return {
+    processing: true,
+    coordSystem: flags.coordinate_system,
+    sectors,
+    frame: utmFrameFromSectors(sectors),
+    sectorEnabled: !!sectorCol,
+    sectorTolerance: sectorCol?.tolerance_m ?? 0,
+  };
+}
+
 /** Enlaza las filas de la carga a los protocolos y escribe sus columnas topo_*.
+ *  Si el procesamiento está activo, calcula lat/lng + sector (polígono con tolerancia).
  *  Devuelve { touchedIds, pending }. Encola PUSH_TOPO_CARGA + PUSH_PROTOCOL_STATUS. */
 export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedIds: string[]; pending: string[] }> {
   const carga = await topoCargasCollection.find(cargaId).catch(() => null);
@@ -87,6 +121,7 @@ export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedI
   const codeMap = buildProtocolCodeMap(protocols);
   const { applied, pending } = bindCargaToProtocols(rows, codeMap);
   const protoById = new Map<string, any>(protocols.map((p) => [p.id, p]));
+  const ctx = await loadProcessingCtx(projectId);
 
   const now = Date.now();
   const touchedIds: string[] = [];
@@ -95,12 +130,31 @@ export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedI
       const p = protoById.get(b.protocolId);
       if (!p) continue;
       const payload = computeTopoPayload(b.row);
+      // Motor: lat/lng + sector (polígono con tolerancia) cuando el procesamiento está ON.
+      let lat: number | null = null, lng: number | null = null, sectorId: string | null = null;
+      if (ctx.processing) {
+        const e = payload.topoCoordEast as number | null, nrt = payload.topoCoordNorth as number | null;
+        if (e != null && nrt != null) {
+          const ll = topoCoordsToLatLng(e, nrt, ctx.coordSystem, ctx.frame);
+          if (ll) {
+            lat = ll.lat; lng = ll.lng;
+            if (ctx.sectorEnabled && ctx.sectors.length > 0) {
+              const res = findSectorByPointWithTolerance(ll, ctx.sectors, ctx.sectorTolerance);
+              sectorId = res?.id ?? null;
+            }
+          }
+        }
+      }
       await p.update((rec: any) => {
         rec.topoSourceCargaId = cargaId;
         rec.topoCoordEast = payload.topoCoordEast;
         rec.topoCoordNorth = payload.topoCoordNorth;
         rec.topoCoordElevation = payload.topoCoordElevation;
         rec.topoValuesJson = payload.topoValuesJson;
+        rec.topoLatitude = lat;
+        rec.topoLongitude = lng;
+        rec.topoSectorId = sectorId;
+        rec.topoCoordSystem = ctx.coordSystem;
         rec.topoUpdatedAt = now;
       });
       touchedIds.push(b.protocolId);
