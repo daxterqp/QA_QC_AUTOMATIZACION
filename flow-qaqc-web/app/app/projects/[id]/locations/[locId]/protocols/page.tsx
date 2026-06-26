@@ -228,13 +228,16 @@ function ProtocolRow({
 
 function StatusBadge({ status }: { status: ProtocolStatus | null }) {
   const { t } = useI18n();
-  const s = status ?? 'DRAFT';
+  // #2 — Sin instancia (status null) = protocolo clásico NO iniciado → en blanco
+  // (antes caía a DRAFT y mostraba "En progreso" erróneamente). Una vez iniciado
+  // (DRAFT/IN_PROGRESS/…) sí muestra su estado.
+  if (!status) return null;
   return (
     <span className={cn(
       'text-[11px] font-bold px-2.5 py-1 rounded-md',
-      STATUS_COLORS[s]
+      STATUS_COLORS[status]
     )}>
-      {t(STATUS_LABEL_KEYS[s])}
+      {t(STATUS_LABEL_KEYS[status])}
     </span>
   );
 }

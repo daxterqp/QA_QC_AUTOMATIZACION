@@ -22,13 +22,17 @@ interface Props {
   labelExtras?: { label: string; value: string }[];
   /** Compact = solo el QR sin botón de imprimir (para inline en cards). */
   compact?: boolean;
+  /** Oculta el identificador + nombre que van DEBAJO del QR. Se usa en protocolos
+   *  clásicos del audit: sus nombres son largos y descuadran el diseño. En numéricos
+   *  se mantiene (nombre corto tipo código). Los botones Imprimir/Etiqueta siguen. */
+  hideLabel?: boolean;
 }
 
 /** Badge con el QR del protocolo + identificador legible + botón "Imprimir".
  *  La impresión abre una ventana nueva con CSS print-friendly.
  *  Adicionalmente: botón "Etiqueta" abre LabelPrintModal con preview + comandos
  *  ZPL/TSPL para impresoras térmicas (Zebra, TSC, Phomemo, NIIMBOT, etc.). */
-export function QRCodeBadge({ idProtocolo, externalId, protocolUuid, protocolName, projectName, locationName, specialty, labelExtras, compact }: Props) {
+export function QRCodeBadge({ idProtocolo, externalId, protocolUuid, protocolName, projectName, locationName, specialty, labelExtras, compact, hideLabel }: Props) {
   const { t } = useI18n();
   const [data, setData] = useState<{ identifier: string; deepLink: string; svg: string } | null>(null);
   const [showLabelModal, setShowLabelModal] = useState(false);
@@ -83,10 +87,12 @@ export function QRCodeBadge({ idProtocolo, externalId, protocolUuid, protocolNam
   return (
     <div className="inline-flex flex-col items-center gap-2 p-3 bg-white border border-border rounded-lg shadow-subtle">
       <div className="leading-none" dangerouslySetInnerHTML={{ __html: data.svg }} />
-      <div className="flex flex-col items-center gap-0.5">
-        <p className="text-xs font-extrabold text-navy tracking-wide">{data.identifier}</p>
-        {protocolName && <p className="text-[10px] text-textSecondary truncate max-w-[180px]">{protocolName}</p>}
-      </div>
+      {!hideLabel && (
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="text-xs font-extrabold text-navy tracking-wide">{data.identifier}</p>
+          {protocolName && <p className="text-[10px] text-textSecondary truncate max-w-[180px]">{protocolName}</p>}
+        </div>
+      )}
       <div className="flex gap-1.5">
         <button
           onClick={handlePrint}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import {
   X, Check, Trash2, MessageSquare, Send, ChevronDown,
@@ -89,6 +90,15 @@ export default function PlanViewerPage() {
 
   // ── Selector de planos ────────────────────────────────────────────────────
   const [showPlanPicker, setShowPlanPicker] = useState(false);
+  // #3 — El PageHeader tiene overflow-hidden (ondas) y recortaba el dropdown anclado
+  // dentro de él. Lo renderizamos en un portal con posición fija calculada del botón.
+  const planBtnRef = useRef<HTMLButtonElement>(null);
+  const [planMenuPos, setPlanMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const togglePlanPicker = () => {
+    const r = planBtnRef.current?.getBoundingClientRect();
+    if (r) setPlanMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
+    setShowPlanPicker(v => !v);
+  };
   const switchPlan = (newPlanId: string) => {
     setShowPlanPicker(false);
     const params = new URLSearchParams();
@@ -514,16 +524,20 @@ export default function PlanViewerPage() {
               {fromProtocolId && protocolPlans.length > 0 && (
                 <div className="relative">
                   <button
-                    onClick={() => setShowPlanPicker(v => !v)}
+                    ref={planBtnRef}
+                    onClick={togglePlanPicker}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white/10 text-white border border-white/25 hover:bg-white/20 transition"
                   >
                     <span className="max-w-[140px] truncate">{plan.name}</span>
                     <ChevronDown size={11} className={cn('transition-transform flex-shrink-0', showPlanPicker && 'rotate-180')} />
                   </button>
-                  {showPlanPicker && (
+                  {showPlanPicker && planMenuPos && createPortal(
                     <>
-                      <div className="fixed inset-0 z-30" onClick={() => setShowPlanPicker(false)} />
-                      <div className="absolute right-0 top-full mt-1.5 z-40 bg-white rounded-xl shadow-2xl border border-border overflow-hidden min-w-[200px]">
+                      <div className="fixed inset-0 z-[60]" onClick={() => setShowPlanPicker(false)} />
+                      <div
+                        className="fixed z-[61] bg-white rounded-xl shadow-2xl border border-border overflow-hidden min-w-[200px] max-h-[70vh] overflow-y-auto"
+                        style={{ top: planMenuPos.top, right: planMenuPos.right }}
+                      >
                         {protocolPlans.map(p => (
                           <button
                             key={p.id}
@@ -537,7 +551,8 @@ export default function PlanViewerPage() {
                           </button>
                         ))}
                       </div>
-                    </>
+                    </>,
+                    document.body,
                   )}
                 </div>
               )}
@@ -772,8 +787,9 @@ export default function PlanViewerPage() {
                               )}
                               {isJefe && (
                                 <button onClick={() => toggleOk.mutate({ annotationId: ann.id, isOk: !d.isOk })}
-                                  className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition',
-                                    d.isOk ? 'bg-muted/20 text-muted hover:bg-danger/10 hover:text-danger' : 'bg-success/10 text-success hover:bg-success/20')}>
+                                  className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border bg-transparent transition',
+                                    // #6 — Ghost button (fondo transparente + borde), paridad con móvil ("Completado").
+                                    d.isOk ? 'border-border text-muted hover:bg-danger/10 hover:text-danger hover:border-danger' : 'border-success text-success hover:bg-success/10')}>
                                   <Check size={12} />{d.isOk ? t('webProto.reopen') : t('webProto.resolve')}
                                 </button>
                               )}

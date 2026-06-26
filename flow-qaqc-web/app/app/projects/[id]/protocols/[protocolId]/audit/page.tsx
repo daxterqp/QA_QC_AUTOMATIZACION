@@ -586,6 +586,9 @@ export default function ProtocolAuditPage() {
                 externalId={(protoAny?.external_id as string | null) ?? null}
                 protocolUuid={protocolId}
                 protocolName={protoAny?.protocol_number ?? null}
+                // #8 — En clásicos el nombre es largo y descuadra el badge: ocultamos
+                // el texto bajo el QR. En numéricos (nombre tipo código) se mantiene.
+                hideLabel={!numericMode}
                 projectName={fillData?.project?.name ?? null}
                 locationName={fillData?.location?.location_only ?? fillData?.location?.name ?? null}
                 specialty={fillData?.location?.specialty ?? null}

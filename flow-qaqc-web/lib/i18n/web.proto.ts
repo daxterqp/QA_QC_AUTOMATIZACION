@@ -248,7 +248,7 @@ export const STRINGS_WEB_PROTO: Record<string, { es: string; en: string; pt: str
   'webProto.addCommentPlaceholder': { es: 'Agregar comentario…', en: 'Add comment…', pt: 'Adicionar comentário…' },
   'webProto.priority': { es: 'Prioridad', en: 'Priority', pt: 'Prioridade' },
   'webProto.reopen': { es: 'Reabrir', en: 'Reopen', pt: 'Reabrir' },
-  'webProto.resolve': { es: 'Resolver', en: 'Resolve', pt: 'Resolver' },
+  'webProto.resolve': { es: 'Completado', en: 'Completed', pt: 'Concluído' },
   'webProto.confirmDeleteBullet': { es: '¿Eliminar viñeta {n}?', en: 'Delete marker {n}?', pt: 'Excluir marcador {n}?' },
   'webProto.noSession': { es: 'Sin sesión activa. Recarga la página.', en: 'No active session. Reload the page.', pt: 'Sem sessão ativa. Recarregue a página.' },
   'webProto.errSaveWithMsg': { es: 'Error al guardar: {msg}', en: 'Error saving: {msg}', pt: 'Erro ao salvar: {msg}' },

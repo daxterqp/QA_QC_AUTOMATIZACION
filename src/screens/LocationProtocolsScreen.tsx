@@ -292,15 +292,13 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
           {canFill && <Text style={styles.fillHint}>{t('locProtos.fillHint')}</Text>}
         </View>
         <View style={styles.cardRight}>
+          {/* #2 — Clásico NO iniciado (sin instancia) = sin badge, en blanco
+              (paridad con web). Solo se muestra estado una vez iniciado. */}
           {status ? (
             <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[status] }]}>
               <Text style={styles.statusText}>{STATUS_LABELS[status]}</Text>
             </View>
-          ) : (
-            <View style={[styles.statusBadge, { backgroundColor: Colors.border }]}>
-              <Text style={[styles.statusText, { color: Colors.textMuted }]}>{t('locProtos.status.notStarted')}</Text>
-            </View>
-          )}
+          ) : null}
           <Text style={styles.chevron}>›</Text>
         </View>
       </TouchableOpacity>

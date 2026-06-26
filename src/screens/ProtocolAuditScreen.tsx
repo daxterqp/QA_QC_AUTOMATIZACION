@@ -602,7 +602,9 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
             {(p.status === 'SUBMITTED' || p.status === 'APPROVED' || p.status === 'REJECTED') ? (
               <View style={{ alignItems: 'center' }}>
                 <QrCodeView value={buildProtocolDeepLink(buildQrIdentifier({ idProtocolo, externalId: p.externalId ?? null, protocolUuid: p.id }))} size={92} />
-                <Text style={styles.qrBandCode}>{p.protocolCode ?? p.protocolNumber ?? '—'}</Text>
+                {/* #8 — Código bajo el QR SOLO en numéricos (su código es corto). En clásicos
+                    el fallback al nombre largo descuadraba toda la banda → se omite. */}
+                {numericMode && <Text style={styles.qrBandCode}>{p.protocolCode ?? p.protocolNumber ?? '—'}</Text>}
               </View>
             ) : null}
           </View>
