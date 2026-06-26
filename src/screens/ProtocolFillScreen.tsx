@@ -5,6 +5,7 @@ import {
   TextInput, Alert, ActivityIndicator, ScrollView, Image, Modal, Dimensions,
   useWindowDimensions, Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -54,6 +55,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   const { protocolId, sectorLocked } = route.params;
   const { currentUser } = useAuth();
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
 
   // Tour refs
   const protocolItemRowRef = useTourStep('protocol_item_row');
@@ -941,7 +943,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
         )}
 
         keyExtractor={(row, index) => row.type === 'section' ? `sec-${row.title}-${index}` : (row.item as any).id}
-        contentContainerStyle={[styles.list, numericMode && styles.listNumeric, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}
+        contentContainerStyle={[styles.list, numericMode && styles.listNumeric, { paddingBottom: insets.bottom + 40 }, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}
         renderItem={({ item: row, index: rowIndex }) => {
           if (row.type === 'section') {
             return (
