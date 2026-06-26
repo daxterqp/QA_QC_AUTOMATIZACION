@@ -14,7 +14,8 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Settings, Info, FileText, Timer, Map, AlertTriangle } from 'lucide-react';
+import Link from 'next/link';
+import { X, Settings, Info, FileText, Timer, Map, AlertTriangle, FunctionSquare } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
@@ -240,6 +241,15 @@ export function ProjectConfigModal({
                 )}
                 <Check label="Habilitar procesamiento de datos topográficos" description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
                   value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
+                {flags.topo_processing_enabled && projectId && (
+                  <Link
+                    href={`/app/projects/${projectId}/topo-formulas`}
+                    onClick={onCancel}
+                    className="self-start flex items-center gap-2 bg-primary/10 text-primary rounded-lg px-3 py-2 my-1 text-[13px] font-bold hover:bg-primary/20 transition"
+                  >
+                    <FunctionSquare size={15} /> Administrar Fórmulas y Tablas Auxiliares
+                  </Link>
+                )}
                 <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
               </div>
             )}

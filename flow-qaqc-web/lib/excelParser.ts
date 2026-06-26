@@ -417,6 +417,41 @@ export function parseAuxTablesSheet(wb: XLSX.WorkBook): { tables: TraceabilityAu
   return { tables, warnings };
 }
 
+export interface TopoFormulaEntry {
+  /** Nombre de la columna de la config (match por nombre, sin tildes/caso). */
+  name: string;
+  /** Texto de la fórmula (motor existente: BUSCAR, #1A, etc.). */
+  formula: string;
+}
+
+/** Parsea la hoja "Fórmulas" del Excel de procesamiento topográfico.
+ *  Formato: filas `Columna | Fórmula`. Se salta una fila de encabezado si la
+ *  primera celda es "columna"/"nombre"/"tipo"/"campo". Filas sin nombre o sin
+ *  fórmula se omiten. Las fórmulas se asignan a las columnas de config por NOMBRE. */
+export function parseTopoFormulasSheet(wb: XLSX.WorkBook): { entries: TopoFormulaEntry[]; warnings: string[] } {
+  const rows = readSheet(wb, ['Fórmulas', 'Formulas', 'Fórmula', 'Formula', 'Topo Fórmulas', 'Topo Formulas']);
+  if (!rows) return { entries: [], warnings: [] };
+  const entries: TopoFormulaEntry[] = [];
+  const warnings: string[] = [];
+  const HEADER = new Set(['columna', 'nombre', 'tipo', 'campo', 'column', 'name']);
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const name = String(r[0] ?? '').trim();
+    const formula = String(r[1] ?? '').trim();
+    if (!name) continue;
+    if (HEADER.has(name.toLowerCase()) && (!formula || HEADER.has(formula.toLowerCase()))) continue;
+    if (!formula) { warnings.push(`Columna "${name}": sin fórmula — omitida.`); continue; }
+    const key = name.toLowerCase();
+    if (seen.has(key)) { warnings.push(`Columna "${name}": duplicada — se usa la última.`); }
+    seen.add(key);
+    // Dedup conservando la última: quita la previa si existe.
+    const prevIdx = entries.findIndex(e => e.name.toLowerCase() === key);
+    if (prevIdx >= 0) entries.splice(prevIdx, 1);
+    entries.push({ name, formula });
+  }
+  return { entries, warnings };
+}
+
 const KIND_MAP: Record<string, TraceabilityActivity['kind']> = {
   productiva: 'productive', productivas: 'productive', productive: 'productive',
   mantenimiento: 'maintenance', maintenance: 'maintenance',

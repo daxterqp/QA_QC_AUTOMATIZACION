@@ -324,6 +324,16 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               )}
               <CheckRow label="Habilitar procesamiento de datos topográficos" description="Motor de cálculo (fórmulas + sector por área con tolerancia)."
                 value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
+              {flags.topo_processing_enabled && (
+                <TouchableOpacity
+                  style={styles.topoFormulasBtn}
+                  onPress={() => navigation.navigate('TopoFormulas', { projectId, projectName: projectName ?? '' })}
+                >
+                  <Ionicons name="calculator-outline" size={16} color={Colors.primary} />
+                  <Text style={styles.topoFormulasBtnText}>Administrar Fórmulas y Tablas Auxiliares</Text>
+                  <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+                </TouchableOpacity>
+              )}
               <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
             </View>
           )}
@@ -650,6 +660,8 @@ const styles = StyleSheet.create({
   topoAlert: { flexDirection: 'row', gap: 8, backgroundColor: '#FFFBEB', borderColor: '#FCD34D', borderWidth: 1, borderRadius: Radius.md, padding: 10, marginVertical: 6 },
   topoAlertText: { fontSize: 11, color: '#78350F', lineHeight: 15 },
   topoAlertBold: { fontWeight: '800', color: '#78350F' },
+  topoFormulasBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.primary + '14', borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 10, marginVertical: 6, alignSelf: 'flex-start' },
+  topoFormulasBtnText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
 
   sectionBox: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, marginBottom: 10, backgroundColor: Colors.white, overflow: 'hidden' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },

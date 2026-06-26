@@ -53,3 +53,46 @@ export function computeTopoFormulaValues(
   }
   return out;
 }
+
+export interface TopoFormulaEntry { name: string; formula: string }
+export interface ApplyFormulasResult {
+  columns: TopoColumn[];
+  applied: number;   // columnas existentes convertidas a 'formula'
+  created: number;   // columnas nuevas agregadas
+  warnings: string[];
+}
+
+function normName(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+function genColId(seed: number): string { return `cf${seed.toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`; }
+
+/** Aplica las fórmulas del Excel a las columnas de config (match por NOMBRE).
+ *  Si la columna existe → source='formula' + formula. Si no → agrega una nueva
+ *  (enabled + show_in_ficha). Función PURA (mismo resultado móvil/web). */
+export function applyTopoFormulas(columns: TopoColumn[], entries: TopoFormulaEntry[]): ApplyFormulasResult {
+  const cols = columns.map((c) => ({ ...c }));
+  const byName = new Map<string, number>();
+  cols.forEach((c, i) => byName.set(normName(c.name), i));
+  let applied = 0, created = 0;
+  const warnings: string[] = [];
+  entries.forEach((e, idx) => {
+    const key = normName(e.name);
+    const at = byName.get(key);
+    if (at != null) {
+      const c = cols[at];
+      if (c.builtin === 'coord1' || c.builtin === 'coord2' || c.builtin === 'cota') {
+        warnings.push(`"${e.name}" es una columna base (coordenada/cota): no admite fórmula — omitida.`);
+        return;
+      }
+      cols[at] = { ...c, source: 'formula', formula: e.formula };
+      applied++;
+    } else {
+      const id = genColId(idx);
+      cols.push({ id, name: e.name, source: 'formula', formula: e.formula, enabled: true, show_in_ficha: true });
+      byName.set(key, cols.length - 1);
+      created++;
+    }
+  });
+  return { columns: cols, applied, created, warnings };
+}
