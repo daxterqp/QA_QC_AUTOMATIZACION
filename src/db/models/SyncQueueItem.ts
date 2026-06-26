@@ -28,7 +28,10 @@ export type SyncOpType =
   | 'PUSH_WORK_SESSION_FORM_ITEM'
   | 'PUSH_WORK_SESSION_GPS_BATCH'
   // v42 — Tablas Resumen con reintento (antes era push fire-and-forget sin retry).
-  | 'PUSH_SUMMARY_ROW';
+  | 'PUSH_SUMMARY_ROW'
+  // v44 — Carga de datos topográficos
+  | 'PUSH_TOPO_CARGA'
+  | 'DELETE_TOPO_CARGA';
 
 export type SyncStatus = 'PENDING' | 'PROCESSING' | 'FAILED_PERMANENT';
 

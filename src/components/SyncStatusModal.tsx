@@ -50,6 +50,9 @@ const OP_LABELS: Record<SyncOpType, string> = {
   PUSH_WORK_SESSION_FORM_ITEM:     tx('syncModal.op.formAnswers'),
   PUSH_WORK_SESSION_GPS_BATCH:     tx('syncModal.op.sessionGpsBatch'),
   PUSH_SUMMARY_ROW:                tx('syncModal.op.summaryRows'),
+  // v44 — Carga de datos topográficos
+  PUSH_TOPO_CARGA:                 tx('syncModal.op.topoCarga'),
+  DELETE_TOPO_CARGA:               tx('syncModal.op.topoCargaDelete'),
 };
 
 export function SyncStatusModal({ onClose }: Props) {

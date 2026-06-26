@@ -38,6 +38,8 @@ import {
   pushWorkSessionFormItemStrict,
   pushWorkSessionGpsBatchStrict,
   pushSummaryRowStrict,
+  pushTopoCargaStrict,
+  deleteTopoCargaStrict,
 } from './SupabaseSyncService';
 import { uploadEvidencePhoto } from './S3PhotoService';
 import { evidencesCollection } from '@db/index';
@@ -230,6 +232,11 @@ class _SyncWorker {
         return pushWorkSessionGpsBatchStrict(entityId);
       case 'PUSH_SUMMARY_ROW':
         return pushSummaryRowStrict(entityId);
+      // v44 — Carga de datos topográficos
+      case 'PUSH_TOPO_CARGA':
+        return pushTopoCargaStrict(entityId);
+      case 'DELETE_TOPO_CARGA':
+        return deleteTopoCargaStrict(entityId);
       case 'UPLOAD_PHOTO': {
         // El evidence local guarda la URI del archivo en disco. Si ya está
         // SYNCED, marcar éxito silencioso. Si está UPLOADING (H3: otro proceso

@@ -27,6 +27,8 @@ const syncModal: Record<string, { es: string; en: string; pt: string }> = {
   'syncModal.op.formAnswers': { es: 'Respuestas formulario', en: 'Form answers', pt: 'Respostas de formulário' },
   'syncModal.op.sessionGpsBatch': { es: 'GPS sesiones (batch)', en: 'Session GPS (batch)', pt: 'GPS de sessões (batch)' },
   'syncModal.op.summaryRows': { es: 'Tablas Resumen', en: 'Summary tables', pt: 'Tabelas Resumo' },
+  'syncModal.op.topoCarga': { es: 'Cargas topográficas', en: 'Topographic uploads', pt: 'Cargas topográficas' },
+  'syncModal.op.topoCargaDelete': { es: 'Cargas topográficas (eliminar)', en: 'Topographic uploads (delete)', pt: 'Cargas topográficas (excluir)' },
 
   // Forzar subida — Alert (drenado manual)
   'syncModal.forceDrain.title': { es: '⚠ Forzar subida (drenado manual)', en: '⚠ Force upload (manual drain)', pt: '⚠ Forçar envio (drenagem manual)' },

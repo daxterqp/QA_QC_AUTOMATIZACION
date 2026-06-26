@@ -29,6 +29,7 @@ import {
   labAuxTablesCollection,
   recycleBinCollection,
   samplesCollection,
+  topoCargasCollection,
   summaryRowsCollection,
   evidencesCollection,
   nonConformitiesCollection,
@@ -81,6 +82,14 @@ function coerceProtocolRow(row: any): any {
     // sincronizan aunque v45 (la columna jsonb) aún no se haya corrido en Supabase;
     // solo los que realmente usan @código dependen de v45. (Misma lección que is_hidden.)
     delete row.xref_snapshot_json;
+  }
+  // v44 — `topo_values_json` es TEXT en WMDB pero JSONB en Supabase: parsear antes
+  // de subir. Vacío/null → omitir la columna (los ensayos sin topo sincronizan
+  // aunque v44 aún no se haya corrido en alguna réplica vieja).
+  if (typeof row.topo_values_json === 'string' && row.topo_values_json.trim()) {
+    try { row.topo_values_json = JSON.parse(row.topo_values_json); } catch { row.topo_values_json = null; }
+  } else if (!('topo_values_json' in row) || row.topo_values_json == null) {
+    delete row.topo_values_json;
   }
   return row;
 }
@@ -558,6 +567,50 @@ export async function pullSamples(projectId: string): Promise<void> {
   const local = await samplesCollection.query(Q.where('project_id', projectId)).fetch();
   const remoteIds = new Set<string>(data.map((r: any) => r.id));
   const prepares: any[] = prepareFreshOverride(samplesCollection, data, local);
+  for (const rec of local) {
+    if ((rec as any)._raw?._status === 'synced' && !remoteIds.has(rec.id)) {
+      prepares.push((rec as any).prepareDestroyPermanently());
+    }
+  }
+  await safeBatchWrite(prepares);
+}
+
+// ─── v44 — Carga de datos topográficos ───────────────────────────────────────
+
+/** Empuja una carga topográfica por id (con throw → retry del SyncWorker).
+ *  `rows_json`/`columns_json` son TEXT local → parsear a JSONB antes del upsert. */
+export async function pushTopoCargaStrict(cargaId: string): Promise<void> {
+  const c = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!c) return;
+  if (isLocalDeleted(c)) return;
+  const row = toRow((c as any)._raw);
+  if (typeof row.rows_json === 'string') {
+    try { row.rows_json = JSON.parse(row.rows_json); } catch { row.rows_json = []; }
+  }
+  if (typeof row.columns_json === 'string' && row.columns_json.trim()) {
+    try { row.columns_json = JSON.parse(row.columns_json); } catch { row.columns_json = null; }
+  } else if (row.columns_json == null) {
+    delete row.columns_json;
+  }
+  const { error } = await supabase.from('topo_cargas').upsert([row], { onConflict: 'id' });
+  if (error) throw new Error(`[pushTopoCargaStrict] ${error.message}`);
+}
+
+/** Borra una carga remota. El revert de las columnas topo_* de los protocolos lo
+ *  hace el caller (deleteCargaWithRevert) encolando PUSH_PROTOCOL_STATUS por ensayo. */
+export async function deleteTopoCargaStrict(cargaId: string): Promise<void> {
+  const { error } = await supabase.from('topo_cargas').delete().eq('id', cargaId);
+  if (error) throw new Error(`[deleteTopoCargaStrict] ${error.message}`);
+}
+
+/** Bajada de cargas topográficas + override fresco + propagación de deletes remotos
+ *  (igual que pullSamples). filterToLocalSchema stringifica rows_json/columns_json. */
+export async function pullTopoCargas(projectId: string): Promise<void> {
+  const { data, error } = await supabase.from('topo_cargas').select('*').eq('project_id', projectId);
+  if (error || !data) return;
+  const local = await topoCargasCollection.query(Q.where('project_id', projectId)).fetch();
+  const remoteIds = new Set<string>(data.map((r: any) => r.id));
+  const prepares: any[] = prepareFreshOverride(topoCargasCollection, data, local);
   for (const rec of local) {
     if ((rec as any)._raw?._status === 'synced' && !remoteIds.has(rec.id)) {
       prepares.push((rec as any).prepareDestroyPermanently());
@@ -1121,6 +1174,15 @@ export async function pushProtocolStatusStrict(protocolId: string): Promise<void
       ? (() => { try { return JSON.parse(v); } catch { return null; } })()
       : null;
   }
+  // v44 — topo_values_json (TEXT local → JSONB): en UPDATE parcial su presencia en
+  // _changed = intención explícita (incl. limpiarlo al revertir una carga) → enviar
+  // el valor parseado o NULL.
+  if ('topo_values_json' in partial) {
+    const v = partial.topo_values_json;
+    partial.topo_values_json = (typeof v === 'string' && v.trim())
+      ? (() => { try { return JSON.parse(v); } catch { return null; } })()
+      : null;
+  }
   const { error } = await supabase
     .from('protocols')
     .update(partial)
@@ -1628,11 +1690,17 @@ async function pullProject(projectId: string): Promise<number> {
     const remoteSamples = await fetchAll('samples', 'project_id', projectId);
     const localSamples = await samplesCollection.query(Q.where('project_id', projectId)).fetch();
 
+    // v44 — Cargas topográficas. fresh-override (no pisar cargas creadas aún no
+    // pusheadas). filterToLocalSchema serializa rows_json/columns_json (JSONB) a string.
+    const remoteTopoCargas = await fetchAll('topo_cargas', 'project_id', projectId);
+    const localTopoCargas = await topoCargasCollection.query(Q.where('project_id', projectId)).fetch();
+
     const allPrepares = [
       ...prepareOverride(projectsCollection,              remoteProject ?? [],  localProject),
       ...prepareOverride(labAuxTablesCollection,          remoteAuxTables,      localAuxTables),
       ...prepareOverride(recycleBinCollection,            remoteRecycleBin,     localRecycleBin),
       ...prepareFreshOverride(samplesCollection,          remoteSamples,        localSamples),
+      ...prepareFreshOverride(topoCargasCollection,       remoteTopoCargas,     localTopoCargas),
       ...prepareOverride(locationsCollection,             remoteLocations,      localLocs),
       // v32 — Dominio de protocolos: fresh-override (no pisar ediciones locales
       // más nuevas; ver doc de prepareFreshOverride). Resto: cloud-wins clásico.

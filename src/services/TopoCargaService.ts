@@ -1,0 +1,218 @@
+/**
+ * TopoCargaService — Núcleo del módulo "Carga de datos topográficos" (móvil).
+ *
+ * Flujo: una CARGA guarda filas por CÓDIGO de ensayo (rows_json = fuente de verdad).
+ * `applyCargaToProtocols` enlaza esas filas a los protocolos existentes (binding
+ * diferido) y escribe la capa `topo_*` en cada ensayo enlazado (always-update).
+ * Borrar/editar una carga REVIERTE las columnas topo_* que escribió.
+ *
+ * Fase 2 (este archivo): coords crudas (E/N/Cota) + columnas custom (manual). El
+ * cálculo de sector/lat-lng y fórmulas (Fase 4 — procesamiento) se enchufa en
+ * `computeTopoPayload` más adelante sin cambiar la firma.
+ */
+import { Q } from '@nozbe/watermelondb';
+import { database, topoCargasCollection, protocolsCollection } from '@db/index';
+import { enqueue } from './SyncQueueService';
+import { supabase } from '@config/supabase';
+import { bindCargaToProtocols, normalizeCode, type TopoRow } from '@utils/topoBinding';
+import { buildTopoCargaCode, topoSeqGroupKey, nextTopoSeqLocal, cargaDateKey } from '@utils/topoCargaCode';
+
+function toNum(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Map<códigoNormalizado, protocolId> indexando protocol_code y external_id (NO
+ *  protocol_number, que es el nombre de la plantilla y se repite). */
+export function buildProtocolCodeMap(protocols: any[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const p of protocols) {
+    for (const cand of [(p as any).protocolCode, (p as any).externalId]) {
+      const k = normalizeCode(cand);
+      if (k && !map.has(k)) map.set(k, p.id);
+    }
+  }
+  return map;
+}
+
+/** Valores topo_* a escribir en el protocolo a partir de una fila de la carga.
+ *  Fase 2: coords crudas + custom. (Fase 4 sumará lat/lng + sector + fórmulas.) */
+function computeTopoPayload(row: TopoRow): Record<string, unknown> {
+  const custom = row.custom && Object.keys(row.custom).length > 0 ? JSON.stringify(row.custom) : null;
+  return {
+    topoCoordEast: toNum(row.c1),
+    topoCoordNorth: toNum(row.c2),
+    topoCoordElevation: toNum(row.cota),
+    topoValuesJson: custom,
+  };
+}
+
+/** Limpia (null) las columnas topo_* de los protocolos cuyo dueño es `cargaId`.
+ *  Devuelve los ids afectados. NO encola (lo hace el caller). */
+async function revertCargaProtocolsWrite(cargaId: string): Promise<string[]> {
+  const owned = await protocolsCollection.query(Q.where('topo_source_carga_id', cargaId)).fetch();
+  if (owned.length === 0) return [];
+  const now = Date.now();
+  await database.write(async () => {
+    for (const p of owned) {
+      await (p as any).update((rec: any) => {
+        rec.topoSourceCargaId = null;
+        rec.topoCoordSystem = null;
+        rec.topoCoordEast = null;
+        rec.topoCoordNorth = null;
+        rec.topoCoordElevation = null;
+        rec.topoLatitude = null;
+        rec.topoLongitude = null;
+        rec.topoSectorId = null;
+        rec.topoValuesJson = null;
+        rec.topoUpdatedAt = now;
+      });
+    }
+  });
+  return owned.map((p) => p.id);
+}
+
+/** Enlaza las filas de la carga a los protocolos y escribe sus columnas topo_*.
+ *  Devuelve { touchedIds, pending }. Encola PUSH_TOPO_CARGA + PUSH_PROTOCOL_STATUS. */
+export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedIds: string[]; pending: string[] }> {
+  const carga = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!carga) return { touchedIds: [], pending: [] };
+  const projectId = (carga as any).projectId as string;
+  let rows: TopoRow[] = [];
+  try { rows = JSON.parse((carga as any).rowsJson || '[]'); } catch { rows = []; }
+
+  const protocols = await protocolsCollection.query(Q.where('project_id', projectId)).fetch();
+  const codeMap = buildProtocolCodeMap(protocols);
+  const { applied, pending } = bindCargaToProtocols(rows, codeMap);
+  const protoById = new Map<string, any>(protocols.map((p) => [p.id, p]));
+
+  const now = Date.now();
+  const touchedIds: string[] = [];
+  await database.write(async () => {
+    for (const b of applied) {
+      const p = protoById.get(b.protocolId);
+      if (!p) continue;
+      const payload = computeTopoPayload(b.row);
+      await p.update((rec: any) => {
+        rec.topoSourceCargaId = cargaId;
+        rec.topoCoordEast = payload.topoCoordEast;
+        rec.topoCoordNorth = payload.topoCoordNorth;
+        rec.topoCoordElevation = payload.topoCoordElevation;
+        rec.topoValuesJson = payload.topoValuesJson;
+        rec.topoUpdatedAt = now;
+      });
+      touchedIds.push(b.protocolId);
+    }
+    await (carga as any).update((rec: any) => { rec.appliedAt = now; });
+  });
+
+  await enqueue({ opType: 'PUSH_TOPO_CARGA', entityId: cargaId, projectId });
+  for (const id of touchedIds) {
+    await enqueue({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId });
+  }
+  return { touchedIds, pending };
+}
+
+/** Crea una carga (código atómico T<ddmmaa>-<seq>) y la aplica. Devuelve el id. */
+export async function createCarga(args: {
+  projectId: string;
+  rows: TopoRow[];
+  inputMethod: 'manual' | 'csv';
+  createdById?: string | null;
+  columns?: unknown;
+  date?: Date;
+}): Promise<string> {
+  const date = args.date ?? new Date();
+  const existing = await topoCargasCollection.query(Q.where('project_id', args.projectId)).fetch();
+  const baseSeq = nextTopoSeqLocal(existing.map((c: any) => c.cargaCode), date);
+  let seq = baseSeq;
+  try {
+    const { data: cloudSeq, error } = await supabase.rpc('next_protocol_seq', {
+      p_project_id: args.projectId, p_group_key: topoSeqGroupKey(date), p_client_seq: baseSeq, p_count: 1,
+    });
+    if (!error && typeof cloudSeq === 'number' && cloudSeq > 0) seq = cloudSeq;
+  } catch { /* offline → seq local */ }
+  const code = buildTopoCargaCode(date, seq);
+
+  let id = '';
+  await database.write(async () => {
+    const rec = await topoCargasCollection.create((c: any) => {
+      c.projectId = args.projectId;
+      c.cargaCode = code;
+      c.seq = seq;
+      c.cargaDate = cargaDateKey(date);
+      c.inputMethod = args.inputMethod;
+      c.createdById = args.createdById ?? null;
+      c.uploadStatus = 'PENDING';
+      c.rowsJson = JSON.stringify(args.rows ?? []);
+      c.columnsJson = args.columns ? JSON.stringify(args.columns) : null;
+    });
+    id = rec.id;
+  });
+  await applyCargaToProtocols(id);
+  return id;
+}
+
+/** Reemplaza las filas de una carga ("chancar") y re-aplica. Revierte primero los
+ *  protocolos que dejaron de estar en la carga. */
+export async function updateCarga(cargaId: string, rows: TopoRow[], columns?: unknown): Promise<void> {
+  const carga = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!carga) return;
+  const projectId = (carga as any).projectId as string;
+  // 1. Revertir lo que esta carga tenía (collect oldIds).
+  const oldIds = await revertCargaProtocolsWrite(cargaId);
+  // 2. Actualizar rows_json/columns_json.
+  await database.write(async () => {
+    await (carga as any).update((rec: any) => {
+      rec.rowsJson = JSON.stringify(rows ?? []);
+      if (columns !== undefined) rec.columnsJson = columns ? JSON.stringify(columns) : null;
+    });
+  });
+  // 3. Re-aplicar (encola PUSH_TOPO_CARGA + nuevos touched).
+  const { touchedIds } = await applyCargaToProtocols(cargaId);
+  // 4. Encolar push de los que se revirtieron y ya no están (para subir el null).
+  const touchedSet = new Set(touchedIds);
+  for (const id of oldIds) {
+    if (!touchedSet.has(id)) await enqueue({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId });
+  }
+}
+
+/** Borra una carga revirtiendo sus columnas topo_* en los protocolos. */
+export async function deleteCargaWithRevert(cargaId: string): Promise<void> {
+  const carga = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!carga) return;
+  const projectId = (carga as any).projectId as string;
+  const revertedIds = await revertCargaProtocolsWrite(cargaId);
+  await database.write(async () => {
+    await (carga as any).markAsDeleted();
+  });
+  await enqueue({ opType: 'DELETE_TOPO_CARGA', entityId: cargaId, projectId });
+  for (const id of revertedIds) {
+    await enqueue({ opType: 'PUSH_PROTOCOL_STATUS', entityId: id, projectId });
+  }
+}
+
+/** Re-enlaza TODAS las cargas del proyecto (al aparecer ensayos nuevos). Aplica en
+ *  orden de creación (la más nueva gana en caso de solapamiento de código). */
+export async function rebindProjectCargas(projectId: string): Promise<void> {
+  const cargas = await topoCargasCollection
+    .query(Q.where('project_id', projectId), Q.sortBy('created_at', Q.asc))
+    .fetch();
+  for (const c of cargas) {
+    await applyCargaToProtocols(c.id).catch(() => { /* best-effort */ });
+  }
+}
+
+/** Cuenta de pendientes (códigos sin ensayo) de una carga, recomputado en vivo. */
+export async function cargaPendingCodes(cargaId: string): Promise<string[]> {
+  const carga = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!carga) return [];
+  const projectId = (carga as any).projectId as string;
+  let rows: TopoRow[] = [];
+  try { rows = JSON.parse((carga as any).rowsJson || '[]'); } catch { rows = []; }
+  const protocols = await protocolsCollection.query(Q.where('project_id', projectId)).fetch();
+  const { pending } = bindCargaToProtocols(rows, buildProtocolCodeMap(protocols));
+  return pending;
+}
