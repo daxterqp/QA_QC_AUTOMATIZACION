@@ -5,7 +5,7 @@
  * de cobertura), tabla compacta de columnas, procesamiento, y el botón de subir Excel
  * (Fórmulas + Tablas Auxiliares, 2 hojas → requiere .xlsx).
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
@@ -17,12 +17,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius } from '../theme/colors';
-import { projectsCollection, labAuxTablesCollection, protocolsCollection } from '@db/index';
+import { projectsCollection, labAuxTablesCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { parseFeatureFlagsJson, topoColumns, type ProjectFeatureFlags, type TopoColumn } from '@utils/featureFlags';
 import { mergeAndSaveFeatureFlags } from '@services/SupabaseSyncService';
-import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem } from '@utils/topoVisibility';
+import { summarizeTopoCoverage, type TopoCoverageItem } from '@utils/topoVisibility';
+import { loadTopoCoverageItems } from '@services/topoCoverage';
 import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
+import { TopoCoverageBox } from '@components/topo/TopoCoverageBox';
 import {
   pickAndImportTopoFormulas, TopoFormulasImportCancelled,
   type TopoFormulasImportSummary,
@@ -72,13 +74,7 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
       try { rowCount = (JSON.parse(t.rowsJson || '[]') as unknown[]).length; } catch { /* */ }
       return { id: t.id, name: t.name ?? t.groupKey, columns, rowCount };
     }));
-    const protos = await protocolsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]);
-    setTopoItems((protos as any[]).map((p) => ({
-      id: p.id,
-      code: (p.protocolCode ?? p.externalId ?? p.id) as string,
-      hasTopo: hasTopoData({ east: p.topoCoordEast, north: p.topoCoordNorth, elevation: p.topoCoordElevation, valuesJson: p.topoValuesJson }),
-      hasGps: p.latitude != null && p.longitude != null,
-    })));
+    setTopoItems(await loadTopoCoverageItems(projectId));
   }, [projectId]);
 
   // Carga inicial. Al volver de otra pantalla NO recargamos si hay cambios sin guardar.
@@ -93,33 +89,47 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
   // Cobertura recalculada EN VIVO con los flags actuales (sin re-fetch de protocolos).
   const coverage = (flags && topoItems) ? summarizeTopoCoverage(topoItems, flags) : null;
 
-  const save = async () => {
-    if (!flags || !canEdit) return;
+  // Persiste solo el subconjunto topo (merge contra la nube).
+  const persist = (f: ProjectFeatureFlags) => mergeAndSaveFeatureFlags(projectId, {
+    topo_replace_gps: f.topo_replace_gps,
+    topo_keep_gps_fallback: f.topo_keep_gps_fallback,
+    topo_columns: topoColumns(f),
+  });
+
+  // Retroceder (flecha/gesto/hardware) = GUARDAR. Solo el botón Cancelar descarta.
+  const flagsRef = useRef(flags); flagsRef.current = flags;
+  const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
+  const handledRef = useRef(false);
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', () => {
+      if (handledRef.current || !dirtyRef.current || !canEdit || !flagsRef.current) return;
+      void persist(flagsRef.current); // fire-and-forget al salir; no bloquea la navegación
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, canEdit]);
+
+  const save = async (): Promise<boolean> => {
+    if (!flags || !canEdit) return false;
     setSaving(true);
-    try {
-      await mergeAndSaveFeatureFlags(projectId, {
-        topo_replace_gps: flags.topo_replace_gps,
-        topo_keep_gps_fallback: flags.topo_keep_gps_fallback,
-        topo_columns: topoColumns(flags),
-      });
-      setDirty(false);
-    } catch (e) { Alert.alert('Error al guardar', (e as Error).message); }
+    try { await persist(flags); setDirty(false); return true; }
+    catch (e) { Alert.alert('Error al guardar', (e as Error).message); return false; }
     finally { setSaving(false); }
   };
+
+  const onSaveAndBack = async () => {
+    handledRef.current = true;
+    const ok = await save();
+    if (ok) navigation.goBack(); else handledRef.current = false;
+  };
+  const onCancel = () => { handledRef.current = true; navigation.goBack(); };
 
   const onUpload = async () => {
     if (!canEdit || !flags) return;
     setBusy(true); setResult(null);
     try {
       // Guarda los cambios locales primero (para que el import los tome como base).
-      if (dirty) {
-        await mergeAndSaveFeatureFlags(projectId, {
-          topo_replace_gps: flags.topo_replace_gps,
-          topo_keep_gps_fallback: flags.topo_keep_gps_fallback,
-          topo_columns: topoColumns(flags),
-        });
-        setDirty(false);
-      }
+      if (dirty) { await persist(flags); setDirty(false); }
       const res = await pickAndImportTopoFormulas(projectId);
       setResult(res);
       await loadData();
@@ -147,17 +157,8 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
                 <CheckRow label="Seguir usando GPS cuando sea posible" description="Para ensayos sin topo, usar la tarjeta GPS como respaldo."
                   value={!!flags.topo_keep_gps_fallback} onToggle={() => toggle('topo_keep_gps_fallback')} disabled={!canEdit} />
               )}
-              {flags.topo_replace_gps && flags.topo_keep_gps_fallback && coverage && (
-                <View style={styles.alert}>
-                  <Ionicons name="warning-outline" size={16} color="#B45309" style={{ marginTop: 1 }} />
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={styles.alertText}><Text style={styles.alertBold}>{coverage.withoutTopo.length}</Text> de <Text style={styles.alertBold}>{coverage.total}</Text> ensayos no tienen coordenadas topográficas.</Text>
-                    <Text style={styles.alertText}><Text style={styles.alertBold}>{coverage.usingGps.length}</Text> usarán las coordenadas GPS como respaldo.</Text>
-                    {coverage.withoutTopo.length > coverage.usingGps.length && (
-                      <Text style={[styles.alertText, { color: '#92400E' }]}>{coverage.withoutTopo.length - coverage.usingGps.length} quedarán sin ninguna coordenada.</Text>
-                    )}
-                  </View>
-                </View>
+              {coverage && (
+                <TopoCoverageBox summary={coverage} onDetail={() => navigation.navigate('TopoCoverage', { projectId, projectName })} />
               )}
             </View>
 
@@ -200,12 +201,16 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
             </View>
           </ScrollView>
 
-          {/* Footer guardar */}
+          {/* Footer: Guardar / Cancelar. Retroceder con la flecha/gesto GUARDA; solo
+              Cancelar descarta. */}
           {canEdit && (
             <View style={[styles.footer, { paddingBottom: 10 + insets.bottom }]}>
-              <TouchableOpacity style={[styles.saveBtn, (!dirty || saving) && { opacity: 0.5 }]} onPress={save} disabled={!dirty || saving}>
+              <TouchableOpacity style={[styles.cancelBtn, saving && { opacity: 0.5 }]} onPress={onCancel} disabled={saving}>
+                <Text style={styles.cancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.5 }]} onPress={onSaveAndBack} disabled={saving}>
                 {saving ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name="save-outline" size={16} color={Colors.white} />}
-                <Text style={styles.saveText}>{saving ? 'Guardando…' : dirty ? 'Guardar configuración' : 'Guardado'}</Text>
+                <Text style={styles.saveText}>{saving ? 'Guardando…' : 'Guardar'}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -225,9 +230,6 @@ const styles = StyleSheet.create({
   checkRowOn: { backgroundColor: Colors.primary + '0D', borderColor: Colors.primary + '4D' },
   checkLabel: { fontSize: 13, fontWeight: '700', color: Colors.navy },
   checkDesc: { fontSize: 11, color: Colors.textMuted, marginTop: 1, lineHeight: 15 },
-  alert: { flexDirection: 'row', gap: 8, backgroundColor: '#FFFBEB', borderColor: '#FCD34D', borderWidth: 1, borderRadius: Radius.md, padding: 10 },
-  alertText: { fontSize: 11, color: '#78350F', lineHeight: 15 },
-  alertBold: { fontWeight: '800', color: '#78350F' },
   help: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   bold: { fontWeight: '800', color: Colors.navy },
   uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 11, alignSelf: 'flex-start', paddingHorizontal: 16 },
@@ -241,7 +243,9 @@ const styles = StyleSheet.create({
   auxRow: { paddingVertical: 4, borderTopWidth: 1, borderTopColor: Colors.border },
   auxName: { fontSize: 13, fontWeight: '700', color: Colors.navy },
   auxMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-  footer: { borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.white, paddingHorizontal: 12, paddingTop: 10, alignItems: 'flex-end' },
-  saveBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 11, paddingHorizontal: 20 },
+  footer: { borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.white, paddingHorizontal: 12, paddingTop: 10, flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  cancelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingVertical: 11, paddingHorizontal: 18, backgroundColor: Colors.white },
+  cancelText: { color: Colors.textSecondary, fontWeight: '800', fontSize: 14 },
+  saveBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 11, paddingHorizontal: 24 },
   saveText: { color: Colors.white, fontWeight: '800', fontSize: 14 },
 });

@@ -8,7 +8,7 @@
  * (Fórmulas + Tablas Auxiliares, 2 hojas → requiere .xlsx).
  */
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   Settings, UploadCloud, Loader2, CheckCircle2, AlertTriangle, Table2, Save,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import { createClient } from '@lib/supabase/client';
 import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem } from '@lib/topoVisibility';
 import { importTopoFormulasWorkbook, type TopoFormulasImportResult } from '@lib/topoFormulasImport';
 import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
+import { TopoCoverageBox } from '@components/topo/TopoCoverageBox';
 import PageHeader from '@components/PageHeader';
 import { usePageRefresh } from '@hooks/usePageRefresh';
 
@@ -42,6 +43,7 @@ function Toggle({ label, description, value, onToggle, disabled }: {
 
 export default function TopoConfigPage() {
   const { refreshing, onRefresh } = usePageRefresh();
+  const router = useRouter();
   const { id: projectId } = useParams<{ id: string }>();
   const { currentUser } = useAuth();
   const { data: projects = [] } = useProjects();
@@ -97,15 +99,31 @@ export default function TopoConfigPage() {
 
   const coverage = (flags && topoItems) ? summarizeTopoCoverage(topoItems, flags) : null;
 
-  const save = async () => {
-    if (!flags || !canEdit) return;
+  // Back del navegador/breadcrumb = GUARDAR (solo el botón Cancelar descarta). Guardamos
+  // al desmontar usando refs con el último estado, salvo que ya se haya guardado/cancelado.
+  const flagsRef = useRef(flags); flagsRef.current = flags;
+  const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
+  const handledRef = useRef(false);
+  useEffect(() => () => {
+    if (dirtyRef.current && !handledRef.current && flagsRef.current && canEdit) {
+      const supabase = createClient();
+      void supabase.from('projects').update({ feature_flags: flagsRef.current, updated_at: Date.now() }).eq('id', projectId);
+    }
+  }, [projectId, canEdit]);
+
+  const save = async (): Promise<boolean> => {
+    if (!flags || !canEdit) return false;
     setSaving(true);
     try {
       await updateFlags.mutateAsync({ kind: 'flags-only', flags } as never);
       setDirty(false);
-    } catch (e) { window.alert((e as Error).message); }
+      return true;
+    } catch (e) { window.alert((e as Error).message); return false; }
     finally { setSaving(false); }
   };
+
+  const onSaveAndBack = async () => { handledRef.current = true; const ok = await save(); if (ok) router.back(); else handledRef.current = false; };
+  const onCancel = () => { handledRef.current = true; if (serverFlags) setFlags(serverFlags); setDirty(false); router.back(); };
 
   const onPick = () => fileRef.current?.click();
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,24 +186,7 @@ export default function TopoConfigPage() {
                   description="Para los ensayos SIN datos topográficos, usar la tarjeta de coordenadas GPS como respaldo."
                   value={!!flags.topo_keep_gps_fallback} onToggle={() => toggle('topo_keep_gps_fallback')} disabled={!canEdit} />
               )}
-              {flags.topo_replace_gps && flags.topo_keep_gps_fallback && coverage && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex gap-2">
-                  <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                  <div className="text-[11px] text-amber-900 leading-snug flex flex-col gap-0.5">
-                    <span><b>{coverage.withoutTopo.length}</b> de <b>{coverage.total}</b> ensayos no tienen coordenadas topográficas.</span>
-                    <span><b>{coverage.usingGps.length}</b> usarán las coordenadas GPS como respaldo.</span>
-                    {coverage.withoutTopo.length > coverage.usingGps.length && (
-                      <span className="text-amber-700">{coverage.withoutTopo.length - coverage.usingGps.length} quedarán sin ninguna coordenada.</span>
-                    )}
-                    {coverage.withoutTopo.length > 0 && (
-                      <span className="text-amber-700/90 mt-0.5">
-                        Sin topo: {coverage.withoutTopo.slice(0, 8).map((i) => i.code).join(', ')}
-                        {coverage.withoutTopo.length > 8 ? `, +${coverage.withoutTopo.length - 8}` : ''}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
+              {coverage && <TopoCoverageBox summary={coverage} detailHref={`/app/projects/${projectId}/topo-coverage`} />}
             </div>
 
             {/* Tabla de columnas */}
@@ -243,13 +244,17 @@ export default function TopoConfigPage() {
         )}
       </div>
 
-      {/* Footer guardar */}
+      {/* Footer guardar / cancelar. Retroceder con el navegador GUARDA; solo Cancelar descarta. */}
       {flags && canEdit && (
-        <div className="sticky bottom-0 bg-white border-t border-border px-4 py-3 flex justify-end">
-          <button onClick={save} disabled={!dirty || saving}
+        <div className="sticky bottom-0 bg-white border-t border-border px-4 py-3 flex justify-end gap-2">
+          <button onClick={onCancel} disabled={saving}
+            className="flex items-center gap-2 bg-white text-textSecondary border border-border rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50 hover:bg-surface transition">
+            Cancelar
+          </button>
+          <button onClick={onSaveAndBack} disabled={saving}
             className="flex items-center gap-2 bg-primary text-white rounded-lg px-5 py-2 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition">
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-            {saving ? 'Guardando…' : dirty ? 'Guardar configuración' : 'Guardado'}
+            {saving ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
       )}

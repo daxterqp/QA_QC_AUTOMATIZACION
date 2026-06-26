@@ -18,6 +18,9 @@ import {
   type TopoCargaWithMeta,
 } from '@hooks/useTopoCargas';
 import type { TopoRow } from '@lib/topoBinding';
+import { useTopoCoverageItems } from '@hooks/useTopoCoverage';
+import { summarizeTopoCoverage } from '@lib/topoVisibility';
+import { TopoCoverageBox } from '@components/topo/TopoCoverageBox';
 import PageHeader from '@components/PageHeader';
 import { usePageRefresh } from '@hooks/usePageRefresh';
 import { TopoCargaModal } from '@components/topo/TopoCargaModal';
@@ -42,6 +45,8 @@ export default function TopoCargasPage() {
 
   const canEdit = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
   const cols = useMemo(() => (flags ? topoColumns(flags) : []), [flags]);
+  const { data: coverageItems = [] } = useTopoCoverageItems(projectId);
+  const coverage = useMemo(() => (flags ? summarizeTopoCoverage(coverageItems, flags) : null), [coverageItems, flags]);
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<TopoCargaWithMeta | null>(null);
@@ -110,6 +115,7 @@ export default function TopoCargasPage() {
       />
 
       <div className="flex-1 p-4 flex flex-col gap-4 pb-24">
+        {coverage && <TopoCoverageBox summary={coverage} detailHref={`/app/projects/${projectId}/topo-coverage`} />}
         {isLoading ? (
           <div className="flex items-center gap-2 text-muted text-sm"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
         ) : cargas.length === 0 ? (

@@ -16,12 +16,15 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { topoCargasCollection, protocolsCollection } from '@db/index';
+import { topoCargasCollection, protocolsCollection, projectsCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { pullTopoCargas, pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { createCarga, updateCarga, deleteCargaWithRevert, buildProtocolCodeMap } from '@services/TopoCargaService';
 import { bindCargaToProtocols, type TopoRow } from '@utils/topoBinding';
 import { groupByDay } from '@utils/dateGrouping';
+import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { summarizeTopoCoverage, hasTopoData, type TopoCoverageSummary } from '@utils/topoVisibility';
+import { TopoCoverageBox } from '@components/topo/TopoCoverageBox';
 import { TopoCargaModal } from '@components/topo/TopoCargaModal';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TopoCargas'>;
@@ -43,6 +46,7 @@ export default function TopoCargasScreen({ navigation, route }: Props) {
   const canEdit = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
 
   const [cards, setCards] = useState<CargaCard[]>([]);
+  const [coverage, setCoverage] = useState<TopoCoverageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalCarga, setModalCarga] = useState<CargaCard | null>(null);
@@ -65,6 +69,16 @@ export default function TopoCargasScreen({ navigation, route }: Props) {
       };
     });
     setCards(out);
+    // Cobertura de coordenadas (recuadro siempre visible).
+    const proj: any = await projectsCollection.find(projectId).catch(() => null);
+    const flags = parseFeatureFlagsJson(proj?.featureFlags);
+    const items = (protocols as any[]).map((p) => ({
+      id: p.id,
+      code: (p.protocolCode ?? p.externalId ?? p.id) as string,
+      hasTopo: hasTopoData({ east: p.topoCoordEast, north: p.topoCoordNorth, elevation: p.topoCoordElevation, valuesJson: p.topoValuesJson }),
+      hasGps: p.latitude != null && p.longitude != null,
+    }));
+    setCoverage(summarizeTopoCoverage(items, flags));
     setLoading(false);
   }, [projectId]);
 
@@ -130,6 +144,11 @@ export default function TopoCargasScreen({ navigation, route }: Props) {
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 90 }]}
           stickySectionHeadersEnabled={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />}
+          ListHeaderComponent={coverage ? (
+            <View style={{ marginBottom: 10 }}>
+              <TopoCoverageBox summary={coverage} onDetail={() => navigation.navigate('TopoCoverage', { projectId, projectName })} />
+            </View>
+          ) : null}
           renderSectionHeader={({ section }) => <Text style={styles.dayHeader}>{section.title}</Text>}
           ListEmptyComponent={
             <View style={styles.empty}>

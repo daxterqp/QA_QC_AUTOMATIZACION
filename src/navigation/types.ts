@@ -16,6 +16,8 @@ export type RootStackParamList = {
   TopoCargas: { projectId: string; projectName: string };
   /** v44 — Configuración del módulo topográfico (columnas, GPS, procesamiento, Excel). */
   TopoConfig: { projectId: string; projectName: string };
+  /** v44 — Detalle de cobertura de coordenadas (lista filtrable topo/GPS/sin coords). */
+  TopoCoverage: { projectId: string; projectName: string };
   /** v43 — Papelera de Reciclaje: ensayos eliminados (solo lectura). */
   RecycleBin: { projectId: string; projectName: string };
   ProtocolList: { projectId: string; projectName: string };
