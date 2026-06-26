@@ -13,13 +13,15 @@
  * perder configuración cuando el padre se vuelva a prender.
  */
 
-import { useState } from 'react';
-import { X, Settings, Info, FileText, Timer, Map } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Settings, Info, FileText, Timer, Map, AlertTriangle } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
 import { validateMask } from '@lib/protocolCode';
 import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
+import { summarizeTopoCoverage, type TopoCoverageItem } from '@lib/topoVisibility';
+import { createClient } from '@lib/supabase/client';
 import { useI18n } from '@lib/i18n';
 
 interface Props {
@@ -29,6 +31,8 @@ interface Props {
   initialMapTileUrl?: string | null;
   /** v43 — Identificador del proyecto para el código de muestras (campo, no flag). */
   initialSampleIdentifier?: string | null;
+  /** Topo — id del proyecto (solo al EDITAR) para el recuadro de cobertura GPS/topo. */
+  projectId?: string | null;
   /** Llamado al confirmar — entrega flags + map_tile_url + sample_identifier. */
   onConfirm: (flags: ProjectFeatureFlags, mapTileUrl: string | null, sampleIdentifier: string | null) => void;
   onCancel: () => void;
@@ -43,6 +47,7 @@ export function ProjectConfigModal({
   initialFlags,
   initialMapTileUrl,
   initialSampleIdentifier,
+  projectId,
   onConfirm,
   onCancel,
   confirmLabel,
@@ -75,6 +80,31 @@ export function ProjectConfigModal({
   }));
   const [mapTileUrl, setMapTileUrl] = useState<string>(initialMapTileUrl ?? '');
   const [sampleIdentifier, setSampleIdentifier] = useState<string>(initialSampleIdentifier ?? '');
+
+  // Topo — cobertura GPS/topo de los ensayos del proyecto (para el recuadro de alerta
+  // cuando se usa el GPS como respaldo). Se baja una vez al abrir un proyecto existente.
+  const [topoItems, setTopoItems] = useState<TopoCoverageItem[] | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('protocols')
+        .select('id, protocol_code, external_id, topo_coord_east, topo_coord_north, topo_latitude, topo_longitude, latitude, longitude')
+        .eq('project_id', projectId);
+      if (cancelled) return;
+      const items: TopoCoverageItem[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
+        id: String(p.id),
+        code: String(p.protocol_code ?? p.external_id ?? p.id),
+        hasTopo: (p.topo_coord_east != null && p.topo_coord_north != null) || (p.topo_latitude != null && p.topo_longitude != null),
+        hasGps: p.latitude != null && p.longitude != null,
+      }));
+      setTopoItems(items);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
+  const topoCoverage = topoItems ? summarizeTopoCoverage(topoItems, flags) : null;
 
   const setFlag = <K extends keyof ProjectFeatureFlags>(key: K, value: ProjectFeatureFlags[K]) =>
     setFlags(prev => ({ ...prev, [key]: value }));
@@ -187,6 +217,26 @@ export function ProjectConfigModal({
                 {flags.topo_replace_gps && (
                   <Check label="Seguir usando GPS cuando sea posible" description="Para los ensayos SIN datos topográficos, usar la tarjeta de coordenadas GPS como respaldo."
                     value={!!flags.topo_keep_gps_fallback} onToggle={() => toggleFlag('topo_keep_gps_fallback')} />
+                )}
+                {flags.topo_replace_gps && flags.topo_keep_gps_fallback && topoCoverage && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 my-1 flex gap-2">
+                    <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[11px] text-amber-900 leading-snug flex flex-col gap-0.5">
+                      <span><b>{topoCoverage.withoutTopo.length}</b> de <b>{topoCoverage.total}</b> ensayos no tienen coordenadas topográficas.</span>
+                      <span><b>{topoCoverage.usingGps.length}</b> usarán las coordenadas GPS como respaldo.</span>
+                      {topoCoverage.withoutTopo.length > topoCoverage.usingGps.length && (
+                        <span className="text-amber-700">
+                          {topoCoverage.withoutTopo.length - topoCoverage.usingGps.length} quedarán sin ninguna coordenada.
+                        </span>
+                      )}
+                      {topoCoverage.withoutTopo.length > 0 && (
+                        <span className="text-amber-700/90 mt-0.5">
+                          Sin topo: {topoCoverage.withoutTopo.slice(0, 8).map((i) => i.code).join(', ')}
+                          {topoCoverage.withoutTopo.length > 8 ? `, +${topoCoverage.withoutTopo.length - 8}` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 )}
                 <Check label="Habilitar procesamiento de datos topográficos" description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
                   value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />

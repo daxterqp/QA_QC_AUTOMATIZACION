@@ -32,3 +32,28 @@ export function decideCoordCards(
   // replace OFF → ambas; GPS solo si hay valores; topo siempre (aunque vacía).
   return { showGps: hasGps, showTopo: true };
 }
+
+export interface TopoCoverageItem { id: string; code: string; hasTopo: boolean; hasGps: boolean }
+export interface TopoCoverageSummary {
+  /** Ensayos sin coordenadas topográficas (la capa topo no los cubre). */
+  withoutTopo: TopoCoverageItem[];
+  /** Ensayos que, según los flags, terminan mostrando el GPS (fallback o módulo OFF). */
+  usingGps: TopoCoverageItem[];
+  total: number;
+}
+
+/** Resume la cobertura topográfica del proyecto para el recuadro de alerta de la
+ *  config: cuántos ensayos quedan sin topo y cuántos caen al GPS. Función PURA. */
+export function summarizeTopoCoverage(
+  items: TopoCoverageItem[],
+  flags: Pick<ProjectFeatureFlags, 'module_topo' | 'topo_replace_gps' | 'topo_keep_gps_fallback'>,
+): TopoCoverageSummary {
+  const withoutTopo: TopoCoverageItem[] = [];
+  const usingGps: TopoCoverageItem[] = [];
+  for (const it of items) {
+    if (!it.hasTopo) withoutTopo.push(it);
+    const dec = decideCoordCards(flags, it.hasGps, it.hasTopo);
+    if (dec.showGps && it.hasGps) usingGps.push(it);
+  }
+  return { withoutTopo, usingGps, total: items.length };
+}
