@@ -38,6 +38,11 @@ export const STRINGS_WEB: Record<string, { es: string; en: string; pt: string }>
   },
   'webLayout.configModulesTitle': { es: 'Configurar módulos: {name}', en: 'Configure modules: {name}', pt: 'Configurar módulos: {name}' },
   'webLayout.createProjectConfirm': { es: 'Crear proyecto', en: 'Create project', pt: 'Criar projeto' },
+  'webLayout.createError': {
+    es: 'No se pudo crear el proyecto. Intentá de nuevo.',
+    en: 'The project could not be created. Please try again.',
+    pt: 'Não foi possível criar o projeto. Tente novamente.',
+  },
 
   // ── Prioridad de observaciones (componente PriorityChip, web) ──
   'priority.low': { es: 'Baja', en: 'Low', pt: 'Baixa' },

@@ -10,6 +10,17 @@ import { useAuth } from '@lib/auth-context';
 import { useCreateProject, useJoinProject, useProjects } from '@hooks/useProjects';
 import { ProjectConfigModal } from '@components/project/ProjectConfigModal';
 import type { ProjectFeatureFlags } from '@/types';
+import { DEFAULT_FEATURE_FLAGS } from '@/types';
+
+// Defaults al CREAR un proyecto: además de los protocolos clásicos y por ubicación
+// (ya ON en DEFAULT_FEATURE_FLAGS), se activan Planos y Contactos por pedido del
+// usuario. Lo demás queda editable en el mismo paso. No toca el merge de proyectos
+// existentes (eso sigue usando DEFAULT_FEATURE_FLAGS sin estos overrides).
+const CREATE_DEFAULT_FLAGS: ProjectFeatureFlags = {
+  ...DEFAULT_FEATURE_FLAGS,
+  module_plans: true,
+  module_contacts: true,
+};
 import PdfPreview from '@components/PdfPreview';
 import { cn, getInitials } from '@lib/utils';
 import { roleLabel } from '@lib/roles';
@@ -99,10 +110,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const handleCreateWithFlags = async (flags: ProjectFeatureFlags, _mapTileUrl: string | null) => {
     if (!pendingCreate) return;
     // map_tile_url se setea en la edición posterior; al crear lo dejamos null implícito (default DB).
-    await createProject.mutateAsync({ name: pendingCreate.name, password: pendingCreate.password, featureFlags: flags });
-    setNewName('');
-    setNewPassword('');
-    setPendingCreate(null);
+    try {
+      await createProject.mutateAsync({ name: pendingCreate.name, password: pendingCreate.password, featureFlags: flags });
+      setNewName('');
+      setNewPassword('');
+      setPendingCreate(null);
+    } catch (e) {
+      // Antes el error se tragaba en silencio: el modal se quedaba abierto sin avisar
+      // y parecía que "no pasaba de pestaña". Ahora se muestra el motivo real.
+      alert((e as Error).message ?? t('webLayout.createError'));
+    }
   };
 
   const handleJoin = async () => {
@@ -319,6 +336,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Step 2 del wizard de creación: configuración de módulos (solo CREATOR) */}
       {pendingCreate && (
         <ProjectConfigModal
+          initialFlags={CREATE_DEFAULT_FLAGS}
           title={t('webLayout.configModulesTitle', { name: pendingCreate.name })}
           confirmLabel={t('webLayout.createProjectConfirm')}
           onConfirm={handleCreateWithFlags}
