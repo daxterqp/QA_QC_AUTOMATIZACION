@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -78,6 +78,21 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
       pullProjectFromCloud(projectId).then(recountDossier).catch(() => {});
     }
   }, [projectId, loadFlags, recountDossier]));
+
+  // #5 — Pull-to-refresh: re-baja settings + datos del proyecto desde la nube y
+  // recuenta el dossier. El usuario lo pidió al entrar a un proyecto específico.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        pullProjectSettings(projectId).then(loadFlags).catch(() => {}),
+        pullProjectFromCloud(projectId).then(recountDossier).catch(() => {}),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [projectId, loadFlags, recountDossier]);
 
   const options: MenuOption[] = [
     {
@@ -203,7 +218,12 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <AppHeader title={projectName} subtitle="Inicio del proyecto" onBack={() => navigation.goBack()} />
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(24, insets.bottom + 16) }]}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(24, insets.bottom + 16) }]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+        }
+      >
         <View style={styles.heroCard}>
           <Ionicons name="folder-open" size={26} color={Colors.primary} />
           <View style={{ flex: 1 }}>

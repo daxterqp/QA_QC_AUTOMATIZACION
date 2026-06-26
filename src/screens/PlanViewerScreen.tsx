@@ -7,6 +7,7 @@ import {
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -49,6 +50,7 @@ interface PreSavedAnn { annotationId: string; commentId: string; }
 
 export default function PlanViewerScreen({ navigation, route }: Props) {
   const { planId: initialPlanId, planName: initialPlanName, protocolId, annotationId: highlightAnnotationId, locationId } = route.params;
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const { t } = useI18n();
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour, unregisterMeasure } = useTour();
@@ -941,7 +943,8 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      <ScrollView ref={mainScrollRef} showsVerticalScrollIndicator={false} scrollEnabled={!isDrawing}>
+      <ScrollView ref={mainScrollRef} showsVerticalScrollIndicator={false} scrollEnabled={!isDrawing}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>{/* #4 — separar del nav bar de Android */}
         {/* PDF */}
         <View style={styles.pdfSection}>
           <ScrollView ref={hScrollViewRef} horizontal scrollEnabled={!isDrawing && zoom > 1} showsHorizontalScrollIndicator={zoom > 1} style={{ borderRadius: Radius.md }} onScroll={(e) => { hScrollRef.current = e.nativeEvent.contentOffset.x; }} scrollEventThrottle={16}>

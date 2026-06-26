@@ -29,6 +29,7 @@ import type Location from '@models/Location';
 import type Evidence from '@models/Evidence';
 import type Plan from '@models/Plan';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { notifyProtocolApproved, notifyProtocolRejected } from '@services/NotificationService';
 import { pushProjectToSupabase, pushProtocolStatus } from '@services/SupabaseSyncService';
@@ -98,6 +99,7 @@ const infoCellStyles = StyleSheet.create({
 
 export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const { protocolId } = route.params;
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const { t } = useI18n();
 
@@ -586,7 +588,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
       />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.body, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 60 }, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}>{/* #4 — separar del nav bar de Android */}
         {/* Encabezado formal tipo Dossier PDF */}
         <View style={styles.dossierHeader}>
           {/* Top bar — IZQ: nombre del ensayo + proyecto + estado debajo.
