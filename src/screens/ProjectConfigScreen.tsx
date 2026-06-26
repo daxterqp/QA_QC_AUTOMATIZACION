@@ -14,7 +14,6 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '@components/AppHeader';
-import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
 import { Colors, Radius } from '../theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,8 +23,7 @@ import { DEFAULT_FEATURE_FLAGS, parseFeatureFlagsJson, type ProjectFeatureFlags,
 import { validateMask, buildProtocolCode } from '@utils/protocolCode';
 import { supabase } from '@config/supabase';
 import { Q } from '@nozbe/watermelondb';
-import { database, projectsCollection, protocolTemplatesCollection, protocolsCollection } from '@db/index';
-import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem, type TopoCoverageSummary } from '@utils/topoVisibility';
+import { database, projectsCollection, protocolTemplatesCollection } from '@db/index';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
@@ -60,8 +58,6 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
   // v46.1 — tipos de ensayo del proyecto (para la máscara por tipo) + UI colapsable.
   const [testTypes, setTestTypes] = useState<{ tipo: string; name: string }[]>([]);
   const [showPerType, setShowPerType] = useState(false);
-  // Topo — cobertura GPS/topo de los ensayos del proyecto (recuadro de alerta).
-  const [topoItems, setTopoItems] = useState<TopoCoverageItem[] | null>(null);
 
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   const configProtocolsRef = useTourStep('config_protocols');
@@ -128,23 +124,11 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
           }
           setTestTypes([...byTipo.entries()].map(([tipo, name]) => ({ tipo, name })).sort((a, b) => a.tipo.localeCompare(b.tipo)));
         } catch { /* sin templates locales */ }
-        // Topo — cobertura GPS/topo de los ensayos (para el recuadro de alerta).
-        try {
-          const protos = await protocolsCollection.query(Q.where('project_id', projectId)).fetch();
-          setTopoItems((protos as any[]).map((p) => ({
-            id: p.id,
-            code: (p.protocolCode ?? p.externalId ?? p.id) as string,
-            hasTopo: hasTopoData({ east: p.topoCoordEast, north: p.topoCoordNorth, elevation: p.topoCoordElevation, valuesJson: p.topoValuesJson }),
-            hasGps: p.latitude != null && p.longitude != null,
-          })));
-        } catch { /* sin protocolos locales */ }
       } finally {
         setLoading(false);
       }
     })();
   }, [projectId, isCreator, navigation]);
-
-  const topoCoverage: TopoCoverageSummary | null = topoItems ? summarizeTopoCoverage(topoItems, flags) : null;
 
   const setFlag = <K extends keyof ProjectFeatureFlags>(key: K, value: ProjectFeatureFlags[K]) =>
     setFlags(prev => ({ ...prev, [key]: value }));
@@ -286,57 +270,10 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
             value={flags.module_contacts} onToggle={() => toggleFlag('module_contacts')} />
           <CheckRow label={t('projectConfig.moduleSummaryLabel')} description={t('projectConfig.moduleSummaryDesc')}
             value={flags.module_summary_tables} onToggle={() => toggleFlag('module_summary_tables')} />
-          {/* v44 — Carga de datos topográficos */}
-          <CheckRow label="Carga de datos topográficos" description="Carga masiva de coordenadas topográficas (manual o CSV) por código de ensayo."
+          {/* v44 — Carga de datos topográficos. La config detallada (columnas, GPS,
+              procesamiento, fórmulas) vive en el engranaje DENTRO del módulo. */}
+          <CheckRow label="Carga de datos topográficos" description="Carga masiva de coordenadas topográficas (manual o CSV) por código de ensayo. La configuración detallada está en el engranaje dentro del módulo."
             value={!!flags.module_topo} onToggle={() => toggleFlag('module_topo')} />
-          {flags.module_topo && (
-            <View style={{ paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: Colors.primary + '40', marginLeft: 4 }}>
-              <CheckRow label="Reemplazar coordenadas GPS" description="En las fichas se oculta la tarjeta GPS y solo se usan topográficas."
-                value={!!flags.topo_replace_gps} onToggle={() => toggleFlag('topo_replace_gps')} />
-              {flags.topo_replace_gps && (
-                <CheckRow label="Seguir usando GPS cuando sea posible" description="Para ensayos sin topo, usar la tarjeta GPS como respaldo."
-                  value={!!flags.topo_keep_gps_fallback} onToggle={() => toggleFlag('topo_keep_gps_fallback')} />
-              )}
-              {flags.topo_replace_gps && flags.topo_keep_gps_fallback && topoCoverage && (
-                <View style={styles.topoAlert}>
-                  <Ionicons name="warning-outline" size={16} color="#B45309" style={{ marginTop: 1 }} />
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={styles.topoAlertText}>
-                      <Text style={styles.topoAlertBold}>{topoCoverage.withoutTopo.length}</Text> de{' '}
-                      <Text style={styles.topoAlertBold}>{topoCoverage.total}</Text> ensayos no tienen coordenadas topográficas.
-                    </Text>
-                    <Text style={styles.topoAlertText}>
-                      <Text style={styles.topoAlertBold}>{topoCoverage.usingGps.length}</Text> usarán las coordenadas GPS como respaldo.
-                    </Text>
-                    {topoCoverage.withoutTopo.length > topoCoverage.usingGps.length && (
-                      <Text style={[styles.topoAlertText, { color: '#92400E' }]}>
-                        {topoCoverage.withoutTopo.length - topoCoverage.usingGps.length} quedarán sin ninguna coordenada.
-                      </Text>
-                    )}
-                    {topoCoverage.withoutTopo.length > 0 && (
-                      <Text style={[styles.topoAlertText, { color: '#92400E' }]}>
-                        Sin topo: {topoCoverage.withoutTopo.slice(0, 8).map((i) => i.code).join(', ')}
-                        {topoCoverage.withoutTopo.length > 8 ? `, +${topoCoverage.withoutTopo.length - 8}` : ''}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              )}
-              <CheckRow label="Habilitar procesamiento de datos topográficos" description="Motor de cálculo (fórmulas + sector por área con tolerancia)."
-                value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
-              {flags.topo_processing_enabled && (
-                <TouchableOpacity
-                  style={styles.topoFormulasBtn}
-                  onPress={() => navigation.navigate('TopoFormulas', { projectId, projectName: projectName ?? '' })}
-                >
-                  <Ionicons name="calculator-outline" size={16} color={Colors.primary} />
-                  <Text style={styles.topoFormulasBtnText}>Administrar Fórmulas y Tablas Auxiliares</Text>
-                  <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
-                </TouchableOpacity>
-              )}
-              <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
-            </View>
-          )}
 
           {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}
           <Text style={styles.fieldLabel}>{t('projectConfig.fillModeLabel')}</Text>
@@ -657,11 +594,6 @@ const styles = StyleSheet.create({
   infoBox: { flexDirection: 'row', gap: 8, backgroundColor: Colors.primary + '10', borderColor: Colors.primary + '30', borderWidth: 1, borderRadius: Radius.md, padding: 12, marginBottom: 12 },
   infoText: { flex: 1, fontSize: 11, color: Colors.textSecondary, lineHeight: 15 },
 
-  topoAlert: { flexDirection: 'row', gap: 8, backgroundColor: '#FFFBEB', borderColor: '#FCD34D', borderWidth: 1, borderRadius: Radius.md, padding: 10, marginVertical: 6 },
-  topoAlertText: { fontSize: 11, color: '#78350F', lineHeight: 15 },
-  topoAlertBold: { fontWeight: '800', color: '#78350F' },
-  topoFormulasBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.primary + '14', borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 10, marginVertical: 6, alignSelf: 'flex-start' },
-  topoFormulasBtnText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
 
   sectionBox: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, marginBottom: 10, backgroundColor: Colors.white, overflow: 'hidden' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },

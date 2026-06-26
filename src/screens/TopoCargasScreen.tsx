@@ -111,7 +111,16 @@ export default function TopoCargasScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <AppHeader title="Carga topográfica" subtitle={projectName} onBack={() => navigation.goBack()} />
+      <AppHeader
+        title="Carga topográfica"
+        subtitle={projectName}
+        onBack={() => navigation.goBack()}
+        rightContent={currentUser?.role === 'CREATOR' ? (
+          <TouchableOpacity onPress={() => navigation.navigate('TopoConfig', { projectId, projectName })} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="settings-outline" size={22} color={Colors.white} />
+          </TouchableOpacity>
+        ) : undefined}
+      />
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={Colors.primary} /></View>
       ) : (

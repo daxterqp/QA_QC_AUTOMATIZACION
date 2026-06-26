@@ -13,16 +13,12 @@
  * perder configuración cuando el padre se vuelva a prender.
  */
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { X, Settings, Info, FileText, Timer, Map, AlertTriangle, FunctionSquare } from 'lucide-react';
+import { useState } from 'react';
+import { X, Settings, Info, FileText, Timer, Map } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
 import { validateMask } from '@lib/protocolCode';
-import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
-import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem } from '@lib/topoVisibility';
-import { createClient } from '@lib/supabase/client';
 import { useI18n } from '@lib/i18n';
 
 interface Props {
@@ -32,8 +28,6 @@ interface Props {
   initialMapTileUrl?: string | null;
   /** v43 — Identificador del proyecto para el código de muestras (campo, no flag). */
   initialSampleIdentifier?: string | null;
-  /** Topo — id del proyecto (solo al EDITAR) para el recuadro de cobertura GPS/topo. */
-  projectId?: string | null;
   /** Llamado al confirmar — entrega flags + map_tile_url + sample_identifier. */
   onConfirm: (flags: ProjectFeatureFlags, mapTileUrl: string | null, sampleIdentifier: string | null) => void;
   onCancel: () => void;
@@ -48,7 +42,6 @@ export function ProjectConfigModal({
   initialFlags,
   initialMapTileUrl,
   initialSampleIdentifier,
-  projectId,
   onConfirm,
   onCancel,
   confirmLabel,
@@ -56,7 +49,6 @@ export function ProjectConfigModal({
   dangerZone,
 }: Props) {
   const { t } = useI18n();
-  const router = useRouter();
   const resolvedConfirmLabel = confirmLabel ?? t('webCMisc.cfg.confirmLabel');
   const resolvedTitle = title ?? t('webCMisc.cfg.title');
 
@@ -83,36 +75,6 @@ export function ProjectConfigModal({
   const [mapTileUrl, setMapTileUrl] = useState<string>(initialMapTileUrl ?? '');
   const [sampleIdentifier, setSampleIdentifier] = useState<string>(initialSampleIdentifier ?? '');
 
-  // Topo — cobertura GPS/topo de los ensayos del proyecto (para el recuadro de alerta
-  // cuando se usa el GPS como respaldo). Se baja una vez al abrir un proyecto existente.
-  const [topoItems, setTopoItems] = useState<TopoCoverageItem[] | null>(null);
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    (async () => {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from('protocols')
-        .select('id, protocol_code, external_id, topo_coord_east, topo_coord_north, topo_coord_elevation, topo_values_json, latitude, longitude')
-        .eq('project_id', projectId);
-      if (cancelled) return;
-      const items: TopoCoverageItem[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
-        id: String(p.id),
-        code: String(p.protocol_code ?? p.external_id ?? p.id),
-        hasTopo: hasTopoData({
-          east: p.topo_coord_east as number | null,
-          north: p.topo_coord_north as number | null,
-          elevation: p.topo_coord_elevation as number | null,
-          valuesJson: (p.topo_values_json == null ? null : JSON.stringify(p.topo_values_json)),
-        }),
-        hasGps: p.latitude != null && p.longitude != null,
-      }));
-      setTopoItems(items);
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
-  const topoCoverage = topoItems ? summarizeTopoCoverage(topoItems, flags) : null;
-
   const setFlag = <K extends keyof ProjectFeatureFlags>(key: K, value: ProjectFeatureFlags[K]) =>
     setFlags(prev => ({ ...prev, [key]: value }));
   const toggleFlag = (key: keyof ProjectFeatureFlags) =>
@@ -121,7 +83,7 @@ export function ProjectConfigModal({
   // v31 — Una máscara inválida generaría códigos colisionantes.
   const maskErrors = flags.protocol_codes ? validateMask(flags.coding_mask_default) : [];
 
-  const handleConfirm = (): void | Promise<unknown> => {
+  const handleConfirm = () => {
     if (maskErrors.length > 0) return;   // botón deshabilitado; defensa extra
     const trimmed = mapTileUrl.trim();
     // Normalizar al persistir:
@@ -143,16 +105,7 @@ export function ProjectConfigModal({
         gps_capture_numeric: false,
       }),
     };
-    return onConfirm(toPersist, trimmed.length > 0 ? trimmed : null, sampleIdentifier.trim() || null) as void | Promise<unknown>;
-  };
-
-  // "Administrar Fórmulas…": persiste los cambios del modal ANTES de navegar (si no,
-  // navegar desmonta el modal y se perderían los toggles sin guardar — p.ej. el de
-  // procesamiento que habilita este mismo botón). Solo navega si no hay error de máscara.
-  const goToFormulas = async () => {
-    if (maskErrors.length > 0 || !projectId) return;
-    await handleConfirm();
-    router.push(`/app/projects/${projectId}/topo-formulas`);
+    onConfirm(toPersist, trimmed.length > 0 ? trimmed : null, sampleIdentifier.trim() || null);
   };
 
   return (
@@ -224,51 +177,8 @@ export function ProjectConfigModal({
               value={flags.module_summary_tables} onToggle={() => toggleFlag('module_summary_tables')} />
             <Check label="Reportes por correo" description="Habilita el panel para programar el envío de la Tabla Resumen + gráficos por email (AWS SES)."
               value={!!flags.module_email_reports} onToggle={() => toggleFlag('module_email_reports')} />
-            <Check label="Carga de datos topográficos" description="Habilita el módulo para cargar coordenadas topográficas en masa (manual o CSV) por código de ensayo."
+            <Check label="Carga de datos topográficos" description="Habilita el módulo para cargar coordenadas topográficas en masa (manual o CSV) por código de ensayo. La configuración detallada (columnas, GPS, procesamiento, fórmulas) está en el engranaje dentro del módulo."
               value={!!flags.module_topo} onToggle={() => toggleFlag('module_topo')} />
-            {flags.module_topo && (
-              <div className="pl-5 border-l-2 border-primary/20 ml-1 flex flex-col gap-0.5">
-                <Check label="Reemplazar coordenadas GPS" description="En las fichas se oculta la tarjeta de Coordenadas GPS y se usan SOLO las topográficas."
-                  value={!!flags.topo_replace_gps} onToggle={() => toggleFlag('topo_replace_gps')} />
-                {flags.topo_replace_gps && (
-                  <Check label="Seguir usando GPS cuando sea posible" description="Para los ensayos SIN datos topográficos, usar la tarjeta de coordenadas GPS como respaldo."
-                    value={!!flags.topo_keep_gps_fallback} onToggle={() => toggleFlag('topo_keep_gps_fallback')} />
-                )}
-                {flags.topo_replace_gps && flags.topo_keep_gps_fallback && topoCoverage && (
-                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 my-1 flex gap-2">
-                    <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                    <div className="text-[11px] text-amber-900 leading-snug flex flex-col gap-0.5">
-                      <span><b>{topoCoverage.withoutTopo.length}</b> de <b>{topoCoverage.total}</b> ensayos no tienen coordenadas topográficas.</span>
-                      <span><b>{topoCoverage.usingGps.length}</b> usarán las coordenadas GPS como respaldo.</span>
-                      {topoCoverage.withoutTopo.length > topoCoverage.usingGps.length && (
-                        <span className="text-amber-700">
-                          {topoCoverage.withoutTopo.length - topoCoverage.usingGps.length} quedarán sin ninguna coordenada.
-                        </span>
-                      )}
-                      {topoCoverage.withoutTopo.length > 0 && (
-                        <span className="text-amber-700/90 mt-0.5">
-                          Sin topo: {topoCoverage.withoutTopo.slice(0, 8).map((i) => i.code).join(', ')}
-                          {topoCoverage.withoutTopo.length > 8 ? `, +${topoCoverage.withoutTopo.length - 8}` : ''}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-                <Check label="Habilitar procesamiento de datos topográficos" description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
-                  value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
-                {flags.topo_processing_enabled && projectId && (
-                  <button
-                    type="button"
-                    onClick={goToFormulas}
-                    title="Guarda la configuración y abre la administración de fórmulas/tablas"
-                    className="self-start flex items-center gap-2 bg-primary/10 text-primary rounded-lg px-3 py-2 my-1 text-[13px] font-bold hover:bg-primary/20 transition"
-                  >
-                    <FunctionSquare size={15} /> Administrar Fórmulas y Tablas Auxiliares
-                  </button>
-                )}
-                <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
-              </div>
-            )}
 
             {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}
             <p className="text-[11px] font-bold uppercase tracking-wider text-textMuted mt-2">{t('projectConfig.fillModeLabel')}</p>

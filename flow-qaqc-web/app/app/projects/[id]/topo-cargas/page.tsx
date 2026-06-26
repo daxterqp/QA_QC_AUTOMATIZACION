@@ -7,8 +7,9 @@
  * coordenadas topográficas que la carga escribió en las fichas.
  */
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Mountain, Plus, Trash2, Loader2, Pencil, AlertTriangle } from 'lucide-react';
+import { Mountain, Plus, Trash2, Loader2, Pencil, AlertTriangle, Settings } from 'lucide-react';
 import { useProjects, useProjectFlags } from '@hooks/useProjects';
 import { useAuth } from '@lib/auth-context';
 import { isTopoEnabled, topoColumns } from '@/types';
@@ -100,6 +101,12 @@ export default function TopoCargasPage() {
         syncing={isLoading}
         onRefresh={onRefresh}
         refreshing={refreshing}
+        rightContent={currentUser?.role === 'CREATOR' ? (
+          <Link href={`/app/projects/${projectId}/topo-config`} title="Configuración del módulo topográfico"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-white border border-white/20 hover:bg-white/15 transition">
+            <Settings size={15} />
+          </Link>
+        ) : undefined}
       />
 
       <div className="flex-1 p-4 flex flex-col gap-4 pb-24">

@@ -333,7 +333,6 @@ function ProjectConfigButton({ project }: { project: Project }) {
           initialFlags={flags}
           initialMapTileUrl={project.map_tile_url ?? null}
           initialSampleIdentifier={(project as { sample_identifier?: string | null }).sample_identifier ?? null}
-          projectId={project.id}
           title={t('webMisc.configureModulesTitle', { name: project.name })}
           confirmLabel={t('webMisc.saveConfig')}
           dangerZone={<DeleteProjectSection project={project} />}
