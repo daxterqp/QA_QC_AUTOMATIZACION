@@ -19,6 +19,7 @@ import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
 import { exportDossierPdf, exportSingleProtocolPdf } from '@services/DossierExportService';
 import { pushProtocolStatus, mergeAndSaveFeatureFlags, pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { parseFeatureFlagsJson, getTemplatePrintConfig, PRINT_HEADER_COLORS, DEFAULT_HEADER_COLOR, PRINT_HEADER_FIELDS, CROQUIS_MAP_TYPES, CROQUIS_PLACEMENTS, type TemplatePrintConfig, type PrintFontLevel, type PrintGraphSize, type PrintHeaderSize } from '@utils/featureFlags';
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { buildProtocolCroquisSpecs, type CroquisResult } from '@services/CroquisService';
@@ -315,6 +316,10 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId, loadData]);
+
+  // #7C — Tiempo real: si otro equipo aprueba/rechaza/envía un ensayo, se baja y
+  // recarga solo (sin tocar nada) mientras esta pantalla está abierta.
+  useRealtimeProjectPull(projectId, loadData);
 
   const handleApprove = (protocol: Protocol) => {
     Alert.alert(t('dossier.approveTitle'), t('dossier.approveMessage', { number: protocol.protocolNumber }), [

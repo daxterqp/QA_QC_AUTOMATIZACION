@@ -60,6 +60,7 @@ import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Ensayos'>;
 
@@ -246,6 +247,10 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId, loadData]);
+
+  // #7C — Tiempo real: cambios de estado/observaciones de otros equipos se bajan y
+  // recargan solos mientras esta pantalla está abierta.
+  useRealtimeProjectPull(projectId, loadData);
 
   useEffect(() => {
     refreshFromCloud();
