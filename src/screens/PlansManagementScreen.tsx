@@ -20,6 +20,7 @@ import { uploadToS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { downloadPlansFromS3 } from '@services/S3SyncService';
 import { pushPlansToSupabase } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 
 interface Props {
   projectId: string;
@@ -294,6 +295,9 @@ export default function PlansManagementScreen({ projectId, projectName, mode = '
     const sub2 = locationsCollection.query(Q.where('project_id', projectId)).observe().subscribe(setLocations);
     return () => { sub1.unsubscribe(); sub2.unsubscribe(); };
   }, [projectId]);
+
+  // #7C — Tiempo real: planos/anotaciones nuevas se bajan solas (observe refresca).
+  useRealtimeProjectPull(projectId);
 
   /** Devuelve TODAS las ubicaciones que referencian este nombre de plano */
   const findMatchingLocations = (planName: string, locs: typeof locations) =>

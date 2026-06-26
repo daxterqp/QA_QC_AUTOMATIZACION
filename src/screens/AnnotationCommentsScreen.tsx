@@ -23,6 +23,7 @@ import type PlanAnnotation from '@models/PlanAnnotation';
 import type AnnotationComment from '@models/AnnotationComment';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud, pushProjectToSupabase } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { notifyAnnotationClosed } from '@services/NotificationService';
 import { useI18n } from '@i18n/index';
 
@@ -184,6 +185,16 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
       .finally(() => loadData());
   }, [loadData, projectId]));
 
+  // #7B — Pull-to-refresh + #7C tiempo real: baja de la nube y recarga.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); await loadData(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, loadData]);
+  useRealtimeProjectPull(projectId, loadData);
+
   const handleOk = async (row: AnnRow) => {
     await database.write(async () => {
       await row.annotation.update((a) => { a.isOk = true; (a as any).status = 'CLOSED'; });
@@ -327,6 +338,8 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
           data={filteredRows}
           keyExtractor={(r) => r.annotation.id}
           contentContainerStyle={styles.list}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListEmptyComponent={
             <Text style={styles.empty}>
               {rows.length === 0

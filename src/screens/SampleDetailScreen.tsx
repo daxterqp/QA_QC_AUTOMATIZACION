@@ -8,7 +8,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
-  ActivityIndicator, Alert,
+  ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -24,6 +24,8 @@ import {
   projectSectorsCollection, locationsCollection,
 } from '@db/index';
 import { createInstances } from '@services/ProtocolInstanceService';
+import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { todayEnsayoDate } from '@utils/protocolCode';
 import { escapeHtml } from '@utils/htmlEscape';
 import QrCodeView from '@components/QrCodeView';
@@ -89,6 +91,16 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
   }, [sampleId, projectId]);
 
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+
+  // #7B pull-to-refresh + #7C tiempo real: baja de la nube y recarga los ensayos de la muestra.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); await load(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, load]);
+  useRealtimeProjectPull(projectId, load);
 
   const addEnsayo = async () => {
     if (creating) return;
@@ -183,7 +195,8 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
             </TouchableOpacity>
           </View>
         } />
-      <ScrollView contentContainerStyle={{ padding: 12, gap: 12 }}>
+      <ScrollView contentContainerStyle={{ padding: 12, gap: 12 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />}>
         {/* Datos generales — MISMO formato/estilo del Audit Page (título + QR + grid). */}
         <View ref={detailHeaderRef} style={styles.dossierHeader}>
           <View style={styles.dossierTopBar}>

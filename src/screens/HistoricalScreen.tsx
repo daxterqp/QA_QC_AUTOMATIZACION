@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useTour } from '@context/TourContext';
 import { useTourStep, useTourStepWithLayout } from '@hooks/useTourStep';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Modal, Dimensions, Alert,
@@ -564,6 +565,10 @@ export default function HistoricalScreen({ navigation, route }: Props) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initialProjectId);
   const [projects, setProjects] = useState<Project[]>([]);
   const [protocols, setProtocols] = useState<Protocol[]>([]);
+
+  // #7C — Tiempo real: cambios de estado del proyecto seleccionado se bajan solos
+  // (las listas se actualizan por los observe de protocols/projects/users).
+  useRealtimeProjectPull(selectedProjectId ?? '');
   const [plans, setPlans] = useState<Plan[]>([]);
   const [allAnnotations, setAllAnnotations] = useState<PlanAnnotation[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
