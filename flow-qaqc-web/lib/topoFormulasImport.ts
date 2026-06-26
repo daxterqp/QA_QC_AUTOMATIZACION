@@ -11,13 +11,16 @@ import * as XLSX from 'xlsx';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseAuxTablesSheet, parseTopoFormulasSheet } from '@lib/excelParser';
 import { applyTopoFormulas } from '@lib/topoFormula';
-import { topoColumns, type ProjectFeatureFlags, type TopoColumn } from '@/types';
+import { mergeFeatureFlags, topoColumns, type ProjectFeatureFlags, type TopoColumn } from '@/types';
 
 export interface TopoFormulasImportResult {
   auxTables: { upserted: number; names: string[] };
   formulas: { applied: number; created: number };
-  /** Nuevo arreglo de columnas (la página lo guarda en feature_flags). */
+  /** Nuevo arreglo de columnas. */
   newColumns: TopoColumn[];
+  /** Flags COMPLETOS a persistir: re-leídos FRESCOS de la nube con solo
+   *  `topo_columns` reemplazado (no pisa flags cambiados por otros). */
+  mergedFlags: ProjectFeatureFlags;
   warnings: string[];
 }
 
@@ -31,6 +34,18 @@ export async function importTopoFormulasWorkbook(
   const { tables, warnings: auxW } = parseAuxTablesSheet(wb);
   const { entries, warnings: fW } = parseTopoFormulasSheet(wb);
   const warnings = [...auxW, ...fW];
+
+  // Re-leer flags FRESCOS de la nube como base (evita pisar cambios concurrentes
+  // de otros dispositivos/usuarios al persistir; espejo de mergeAndSaveFeatureFlags
+  // del móvil). Si la lectura falla (offline), caemos al snapshot recibido.
+  let freshFlags = flags;
+  try {
+    const { data } = await supabase.from('projects').select('feature_flags').eq('id', projectId).maybeSingle();
+    const ff = (data as { feature_flags?: unknown } | null)?.feature_flags;
+    if (ff != null) freshFlags = typeof ff === 'string'
+      ? mergeFeatureFlags((() => { try { return JSON.parse(ff); } catch { return null; } })())
+      : mergeFeatureFlags(ff as Partial<ProjectFeatureFlags>);
+  } catch { /* offline → snapshot recibido */ }
 
   // ── Tablas auxiliares → upsert por (project_id, group_key) ──────────────────
   const auxNames: string[] = [];
@@ -58,8 +73,8 @@ export async function importTopoFormulasWorkbook(
     }
   }
 
-  // ── Fórmulas → asignar a columnas de config por nombre ──────────────────────
-  const cols = topoColumns(flags);
+  // ── Fórmulas → asignar a columnas de config por nombre (base = flags FRESCOS) ─
+  const cols = topoColumns(freshFlags);
   const { columns: newColumns, applied, created, warnings: applyW } = applyTopoFormulas(cols, entries);
   warnings.push(...applyW);
 
@@ -71,6 +86,7 @@ export async function importTopoFormulasWorkbook(
     auxTables: { upserted: auxNames.length, names: auxNames },
     formulas: { applied, created },
     newColumns,
+    mergedFlags: { ...freshFlags, topo_columns: newColumns },
     warnings,
   };
 }

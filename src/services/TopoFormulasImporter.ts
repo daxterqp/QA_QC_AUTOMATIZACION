@@ -187,16 +187,23 @@ export async function pickAndImportTopoFormulas(projectId: string): Promise<Topo
       }
       await database.batch(ops);
     });
-    for (const t of tables) {
+    // Push AWAIT-eado: el resumen solo cuenta las que subieron a la nube. Si una
+    // falla (RLS / falta v41 / sin red) va a `warnings` y NO se cuenta como subida
+    // (la escritura local sí quedó; otros dispositivos la verán al reintentar).
+    const pushes = await Promise.allSettled(tables.map((t) =>
       supabase.from('lab_aux_tables').upsert({
         id: idByKey.get(t.groupKey),
         project_id: projectId, group_key: t.groupKey, name: t.name,
         columns_json: t.columns, rows_json: t.rows, updated_at: Date.now(),
       }, { onConflict: 'project_id,group_key' }).then(({ error }) => {
-        if (error) console.warn('[topo-formulas] push lab_aux_tables falló (¿v41?):', error.message);
-      });
-      auxNames.push(t.name);
-    }
+        if (error) throw new Error(error.message);
+      }),
+    ));
+    pushes.forEach((res, i) => {
+      const t = tables[i];
+      if (res.status === 'fulfilled') auxNames.push(t.name);
+      else warnings.push(`Tabla auxiliar "${t.name}" guardada local pero NO en la nube: ${(res.reason as Error)?.message ?? 'error'}`);
+    });
   }
 
   return { formulas: { applied, created }, auxTables: { upserted: auxNames.length, names: auxNames }, warnings };

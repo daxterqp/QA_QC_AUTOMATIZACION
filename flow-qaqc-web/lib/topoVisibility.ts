@@ -24,6 +24,15 @@ export function decideCoordCards(
   return { showGps: hasGps, showTopo: true };
 }
 
+/** Predicado CANÓNICO "el ensayo tiene datos topográficos" — espejo del móvil y
+ *  de la regla de visibilidad de la ficha. */
+export function hasTopoData(p: {
+  east?: number | null; north?: number | null; elevation?: number | null;
+  valuesJson?: string | null;
+}): boolean {
+  return p.east != null || p.north != null || p.elevation != null || !!p.valuesJson;
+}
+
 export interface TopoCoverageItem { id: string; code: string; hasTopo: boolean; hasGps: boolean }
 export interface TopoCoverageSummary {
   withoutTopo: TopoCoverageItem[];

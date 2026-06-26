@@ -25,7 +25,7 @@ import { validateMask, buildProtocolCode } from '@utils/protocolCode';
 import { supabase } from '@config/supabase';
 import { Q } from '@nozbe/watermelondb';
 import { database, projectsCollection, protocolTemplatesCollection, protocolsCollection } from '@db/index';
-import { summarizeTopoCoverage, type TopoCoverageItem, type TopoCoverageSummary } from '@utils/topoVisibility';
+import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem, type TopoCoverageSummary } from '@utils/topoVisibility';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
@@ -134,7 +134,7 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
           setTopoItems((protos as any[]).map((p) => ({
             id: p.id,
             code: (p.protocolCode ?? p.externalId ?? p.id) as string,
-            hasTopo: (p.topoCoordEast != null && p.topoCoordNorth != null) || (p.topoLatitude != null && p.topoLongitude != null),
+            hasTopo: hasTopoData({ east: p.topoCoordEast, north: p.topoCoordNorth, elevation: p.topoCoordElevation, valuesJson: p.topoValuesJson }),
             hasGps: p.latitude != null && p.longitude != null,
           })));
         } catch { /* sin protocolos locales */ }

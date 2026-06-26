@@ -33,6 +33,17 @@ export function decideCoordCards(
   return { showGps: hasGps, showTopo: true };
 }
 
+/** Predicado CANÓNICO "el ensayo tiene datos topográficos" — DEBE coincidir con la
+ *  regla que decide la tarjeta en la ficha (ProtocolFillScreen): cualquier señal
+ *  topo (este/norte/cota o valores custom/computados). Si esto se desincroniza, el
+ *  recuadro de cobertura reporta una realidad distinta a la ficha. */
+export function hasTopoData(p: {
+  east?: number | null; north?: number | null; elevation?: number | null;
+  valuesJson?: string | null;
+}): boolean {
+  return p.east != null || p.north != null || p.elevation != null || !!p.valuesJson;
+}
+
 export interface TopoCoverageItem { id: string; code: string; hasTopo: boolean; hasGps: boolean }
 export interface TopoCoverageSummary {
   /** Ensayos sin coordenadas topográficas (la capa topo no los cubre). */

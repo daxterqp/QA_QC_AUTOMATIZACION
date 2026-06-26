@@ -14,14 +14,14 @@
  */
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { X, Settings, Info, FileText, Timer, Map, AlertTriangle, FunctionSquare } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
 import { validateMask } from '@lib/protocolCode';
 import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
-import { summarizeTopoCoverage, type TopoCoverageItem } from '@lib/topoVisibility';
+import { summarizeTopoCoverage, hasTopoData, type TopoCoverageItem } from '@lib/topoVisibility';
 import { createClient } from '@lib/supabase/client';
 import { useI18n } from '@lib/i18n';
 
@@ -56,6 +56,7 @@ export function ProjectConfigModal({
   dangerZone,
 }: Props) {
   const { t } = useI18n();
+  const router = useRouter();
   const resolvedConfirmLabel = confirmLabel ?? t('webCMisc.cfg.confirmLabel');
   const resolvedTitle = title ?? t('webCMisc.cfg.title');
 
@@ -92,13 +93,18 @@ export function ProjectConfigModal({
       const supabase = createClient();
       const { data } = await supabase
         .from('protocols')
-        .select('id, protocol_code, external_id, topo_coord_east, topo_coord_north, topo_latitude, topo_longitude, latitude, longitude')
+        .select('id, protocol_code, external_id, topo_coord_east, topo_coord_north, topo_coord_elevation, topo_values_json, latitude, longitude')
         .eq('project_id', projectId);
       if (cancelled) return;
       const items: TopoCoverageItem[] = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
         id: String(p.id),
         code: String(p.protocol_code ?? p.external_id ?? p.id),
-        hasTopo: (p.topo_coord_east != null && p.topo_coord_north != null) || (p.topo_latitude != null && p.topo_longitude != null),
+        hasTopo: hasTopoData({
+          east: p.topo_coord_east as number | null,
+          north: p.topo_coord_north as number | null,
+          elevation: p.topo_coord_elevation as number | null,
+          valuesJson: (p.topo_values_json == null ? null : JSON.stringify(p.topo_values_json)),
+        }),
         hasGps: p.latitude != null && p.longitude != null,
       }));
       setTopoItems(items);
@@ -115,7 +121,7 @@ export function ProjectConfigModal({
   // v31 — Una máscara inválida generaría códigos colisionantes.
   const maskErrors = flags.protocol_codes ? validateMask(flags.coding_mask_default) : [];
 
-  const handleConfirm = () => {
+  const handleConfirm = (): void | Promise<unknown> => {
     if (maskErrors.length > 0) return;   // botón deshabilitado; defensa extra
     const trimmed = mapTileUrl.trim();
     // Normalizar al persistir:
@@ -137,7 +143,16 @@ export function ProjectConfigModal({
         gps_capture_numeric: false,
       }),
     };
-    onConfirm(toPersist, trimmed.length > 0 ? trimmed : null, sampleIdentifier.trim() || null);
+    return onConfirm(toPersist, trimmed.length > 0 ? trimmed : null, sampleIdentifier.trim() || null) as void | Promise<unknown>;
+  };
+
+  // "Administrar Fórmulas…": persiste los cambios del modal ANTES de navegar (si no,
+  // navegar desmonta el modal y se perderían los toggles sin guardar — p.ej. el de
+  // procesamiento que habilita este mismo botón). Solo navega si no hay error de máscara.
+  const goToFormulas = async () => {
+    if (maskErrors.length > 0 || !projectId) return;
+    await handleConfirm();
+    router.push(`/app/projects/${projectId}/topo-formulas`);
   };
 
   return (
@@ -242,13 +257,14 @@ export function ProjectConfigModal({
                 <Check label="Habilitar procesamiento de datos topográficos" description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
                   value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
                 {flags.topo_processing_enabled && projectId && (
-                  <Link
-                    href={`/app/projects/${projectId}/topo-formulas`}
-                    onClick={onCancel}
+                  <button
+                    type="button"
+                    onClick={goToFormulas}
+                    title="Guarda la configuración y abre la administración de fórmulas/tablas"
                     className="self-start flex items-center gap-2 bg-primary/10 text-primary rounded-lg px-3 py-2 my-1 text-[13px] font-bold hover:bg-primary/20 transition"
                   >
                     <FunctionSquare size={15} /> Administrar Fórmulas y Tablas Auxiliares
-                  </Link>
+                  </button>
                 )}
                 <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
               </div>

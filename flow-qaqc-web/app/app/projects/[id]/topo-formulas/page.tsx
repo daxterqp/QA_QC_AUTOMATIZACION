@@ -52,9 +52,10 @@ export default function TopoFormulasPage() {
       const buf = await file.arrayBuffer();
       const supabase = createClient();
       const res = await importTopoFormulasWorkbook(supabase, projectId, buf, flags);
-      // Persistir las columnas (fórmulas) en feature_flags si cambiaron.
+      // Persistir las columnas (fórmulas) si cambiaron. mergedFlags ya viene de la
+      // nube FRESCA con solo topo_columns reemplazado (no pisa flags concurrentes).
       if (res.formulas.applied + res.formulas.created > 0) {
-        await updateFlags.mutateAsync({ kind: 'flags-only', flags: { ...flags, topo_columns: res.newColumns } } as never);
+        await updateFlags.mutateAsync({ kind: 'flags-only', flags: res.mergedFlags } as never);
       }
       await refetchAux();
       setResult(res);
