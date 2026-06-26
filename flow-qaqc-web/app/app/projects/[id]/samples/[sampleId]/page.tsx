@@ -14,6 +14,7 @@ import { useEnsayosData, createEnsayoInstances } from '@hooks/useEnsayos';
 import { useSample } from '@hooks/useSamples';
 import PageHeader from '@components/PageHeader';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import { cn } from '@lib/utils';
 import type { ProtocolStatus } from '@/types';
 
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 const canFill = (s: string) => s === 'DRAFT' || s === 'IN_PROGRESS' || s === 'REJECTED';
 
 export default function SampleDetailPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId, sampleId } = useParams<{ id: string; sampleId: string }>();
   const qc = useQueryClient();
@@ -52,7 +54,7 @@ export default function SampleDetailPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={sample?.sample_code ?? t('sampleDetail.title')}
         subtitle={project?.name}
         crumbs={[

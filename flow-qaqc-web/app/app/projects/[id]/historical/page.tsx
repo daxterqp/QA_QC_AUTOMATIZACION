@@ -20,6 +20,7 @@ import {
 } from '@hooks/useHistorical';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import { cn } from '@lib/utils';
 import type { Protocol, Location, PlanAnnotation, DashboardNote } from '@/types';
 
@@ -574,6 +575,7 @@ function NotesSection({ projectId }: { projectId: string }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function HistoricalPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { id: projectId } = useParams<{ id: string }>();
   const { t } = useI18n();
 
@@ -631,7 +633,7 @@ export default function HistoricalPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={t('webDossier.dashboardTitle')}
         subtitle={project?.name}
         crumbs={[

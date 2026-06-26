@@ -17,6 +17,7 @@ import { useProjects } from '@hooks/useProjects';
 import { useRecycleBin, useRestoreRecycle, usePurgeRecycle, type RecycleBinEntry } from '@hooks/useRecycleBin';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 
 function fmtDateTime(ms: number): string {
   if (!ms) return '—';
@@ -55,6 +56,7 @@ function Detail({ entry }: { entry: RecycleBinEntry }) {
 }
 
 export default function PapeleraPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
   const { data: projects = [] } = useProjects();
@@ -109,7 +111,7 @@ export default function PapeleraPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={t('webEnsayos.bin.title')}
         subtitle={project?.name}
         crumbs={[

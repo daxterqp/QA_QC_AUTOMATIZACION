@@ -12,6 +12,7 @@ import {
 } from '@hooks/useContacts';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import type { PhoneContact } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ function formatPhone(raw: string): string {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
 
@@ -62,7 +64,7 @@ export default function ContactsPage() {
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={project?.name ?? t('webMisc.projectFallback')}
         subtitle={t('webMisc.contactsSubtitle', { count: contacts.length, plural: contacts.length !== 1 ? 's' : '' })}
         crumbs={[

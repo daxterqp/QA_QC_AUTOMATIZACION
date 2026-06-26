@@ -17,11 +17,13 @@ import { s3Url } from '@lib/pdfGenerator';
 import { cn } from '@lib/utils';
 import { specGroupKey, canonicalSpecName, iconForKey } from '@lib/specialtyGroups';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import type { Plan, Location } from '@/types';
 
 type Mode = 'viewer' | 'measure';
 
 export default function PlansPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
   const search = useSearchParams();
@@ -99,7 +101,7 @@ export default function PlansPage() {
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={mode === 'measure' ? t('webProto.plansMeasureTitle') : t('webProto.plansViewerTitle')}
         subtitle={project?.name}
         crumbs={[

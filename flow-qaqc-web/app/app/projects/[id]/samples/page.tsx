@@ -19,8 +19,10 @@ import { useSamples, useCreateSample, useDeleteSample } from '@hooks/useSamples'
 import { todaySampleDate } from '@lib/sampleCode';
 import PageHeader from '@components/PageHeader';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 
 export default function SamplesPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
   const { currentUser } = useAuth();
@@ -92,7 +94,7 @@ export default function SamplesPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={t('samples.title')}
         subtitle={project?.name}
         crumbs={[{ label: t('webEnsayos.menu.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…' }]}

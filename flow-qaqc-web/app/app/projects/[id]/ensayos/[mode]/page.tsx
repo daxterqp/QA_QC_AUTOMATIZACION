@@ -22,6 +22,7 @@ import {
 import { cn } from '@lib/utils';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import PageHeader from '@components/PageHeader';
 import { useQueryClient } from '@tanstack/react-query';
 import { useProjects, useProjectFlags, useUpdateProjectFlags } from '@hooks/useProjects';
@@ -83,6 +84,7 @@ function createdMs(p: { created_at?: unknown }): number {
 }
 
 export default function EnsayosPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId, mode: modeParam } = useParams<{ id: string; mode: string }>();
   const mode = (['sector', 'type', 'date'].includes(modeParam) ? modeParam : 'sector') as EnsayosMode;
@@ -365,7 +367,7 @@ export default function EnsayosPage() {
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={t(MODE_TITLES[mode])}
         subtitle={project?.name ?? ''}
         crumbs={[

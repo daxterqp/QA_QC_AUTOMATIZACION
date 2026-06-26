@@ -19,6 +19,7 @@ import {
 } from '@hooks/useObservations';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import { PriorityChip, PriorityPickerModal, PRIORITY_META } from '@components/priority/PriorityChip';
 import { useUpdateAnnotationPriority } from '@hooks/usePlanViewer';
 import type { Priority } from '@/types';
@@ -30,6 +31,7 @@ type PriorityFilter = 'all' | Priority | 'none';
 const statusColor = (isOk: boolean) => (isOk ? '#16a34a' : '#dc2626');
 
 export default function ObservationsPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
   const router = useRouter();
@@ -241,7 +243,7 @@ export default function ObservationsPage() {
   // ── Render principal ──────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={t('webEnsayos.obs.title')}
         subtitle={project?.name}
         crumbs={[

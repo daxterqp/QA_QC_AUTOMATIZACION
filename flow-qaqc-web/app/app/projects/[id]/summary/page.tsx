@@ -17,6 +17,7 @@ import { useSummaryTemplates, useSummaryRows, useTemplateItems, type SummaryRowD
 import { FIXED_SUMMARY_COLUMNS, dynamicColumnsFromRows, summaryStatus, type SummaryColumn } from '@lib/summaryTable';
 import { buildAutoColumns, chartYOptions } from '@lib/summaryColumns';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 
 const STATUS_FILTERS = [
   { key: 'APPROVED', labelKey: 'webDash.approved', color: '#1e8e3e' },
@@ -114,6 +115,7 @@ type ChartCfg = { id: string; yKey: string; trend: Trend };
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 function SummaryTablesInner() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
   const router = useRouter();
@@ -249,7 +251,7 @@ function SummaryTablesInner() {
     <div className="flex flex-col min-h-screen bg-surface">
       {/* SELECTOR (tipos de ensayo): header normal. DASHBOARD: header condensado a 1 línea. */}
       {!templateId ? (
-        <PageHeader title={t('webDash.summaryTitle')} subtitle={project?.name}
+        <PageHeader onRefresh={onRefresh} refreshing={refreshing} title={t('webDash.summaryTitle')} subtitle={project?.name}
           crumbs={[{ label: t('webDash.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…', href: `/app/projects/${projectId}/menu` }, { label: t('webDash.summaryTitle') }]} />
       ) : (
         <div className="sticky top-0 z-40 bg-navy text-white flex items-center gap-2 px-3 h-12 shadow-md">

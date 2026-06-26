@@ -11,6 +11,7 @@ import type { RepeatDirective } from '@lib/parametricExpand';
 import { useAuth } from '@lib/auth-context';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import type { ProtocolStatus } from '@/types';
 
 // Paridad EXACTA con el móvil (EnsayosScreen): mismo hue + tinte ~10%.
@@ -32,6 +33,7 @@ const STATUS_LABEL_KEYS: Record<ProtocolStatus, string> = {
 };
 
 export default function LocationProtocolsPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { id: projectId, locId: locationId } = useParams<{ id: string; locId: string }>();
   const router = useRouter();
   const { t } = useI18n();
@@ -113,7 +115,7 @@ export default function LocationProtocolsPage() {
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={location?.name ?? t('webMisc.locationFallback')}
         subtitle={t('webMisc.requiredProtocols')}
         crumbs={[

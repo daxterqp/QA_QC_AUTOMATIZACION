@@ -13,9 +13,11 @@ import { useLocations, useLocationProgress } from '@hooks/useLocations';
 import { useProjects } from '@hooks/useProjects';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import type { Location } from '@/types';
 
 export default function LocationsPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { id: projectId } = useParams<{ id: string }>();
 
@@ -55,7 +57,7 @@ export default function LocationsPage() {
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      <PageHeader
+      <PageHeader onRefresh={onRefresh} refreshing={refreshing}
         title={project?.name ?? t('webMisc.projectFallback')}
         subtitle={t(filtered.length !== 1 ? 'webMisc.locationsSubtitleMany' : 'webMisc.locationsSubtitleOne', { count: filtered.length })}
         crumbs={[{ label: t('webMisc.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '...' }]}

@@ -225,6 +225,7 @@ export const STRINGS_WEB_CMISC: Record<string, { es: string; en: string; pt: str
   'webCMisc.header.syncing': { es: 'Sincronizando...', en: 'Syncing...', pt: 'Sincronizando...' },
   'webCMisc.header.back': { es: 'Atrás', en: 'Back', pt: 'Voltar' },
   'webCMisc.header.forward': { es: 'Adelante', en: 'Forward', pt: 'Avançar' },
+  'webCMisc.header.refresh': { es: 'Recargar', en: 'Refresh', pt: 'Recarregar' },
 
   // ── RepeatPromptModal ──
   'webCMisc.repeat.title': {

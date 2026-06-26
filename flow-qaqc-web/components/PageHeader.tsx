@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 
@@ -15,10 +15,15 @@ interface PageHeaderProps {
   syncing?: boolean;
   rightContent?: React.ReactNode;
   backHref?: string;
+  /** #7C — Botón "Recargar" reutilizable. Si se pasa, aparece un ícono que al
+   *  tocarlo fuerza la recarga de los datos de la página (refetch de queries). */
+  onRefresh?: () => void;
+  /** Muestra el ícono girando mientras recarga. */
+  refreshing?: boolean;
 }
 
 export default function PageHeader({
-  title, subtitle, crumbs, syncing, rightContent, backHref,
+  title, subtitle, crumbs, syncing, rightContent, backHref, onRefresh, refreshing,
 }: PageHeaderProps) {
   const router = useRouter();
   const { t } = useI18n();
@@ -120,8 +125,20 @@ export default function PageHeader({
             </p>
           )}
         </div>
-        {rightContent && (
-          <div className="flex items-center gap-2 flex-shrink-0">{rightContent}</div>
+        {(rightContent || onRefresh) && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {rightContent}
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                disabled={refreshing}
+                title={t('webCMisc.header.refresh')}
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-white border border-white/20 hover:bg-white/15 transition disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

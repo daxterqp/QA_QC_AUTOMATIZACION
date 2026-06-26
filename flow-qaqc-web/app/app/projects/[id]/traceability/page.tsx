@@ -19,6 +19,7 @@ import { useState, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useProjectFlags, useProjects } from '@hooks/useProjects';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import { useAuth } from '@lib/auth-context';
 import { useTraceability, useCaptureCatalogs, useCreateWorkSession } from '@hooks/useTraceability';
 import { AnonymizeMap } from '@lib/anonymize';
@@ -42,6 +43,7 @@ const TABS: { key: TabKey; labelKey: string; icon: React.ElementType }[] = [
 ];
 
 export default function TraceabilityPage() {
+  const { refreshing, onRefresh } = usePageRefresh();
   const { id: projectId } = useParams<{ id: string }>();
   const { t } = useI18n();
   const router = useRouter();
@@ -108,7 +110,7 @@ export default function TraceabilityPage() {
   if (moduleDisabled) {
     return (
       <div className="flex flex-col min-h-screen bg-surface">
-        <PageHeader
+        <PageHeader onRefresh={onRefresh} refreshing={refreshing}
           title={t('webDossier.traceTitle')}
           subtitle={project?.name}
           crumbs={[{ label: t('webDossier.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…' }]}

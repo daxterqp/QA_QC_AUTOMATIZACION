@@ -14,6 +14,7 @@ import { useProjectPreload } from '@hooks/useProjectPreload';
 import { useApproveProtocol, useRejectProtocol } from '@hooks/useProtocolAudit';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
+import { usePageRefresh } from '@hooks/usePageRefresh';
 import { cn } from '@lib/utils';
 import { exportFullDossier, exportSingleProtocolPdf } from '@lib/pdfGenerator';
 import type { Location } from '@/types';
@@ -236,6 +237,7 @@ function ProtocolCard({
 
 export default function DossierPage() {
   const { id: projectId } = useParams<{ id: string }>();
+  const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
   const { currentUser } = useAuth();
   const { data: projects = [] } = useProjects();
@@ -367,6 +369,8 @@ export default function DossierPage() {
           { label: project?.name ?? '…' },
         ]}
         syncing={isLoading}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
         rightContent={
           isJefe ? (
             <button
