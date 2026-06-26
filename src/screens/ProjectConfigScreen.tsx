@@ -270,6 +270,21 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
             value={flags.module_contacts} onToggle={() => toggleFlag('module_contacts')} />
           <CheckRow label={t('projectConfig.moduleSummaryLabel')} description={t('projectConfig.moduleSummaryDesc')}
             value={flags.module_summary_tables} onToggle={() => toggleFlag('module_summary_tables')} />
+          {/* v44 — Carga de datos topográficos */}
+          <CheckRow label="Carga de datos topográficos" description="Carga masiva de coordenadas topográficas (manual o CSV) por código de ensayo."
+            value={!!flags.module_topo} onToggle={() => toggleFlag('module_topo')} />
+          {flags.module_topo && (
+            <View style={{ paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: Colors.primary + '40', marginLeft: 4 }}>
+              <CheckRow label="Reemplazar coordenadas GPS" description="En las fichas se oculta la tarjeta GPS y solo se usan topográficas."
+                value={!!flags.topo_replace_gps} onToggle={() => toggleFlag('topo_replace_gps')} />
+              {flags.topo_replace_gps && (
+                <CheckRow label="Seguir usando GPS cuando sea posible" description="Para ensayos sin topo, usar la tarjeta GPS como respaldo."
+                  value={!!flags.topo_keep_gps_fallback} onToggle={() => toggleFlag('topo_keep_gps_fallback')} />
+              )}
+              <CheckRow label="Habilitar procesamiento de datos topográficos" description="Motor de cálculo (fórmulas + sector por área con tolerancia)."
+                value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
+            </View>
+          )}
 
           {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}
           <Text style={styles.fieldLabel}>{t('projectConfig.fillModeLabel')}</Text>
