@@ -41,7 +41,9 @@ import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { SyncWorker } from '@services/SyncWorker';
 import { GPSCaptureBar } from '@components/GPSCaptureBar';
-import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { TopoCoordCard } from '@components/topo/TopoCoordCard';
+import { decideCoordCards } from '@utils/topoVisibility';
+import { parseFeatureFlagsJson, topoColumns } from '@utils/featureFlags';
 import { supabase } from '@config/supabase';
 import { listS3Keys, downloadFromS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
@@ -901,13 +903,24 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
               <Text style={styles.noPlanHint}>{t('protoFill.plans.searching')}</Text>
             )}
 
-            {/* v32 — Módulo GIS integrado dentro de Datos generales */}
-            {protocol && projectFlags && (
-              (numericMode && projectFlags.gps_capture_numeric) ||
-              (!numericMode && projectFlags.gps_capture_subjective)
-            ) && (
-              <GPSCaptureBar protocol={protocol} readOnly={isReadOnly} sectorLocked={sectorLocked} />
-            )}
+            {/* v32 GIS + v44 Topo — Coordenadas GPS + Topográficas integradas en Datos generales */}
+            {protocol && projectFlags && (() => {
+              const pa = protocol as any;
+              const hasGps = pa.latitude != null && pa.longitude != null;
+              const hasTopo = pa.topoCoordEast != null || pa.topoCoordNorth != null || pa.topoCoordElevation != null || !!pa.topoValuesJson;
+              const decision = decideCoordCards(projectFlags, hasGps, hasTopo);
+              const gpsCaptureOn = (numericMode && projectFlags.gps_capture_numeric) || (!numericMode && projectFlags.gps_capture_subjective);
+              return (
+                <>
+                  {gpsCaptureOn && decision.showGps && (
+                    <GPSCaptureBar protocol={protocol} readOnly={isReadOnly} sectorLocked={sectorLocked} />
+                  )}
+                  {projectFlags.module_topo && decision.showTopo && (
+                    <TopoCoordCard protocol={pa} columns={topoColumns(projectFlags)} embedded />
+                  )}
+                </>
+              );
+            })()}
           </View>
             {numericMode && (
               <>

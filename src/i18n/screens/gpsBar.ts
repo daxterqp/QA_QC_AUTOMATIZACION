@@ -25,7 +25,7 @@ const gpsBar: Record<string, { es: string; en: string; pt: string }> = {
   'gpsBar.datum.psad56Utm': { es: 'Este, Norte (UTM) · PSAD56', en: 'Easting, Northing (UTM) · PSAD56', pt: 'Este, Norte (UTM) · PSAD56' },
 
   // Título y botones
-  'gpsBar.title': { es: 'Coordenadas', en: 'Coordinates', pt: 'Coordenadas' },
+  'gpsBar.title': { es: 'Coordenadas GPS', en: 'GPS Coordinates', pt: 'Coordenadas GPS' },
   'gpsBar.btn.recapture': { es: 'Recapturar', en: 'Recapture', pt: 'Recapturar' },
   'gpsBar.btn.measure': { es: 'Medir', en: 'Measure', pt: 'Medir' },
   'gpsBar.btn.manual': { es: 'Manual', en: 'Manual', pt: 'Manual' },

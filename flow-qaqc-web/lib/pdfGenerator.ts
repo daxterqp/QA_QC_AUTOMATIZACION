@@ -620,10 +620,21 @@ function buildProtocolPages(
   // v42d — En ensayos NUMÉRICOS, Datos Generales no lleva "Ubicación/Especialidad"
   // (se trabaja por coordenadas/sector, igual que el Audit). En clásicos se mantiene.
   const isNumeric = isNumericProtocol(items as any);
-  const pa = p as { latitude?: number | null; longitude?: number | null };
-  const coordsStr = (pa.latitude != null && pa.longitude != null)
-    ? `${Number(pa.latitude).toFixed(6)}, ${Number(pa.longitude).toFixed(6)}`
-    : 'Sin coordenadas';
+  // v44 — Jerarquía ESTRICTA: topográficas > GPS > "Sin coordenadas".
+  const pa = p as {
+    latitude?: number | null; longitude?: number | null;
+    topo_coord_east?: number | null; topo_coord_north?: number | null; topo_coord_elevation?: number | null;
+  };
+  const coordsStr = (() => {
+    if (pa.topo_coord_east != null && pa.topo_coord_north != null) {
+      const z = pa.topo_coord_elevation != null ? ` · Cota ${Number(pa.topo_coord_elevation)}` : '';
+      return `E ${Number(pa.topo_coord_east).toFixed(2)} · N ${Number(pa.topo_coord_north).toFixed(2)}${z}`;
+    }
+    if (pa.latitude != null && pa.longitude != null) {
+      return `${Number(pa.latitude).toFixed(6)}, ${Number(pa.longitude).toFixed(6)}`;
+    }
+    return 'Sin coordenadas';
+  })();
   const filledName = p.filledByName ?? '—';
   const signedName = p.signedByName ?? signerName;
   const sc = statusColor(p.status);

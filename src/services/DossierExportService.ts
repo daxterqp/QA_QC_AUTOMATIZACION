@@ -725,9 +725,19 @@ function buildProtocolPages(
   const cfg = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
   const fontScale = PRINT_FONT_SCALE[cfg.font_level];
   const headerColor = getPrintHeaderColor(_pdfFlags);   // color GLOBAL para todos los ensayos
-  const coordsStr = (protocol.latitude != null && protocol.longitude != null)
-    ? `${Number(protocol.latitude).toFixed(6)}, ${Number(protocol.longitude).toFixed(6)}`
-    : 'Sin coordenadas';
+  // v44 — Jerarquía ESTRICTA de coordenadas para el PDF: topográficas > GPS > "Sin
+  // coordenadas". Un solo juego de coordenadas en el dossier.
+  const coordsStr = (() => {
+    const pa = protocol as any;
+    if (pa.topoCoordEast != null && pa.topoCoordNorth != null) {
+      const z = pa.topoCoordElevation != null ? ` · Cota ${Number(pa.topoCoordElevation)}` : '';
+      return `E ${Number(pa.topoCoordEast).toFixed(2)} · N ${Number(pa.topoCoordNorth).toFixed(2)}${z}`;
+    }
+    if (protocol.latitude != null && protocol.longitude != null) {
+      return `${Number(protocol.latitude).toFixed(6)}, ${Number(protocol.longitude).toFixed(6)}`;
+    }
+    return 'Sin coordenadas';
+  })();
 
   const logoHtml = logoB64
     ? `<img src="${logoB64}" class="proto-logo" alt="Logo"/>`

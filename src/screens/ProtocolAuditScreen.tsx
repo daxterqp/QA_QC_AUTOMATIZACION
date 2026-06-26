@@ -21,6 +21,9 @@ import {
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
 import { GPSCaptureBar } from '@components/GPSCaptureBar';
+import { TopoCoordCard } from '@components/topo/TopoCoordCard';
+import { decideCoordCards } from '@utils/topoVisibility';
+import { topoColumns } from '@utils/featureFlags';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import { useTour } from '@context/TourContext';
 import { useTourStepWithLayout } from '@hooks/useTourStep';
@@ -680,14 +683,25 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
             </View>
           )}
 
-          {/* v33 — Tarjeta de Coordenadas INTEGRADA dentro de Datos Generales
-              (fondo blanco, embebida). Antes era una tarjeta gris separada. */}
-          {protocol && projectFlags && (
-            (numericMode && projectFlags.gps_capture_numeric) ||
-            (!numericMode && projectFlags.gps_capture_subjective)
-          ) && (
-            <GPSCaptureBar protocol={protocol} readOnly embedded title={t('protoAudit.gpsTitle')} />
-          )}
+          {/* v33 — Coordenadas GPS + v44 Coordenadas Topográficas (tarjetas embebidas
+              en Datos Generales). Visibilidad por decideCoordCards (replace/keep_gps). */}
+          {protocol && projectFlags && (() => {
+            const pa = protocol as any;
+            const hasGps = pa.latitude != null && pa.longitude != null;
+            const hasTopo = pa.topoCoordEast != null || pa.topoCoordNorth != null || pa.topoCoordElevation != null || !!pa.topoValuesJson;
+            const decision = decideCoordCards(projectFlags, hasGps, hasTopo);
+            const gpsCaptureOn = (numericMode && projectFlags.gps_capture_numeric) || (!numericMode && projectFlags.gps_capture_subjective);
+            return (
+              <>
+                {gpsCaptureOn && decision.showGps && (
+                  <GPSCaptureBar protocol={protocol} readOnly embedded title={t('protoAudit.gpsTitle')} />
+                )}
+                {projectFlags.module_topo && decision.showTopo && (
+                  <TopoCoordCard protocol={pa} columns={topoColumns(projectFlags)} embedded />
+                )}
+              </>
+            );
+          })()}
         </View>
 
         {/* v42 — Aviso de llamados entre ensayos desactualizados (frescura híbrida). */}

@@ -57,7 +57,7 @@ const protoAudit: Record<string, { es: string; en: string; pt: string }> = {
   'protoAudit.stat.total': { es: 'Total', en: 'Total', pt: 'Total' },
 
   // Tarjeta GPS
-  'protoAudit.gpsTitle': { es: 'Ubicación GPS', en: 'GPS Location', pt: 'Localização GPS' },
+  'protoAudit.gpsTitle': { es: 'Coordenadas GPS', en: 'GPS Coordinates', pt: 'Coordenadas GPS' },
 
   // Banner xref desactualizado
   'protoAudit.xref.staleTitle': { es: 'Datos llamados desactualizados', en: 'Referenced data out of date', pt: 'Dados referenciados desatualizados' },
