@@ -16,12 +16,12 @@ import { useProjectFlags, useProjects } from '@hooks/useProjects';
 import { useProjectMetrics } from '@hooks/useProjectMetrics';
 import { useAuth } from '@lib/auth-context';
 import { useI18n } from '@lib/i18n';
-import { isTraceabilityEnabled, isGeolocationEnabled } from '@/types';
+import { isTraceabilityEnabled, isGeolocationEnabled, isTopoEnabled } from '@/types';
 import PageHeader from '@components/PageHeader';
 import {
   List, Timer, Map as MapIcon, ChevronRight,
   FolderOpen, FileUp, Phone, FileText, BookOpen,
-  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2, RefreshCw, Mail,
+  Grid3x3, FlaskConical, CalendarDays, Table2, Trash2, RefreshCw, Mail, Mountain,
 } from 'lucide-react';
 
 /** Botón "Actualizar": re-trae de la nube TODO lo cacheado de este proyecto
@@ -178,6 +178,15 @@ export default function ProjectMenuPage() {
       icon: Mail,
       tone: 'secondary',
       visible: !!flags && !!flags.module_email_reports && isJefeOrCreator,
+    },
+    {
+      key: 'topo-cargas',
+      title: 'Carga de datos topográficos',
+      subtitle: 'Coordenadas topográficas en masa (manual o CSV) por código de ensayo.',
+      href: `/app/projects/${projectId}/topo-cargas`,
+      icon: Mountain,
+      tone: 'primary',
+      visible: !!flags && isTopoEnabled(flags) && isJefeOrCreator,
     },
     {
       key: 'recycle-bin',
