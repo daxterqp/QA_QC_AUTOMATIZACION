@@ -15,6 +15,17 @@ import {
   type LatLng, type CoordinateSystem,
 } from '@lib/coordinateTopo';
 
+/** Valida y parsea points_json (jsonb) → LatLng[] | null. Espejo del getter
+ *  ProjectSector.points del móvil: descarta polígonos con vértices NaN/malformados
+ *  (evita que pointInPolygon/llToLocalMeters produzcan resultados distintos por
+ *  plataforma). */
+function parseSectorPoints(json: unknown): LatLng[] | null {
+  if (!Array.isArray(json)) return null;
+  const ok = (json as any[]).every((p) =>
+    p && typeof p.lat === 'number' && typeof p.lng === 'number' && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  return ok && json.length > 0 ? (json as LatLng[]) : null;
+}
+
 interface ProcessingCtxWeb {
   processing: boolean;
   coordSystem: CoordinateSystem;
@@ -33,8 +44,7 @@ async function loadProcessingCtxWeb(supabase: SupabaseClient, projectId: string)
   }
   const { data: secs } = await supabase.from('project_sectors').select('id, name, points_json').eq('project_id', projectId);
   const sectors = ((secs ?? []) as { id: string; name: string; points_json: unknown }[]).map((s) => ({
-    id: s.id, name: s.name,
-    points: Array.isArray(s.points_json) ? (s.points_json as LatLng[]) : null,
+    id: s.id, name: s.name, points: parseSectorPoints(s.points_json),
   }));
   const sectorCol = topoColumns(flags).find((c) => c.builtin === 'sector' && c.enabled);
   return {

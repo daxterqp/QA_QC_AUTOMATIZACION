@@ -159,7 +159,9 @@ export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedI
       });
       touchedIds.push(b.protocolId);
     }
-    await (carga as any).update((rec: any) => { rec.appliedAt = now; });
+    // Nota: NO tocamos la fila `carga` aquí (apply/rebind escriben solo protocolos),
+    // para que applied_at/updated_at de la carga coincidan con la web (que setea
+    // applied_at solo en create/update, no en rebind).
   });
 
   await enqueue({ opType: 'PUSH_TOPO_CARGA', entityId: cargaId, projectId });
@@ -200,6 +202,7 @@ export async function createCarga(args: {
       c.inputMethod = args.inputMethod;
       c.createdById = args.createdById ?? null;
       c.uploadStatus = 'PENDING';
+      c.appliedAt = Date.now();
       c.rowsJson = JSON.stringify(args.rows ?? []);
       c.columnsJson = args.columns ? JSON.stringify(args.columns) : null;
     });
@@ -223,6 +226,7 @@ export async function updateCarga(cargaId: string, rows: TopoRow[], columns?: un
     await (carga as any).update((rec: any) => {
       rec.rowsJson = JSON.stringify(rows ?? []);
       if (columns !== undefined) rec.columnsJson = columns ? JSON.stringify(columns) : null;
+      rec.appliedAt = Date.now();
     });
   });
   // 3. Re-aplicar TODAS las cargas (created_at asc): la editada con sus nuevas filas +

@@ -360,6 +360,7 @@ async function filterByFreshness(
 
 import { parseFeatureFlagsJson, mergeFeatureFlags, type GroupingPreset } from '@utils/featureFlags';
 import { buildProtocolCode, nextSeq, parseEnsayoDate, pickMask, type SeqResetScope } from '@utils/protocolCode';
+import { buildTopoCargaCode, nextTopoSeqLocal, topoSeqGroupKey } from '@utils/topoCargaCode';
 
 function isCodeUniqueViolation(error: { code?: string; message?: string; details?: string } | null | undefined): boolean {
   if (!error) return false;
@@ -579,11 +580,8 @@ export async function pullSamples(projectId: string): Promise<void> {
 
 /** Empuja una carga topográfica por id (con throw → retry del SyncWorker).
  *  `rows_json`/`columns_json` son TEXT local → parsear a JSONB antes del upsert. */
-export async function pushTopoCargaStrict(cargaId: string): Promise<void> {
-  const c = await topoCargasCollection.find(cargaId).catch(() => null);
-  if (!c) return;
-  if (isLocalDeleted(c)) return;
-  const row = toRow((c as any)._raw);
+function topoCargaRow(rec: any): any {
+  const row = toRow(rec._raw);
   if (typeof row.rows_json === 'string') {
     try { row.rows_json = JSON.parse(row.rows_json); } catch { row.rows_json = []; }
   }
@@ -592,8 +590,52 @@ export async function pushTopoCargaStrict(cargaId: string): Promise<void> {
   } else if (row.columns_json == null) {
     delete row.columns_json;
   }
-  const { error } = await supabase.from('topo_cargas').upsert([row], { onConflict: 'id' });
-  if (error) throw new Error(`[pushTopoCargaStrict] ${error.message}`);
+  return row;
+}
+
+/** Re-secuencia el carga_code local (otro dispositivo tomó el seq del día). Recalcula
+ *  el próximo seq libre contra la nube (+ RPC atómico) y reescribe carga_code/seq. */
+async function resequenceTopoCargaCode(cargaId: string): Promise<boolean> {
+  const c: any = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!c) return false;
+  const projectId = c.projectId as string;
+  const dateKey = c.cargaDate as string | null;
+  const date = dateKey ? new Date(`${dateKey}T12:00:00`) : new Date();
+  const { data } = await supabase.from('topo_cargas').select('carga_code').eq('project_id', projectId);
+  const codes = ((data ?? []) as { carga_code: string }[]).map((r) => r.carga_code);
+  let seq = nextTopoSeqLocal(codes, date);
+  try {
+    const { data: cloudSeq, error } = await supabase.rpc('next_protocol_seq', {
+      p_project_id: projectId, p_group_key: topoSeqGroupKey(date), p_client_seq: seq, p_count: 1,
+    });
+    if (!error && typeof cloudSeq === 'number' && cloudSeq > 0) seq = cloudSeq;
+  } catch { /* offline → seq local */ }
+  const newCode = buildTopoCargaCode(date, seq);
+  await database.write(async () => { await c.update((rec: any) => { rec.cargaCode = newCode; rec.seq = seq; }); });
+  return true;
+}
+
+export async function pushTopoCargaStrict(cargaId: string): Promise<void> {
+  const c = await topoCargasCollection.find(cargaId).catch(() => null);
+  if (!c) return;
+  if (isLocalDeleted(c)) return;
+  const { error } = await supabase.from('topo_cargas').upsert([topoCargaRow(c)], { onConflict: 'id' });
+  if (!error) return;
+  // Colisión del índice (project_id, carga_code): otro dispositivo tomó el seq del día.
+  // Re-secuenciar (igual que la web reintenta con 23505) y reintentar UNA vez.
+  const txt = `${error.message ?? ''} ${(error as any).details ?? ''}`;
+  if (error.code === '23505' && txt.includes('topo_cargas_code_unique')) {
+    const ok = await resequenceTopoCargaCode(cargaId).catch(() => false);
+    if (ok) {
+      const fresh: any = await topoCargasCollection.find(cargaId).catch(() => null);
+      if (fresh) {
+        const { error: e2 } = await supabase.from('topo_cargas').upsert([topoCargaRow(fresh)], { onConflict: 'id' });
+        if (!e2) return;
+        throw new Error(`[pushTopoCargaStrict:reseq] ${e2.message}`);
+      }
+    }
+  }
+  throw new Error(`[pushTopoCargaStrict] ${error.message}`);
 }
 
 /** Borra una carga remota. El revert de las columnas topo_* de los protocolos lo
