@@ -39,15 +39,13 @@ interface ProcessingCtxWeb {
   auxTables: AuxTables;
 }
 
-/** Contexto del motor web: flags (coord_system + procesamiento) + sectores + zona UTM
- *  + columnas config + tablas auxiliares (para fórmulas/BUSCAR). */
+/** Contexto del motor web: flags (coord_system) + sectores + zona UTM + columnas
+ *  config + tablas auxiliares (para fórmulas/BUSCAR). El procesamiento SIEMPRE está
+ *  activo: si no hay columnas fórmula/área ni sectores, simplemente no calcula nada. */
 async function loadProcessingCtxWeb(supabase: SupabaseClient, projectId: string): Promise<ProcessingCtxWeb> {
   const { data: proj } = await supabase.from('projects').select('feature_flags').eq('id', projectId).single();
   const flags = mergeFeatureFlags(((proj as { feature_flags?: unknown } | null)?.feature_flags ?? null) as any);
   const cols = topoColumns(flags);
-  if (!flags.topo_processing_enabled) {
-    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0, columns: cols, auxTables: {} };
-  }
   const { data: secs } = await supabase.from('project_sectors').select('id, name, points_json').eq('project_id', projectId);
   const sectors = ((secs ?? []) as { id: string; name: string; points_json: unknown }[]).map((s) => ({
     id: s.id, name: s.name, points: parseSectorPoints(s.points_json),

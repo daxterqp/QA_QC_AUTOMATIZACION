@@ -100,7 +100,6 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
       await mergeAndSaveFeatureFlags(projectId, {
         topo_replace_gps: flags.topo_replace_gps,
         topo_keep_gps_fallback: flags.topo_keep_gps_fallback,
-        topo_processing_enabled: flags.topo_processing_enabled,
         topo_columns: topoColumns(flags),
       });
       setDirty(false);
@@ -117,7 +116,6 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
         await mergeAndSaveFeatureFlags(projectId, {
           topo_replace_gps: flags.topo_replace_gps,
           topo_keep_gps_fallback: flags.topo_keep_gps_fallback,
-          topo_processing_enabled: flags.topo_processing_enabled,
           topo_columns: topoColumns(flags),
         });
         setDirty(false);
@@ -168,40 +166,37 @@ export default function TopoConfigScreen({ navigation, route }: Props) {
               <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
             </View>
 
-            {/* Procesamiento + Excel */}
+            {/* Fórmulas + Tablas auxiliares (el procesamiento siempre está activo:
+                si no se usa ninguna fórmula/área, simplemente no calcula nada). */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Procesamiento de datos</Text>
-              <CheckRow label="Habilitar procesamiento de datos topográficos" description="Motor de cálculo (fórmulas + sector por área con tolerancia)."
-                value={!!flags.topo_processing_enabled} onToggle={() => toggle('topo_processing_enabled')} disabled={!canEdit} />
-              {flags.topo_processing_enabled && (
-                <View style={{ gap: 10, marginTop: 4 }}>
-                  <Text style={styles.help}>
-                    Sube un <Text style={styles.bold}>.xlsx</Text> con dos hojas (un .csv solo tiene una).{' '}
-                    <Text style={styles.bold}>Hoja 1 «Fórmulas»</Text>: filas Columna | Fórmula.{' '}
-                    <Text style={styles.bold}>Hoja 2 «Tablas Auxiliares»</Text>: tabla-&lt;nombre&gt; | columna | valores…
-                  </Text>
-                  <TouchableOpacity style={[styles.uploadBtn, (!canEdit || busy) && { opacity: 0.5 }]} onPress={onUpload} disabled={!canEdit || busy}>
-                    {busy ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name="cloud-upload-outline" size={16} color={Colors.white} />}
-                    <Text style={styles.uploadText}>{busy ? 'Procesando…' : 'Subir Excel (Fórmulas + Tablas)'}</Text>
-                  </TouchableOpacity>
-                  {result && (
-                    <View style={styles.resultBox}>
-                      <Text style={styles.resultTitle}>Importación completada</Text>
-                      <Text style={styles.resultLine}>Fórmulas: {result.formulas.applied} asignadas · {result.formulas.created} nuevas · Tablas: {result.auxTables.upserted}</Text>
-                      {result.warnings.map((w, i) => <Text key={i} style={styles.warn}>⚠ {w}</Text>)}
-                    </View>
-                  )}
-                  <Text style={styles.subHead}>Tablas auxiliares</Text>
-                  {auxTables.length === 0 ? (
-                    <Text style={styles.empty}>Ninguna cargada.</Text>
-                  ) : auxTables.map((t) => (
-                    <View key={t.id} style={styles.auxRow}>
-                      <Text style={styles.auxName}>{t.name}</Text>
-                      <Text style={styles.auxMeta}>{t.columns.join(' · ')} — {t.rowCount} fila{t.rowCount !== 1 ? 's' : ''}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
+              <Text style={styles.cardTitle}>Fórmulas y tablas auxiliares</Text>
+              <View style={{ gap: 10, marginTop: 4 }}>
+                <Text style={styles.help}>
+                  Sube un <Text style={styles.bold}>.xlsx</Text> con dos hojas (un .csv solo tiene una).{' '}
+                  <Text style={styles.bold}>Hoja 1 «Fórmulas»</Text>: filas Columna | Fórmula.{' '}
+                  <Text style={styles.bold}>Hoja 2 «Tablas Auxiliares»</Text>: tabla-&lt;nombre&gt; | columna | valores…
+                </Text>
+                <TouchableOpacity style={[styles.uploadBtn, (!canEdit || busy) && { opacity: 0.5 }]} onPress={onUpload} disabled={!canEdit || busy}>
+                  {busy ? <ActivityIndicator size="small" color={Colors.white} /> : <Ionicons name="cloud-upload-outline" size={16} color={Colors.white} />}
+                  <Text style={styles.uploadText}>{busy ? 'Procesando…' : 'Subir Excel (Fórmulas + Tablas)'}</Text>
+                </TouchableOpacity>
+                {result && (
+                  <View style={styles.resultBox}>
+                    <Text style={styles.resultTitle}>Importación completada</Text>
+                    <Text style={styles.resultLine}>Fórmulas: {result.formulas.applied} asignadas · {result.formulas.created} nuevas · Tablas: {result.auxTables.upserted}</Text>
+                    {result.warnings.map((w, i) => <Text key={i} style={styles.warn}>⚠ {w}</Text>)}
+                  </View>
+                )}
+                <Text style={styles.subHead}>Tablas auxiliares</Text>
+                {auxTables.length === 0 ? (
+                  <Text style={styles.empty}>Ninguna cargada.</Text>
+                ) : auxTables.map((t) => (
+                  <View key={t.id} style={styles.auxRow}>
+                    <Text style={styles.auxName}>{t.name}</Text>
+                    <Text style={styles.auxMeta}>{t.columns.join(' · ')} — {t.rowCount} fila{t.rowCount !== 1 ? 's' : ''}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
           </ScrollView>
 

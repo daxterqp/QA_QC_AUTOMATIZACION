@@ -105,15 +105,14 @@ interface ProcessingCtx {
   auxTables: AuxTables;
 }
 
-/** Contexto del motor: flags (coord_system + procesamiento) + sectores del proyecto +
- *  zona UTM derivada + columnas config + tablas auxiliares (para fórmulas/BUSCAR). */
+/** Contexto del motor: flags (coord_system) + sectores del proyecto + zona UTM
+ *  derivada + columnas config + tablas auxiliares (para fórmulas/BUSCAR).
+ *  El procesamiento SIEMPRE está activo: si no hay columnas fórmula/área ni sectores,
+ *  simplemente no calcula nada (no hace falta un toggle). */
 async function loadProcessingCtx(projectId: string): Promise<ProcessingCtx> {
   const proj = await projectsCollection.find(projectId).catch(() => null);
   const flags = parseFeatureFlagsJson((proj as any)?.featureFlags);
   const cols = topoColumns(flags);
-  if (!flags.topo_processing_enabled) {
-    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0, columns: cols, auxTables: {} };
-  }
   const secRecs = await projectSectorsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]);
   const sectors = (secRecs as any[]).map((s) => ({ id: s.id, name: s.name, points: s.points ?? null }));
   const sectorCol = cols.find((c) => c.builtin === 'sector' && c.enabled);

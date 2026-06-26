@@ -193,55 +193,51 @@ export default function TopoConfigPage() {
               <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
             </div>
 
-            {/* Procesamiento + Excel */}
+            {/* Fórmulas + Tablas auxiliares (el procesamiento siempre está activo:
+                si no se usa ninguna fórmula/área, simplemente no calcula nada). */}
             <div className="bg-white rounded-xl shadow-subtle p-5 flex flex-col gap-3">
-              <h2 className="text-navy font-bold text-[15px]">Procesamiento de datos</h2>
-              <Toggle label="Habilitar procesamiento de datos topográficos"
-                description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
-                value={!!flags.topo_processing_enabled} onToggle={() => toggle('topo_processing_enabled')} disabled={!canEdit} />
-              {flags.topo_processing_enabled && (
-                <div className="flex flex-col gap-3 pl-1">
-                  <p className="text-[12px] text-muted leading-snug">
-                    Sube un <b>.xlsx</b> con dos hojas (un .csv solo tiene una). <b>Hoja 1 «Fórmulas»</b>: filas
-                    {' '}<code>Columna | Fórmula</code> (se asigna a la columna por nombre). <b>Hoja 2 «Tablas Auxiliares»</b>:
-                    {' '}<code>tabla-&lt;nombre&gt; | columna | valor1 | valor2 …</code> (para <code>BUSCAR</code>).
-                  </p>
-                  <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
-                  <button onClick={onPick} disabled={!canEdit || busy}
-                    className="self-start flex items-center gap-2 bg-primary text-white rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition">
-                    {busy ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
-                    {busy ? 'Procesando…' : 'Subir Excel (Fórmulas + Tablas)'}
-                  </button>
-                  {error && (
-                    <div className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 flex gap-2 text-[12px] text-danger">
-                      <AlertTriangle size={15} className="shrink-0 mt-0.5" /> {error}
-                    </div>
-                  )}
-                  {result && (
-                    <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 flex flex-col gap-1">
-                      <div className="flex items-center gap-2 text-emerald-800 font-bold text-[12px]"><CheckCircle2 size={15} /> Importación completada</div>
-                      <p className="text-[11px] text-emerald-900">Fórmulas: {result.formulas.applied} asignadas · {result.formulas.created} nuevas · Tablas: {result.auxTables.upserted}</p>
-                      {result.warnings.map((w, i) => <p key={i} className="text-[11px] text-amber-700">⚠ {w}</p>)}
-                    </div>
-                  )}
-                  {/* Tablas auxiliares cargadas */}
-                  <div className="flex flex-col gap-1.5 mt-1">
-                    <div className="flex items-center gap-2 text-[12px] font-bold text-muted"><Table2 size={14} /> Tablas auxiliares</div>
-                    {auxTables.length === 0 ? (
-                      <p className="text-[11px] text-muted">Ninguna cargada.</p>
-                    ) : auxTables.map((t) => {
-                      const colsArr = Array.isArray(t.columns_json) ? (t.columns_json as string[]) : [];
-                      const rowsArr = Array.isArray(t.rows_json) ? (t.rows_json as string[][]) : [];
-                      return (
-                        <div key={t.id} className="border border-border rounded-md px-2.5 py-1.5">
-                          <p className="text-[12px] text-navy font-bold">{t.name ?? t.group_key}</p>
-                          <p className="text-[10px] text-muted">{colsArr.join(' · ')} — {rowsArr.length} fila{rowsArr.length !== 1 ? 's' : ''}</p>
-                        </div>
-                      );
-                    })}
+              <h2 className="text-navy font-bold text-[15px]">Fórmulas y tablas auxiliares</h2>
+              <div className="flex flex-col gap-3 pl-1">
+                <p className="text-[12px] text-muted leading-snug">
+                  Sube un <b>.xlsx</b> con dos hojas (un .csv solo tiene una). <b>Hoja 1 «Fórmulas»</b>: filas
+                  {' '}<code>Columna | Fórmula</code> (se asigna a la columna por nombre). <b>Hoja 2 «Tablas Auxiliares»</b>:
+                  {' '}<code>tabla-&lt;nombre&gt; | columna | valor1 | valor2 …</code> (para <code>BUSCAR</code>).
+                </p>
+                <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
+                <button onClick={onPick} disabled={!canEdit || busy}
+                  className="self-start flex items-center gap-2 bg-primary text-white rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50 hover:bg-primary/90 transition">
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
+                  {busy ? 'Procesando…' : 'Subir Excel (Fórmulas + Tablas)'}
+                </button>
+                {error && (
+                  <div className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 flex gap-2 text-[12px] text-danger">
+                    <AlertTriangle size={15} className="shrink-0 mt-0.5" /> {error}
                   </div>
+                )}
+                {result && (
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 flex flex-col gap-1">
+                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-[12px]"><CheckCircle2 size={15} /> Importación completada</div>
+                    <p className="text-[11px] text-emerald-900">Fórmulas: {result.formulas.applied} asignadas · {result.formulas.created} nuevas · Tablas: {result.auxTables.upserted}</p>
+                    {result.warnings.map((w, i) => <p key={i} className="text-[11px] text-amber-700">⚠ {w}</p>)}
+                  </div>
+                )}
+                {/* Tablas auxiliares cargadas */}
+                <div className="flex flex-col gap-1.5 mt-1">
+                  <div className="flex items-center gap-2 text-[12px] font-bold text-muted"><Table2 size={14} /> Tablas auxiliares</div>
+                  {auxTables.length === 0 ? (
+                    <p className="text-[11px] text-muted">Ninguna cargada.</p>
+                  ) : auxTables.map((t) => {
+                    const colsArr = Array.isArray(t.columns_json) ? (t.columns_json as string[]) : [];
+                    const rowsArr = Array.isArray(t.rows_json) ? (t.rows_json as string[][]) : [];
+                    return (
+                      <div key={t.id} className="border border-border rounded-md px-2.5 py-1.5">
+                        <p className="text-[12px] text-navy font-bold">{t.name ?? t.group_key}</p>
+                        <p className="text-[10px] text-muted">{colsArr.join(' · ')} — {rowsArr.length} fila{rowsArr.length !== 1 ? 's' : ''}</p>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
             </div>
           </>
         )}
