@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, ActivityIndicator, Modal, TextInput, ScrollView,
+  Alert, ActivityIndicator, Modal, TextInput, ScrollView, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -52,6 +53,7 @@ async function edgeFnError(error: unknown, fallback: string): Promise<string> {
 
 export default function UserManagementScreen({ navigation }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const { isOnline } = useNetwork();
   const { jumpToStep } = useTour();
@@ -181,6 +183,16 @@ export default function UserManagementScreen({ navigation }: Props) {
     return () => sub.unsubscribe();
   }, []);
   useEffect(() => { loadAccess(); }, [loadAccess]);
+
+  // #7B — Pull-to-refresh: baja usuarios de la nube (refreshUsersFromCloud crea/actualiza
+  // local → el observe refresca la lista) + recarga los accesos por proyecto.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await refreshUsersFromCloud(); await loadAccess(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [refreshUsersFromCloud, loadAccess]);
 
   const handleImport = async () => {
     if (!isOnline) { Alert.alert(t('usersMgmt.alert.offlineTitle'), t('usersMgmt.alert.offlineImport')); return; }
@@ -362,7 +374,9 @@ export default function UserManagementScreen({ navigation }: Props) {
       <FlatList
         data={users}
         keyExtractor={(u) => u.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         ListEmptyComponent={<Text style={styles.empty}>{t('usersMgmt.empty')}</Text>}
         renderItem={({ item, index }) => {
           const roleInfo = ROLE_LABELS[item.role] ?? { label: item.role, color: '#666' };
