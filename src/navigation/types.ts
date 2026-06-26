@@ -12,6 +12,8 @@ export type RootStackParamList = {
   /** v43 — Ensayos por MUESTRA física: lista de muestras y detalle. */
   Samples: { projectId: string; projectName: string };
   SampleDetail: { projectId: string; projectName: string; sampleId: string };
+  /** v44 — Carga de datos topográficos: lista de cargas por fecha. */
+  TopoCargas: { projectId: string; projectName: string };
   /** v43 — Papelera de Reciclaje: ensayos eliminados (solo lectura). */
   RecycleBin: { projectId: string; projectName: string };
   ProtocolList: { projectId: string; projectName: string };

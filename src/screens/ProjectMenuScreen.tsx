@@ -159,6 +159,16 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
       onPress: () => navigation.navigate('PlansManagement', { projectId, projectName, mode: 'measure' }),
       flagKey: 'module_plans',
     },
+    // v44 — Carga de datos topográficos (solo Jefe/Creador, gateado por module_topo).
+    ...(canUploadFiles ? [{
+      key: 'topo-cargas',
+      title: 'Carga topográfica',
+      subtitle: 'Coordenadas topográficas en masa (manual o CSV) por código',
+      icon: 'triangle-outline',
+      tone: Colors.primary,
+      onPress: () => navigation.navigate('TopoCargas', { projectId, projectName }),
+      flagKey: 'module_topo',
+    } as MenuOption] : []),
     ...(canUploadFiles ? [{
       key: 'file-upload',
       title: t('projectMenu.fileUploadTitle'),
