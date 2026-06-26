@@ -7,23 +7,20 @@
 
 ---
 
-## 1. (IMPORTANTE) Re-crear los 4 usuarios: Angel, Pablo, Pedro, Ruben
+## 1. Usuarios: tabla en blanco (HECHO) → crear los reales cuando quieras
 
-**Por qué:** con el login nuevo por **email**, esos 4 usuarios *todavía no tienen cuenta*
-(antes entraban por nombre+clave en texto plano, que ya no existe). Hasta que los re-crees,
-**no pueden entrar**. Además `user_project_access` está vacía → aunque entren, no verán
-ningún proyecto hasta que les des acceso.
+**Estado:** se borraron los 4 usuarios de prueba (Angel, Pablo, Pedro, Ruben). Quedó **solo
+tu cuenta** (Joseph, a20193477@pucp.edu.pe, CREATOR). Empezamos de cero.
 
-**Cómo (desde el celular, app móvil, logueado como vos = CREATOR):**
-1. Menú lateral → **Gestión de usuarios**.
+**Cómo agregar usuarios reales (cuando los necesites), desde el celular logueado como vos = CREATOR:**
+1. Menú lateral (☰) → **Gestión de usuarios**.
 2. Botón **“Añadir usuario”**.
-3. Por cada uno completá: **Email real**, **Nombre**, **Apellido**, **Rol**
-   (Pablo=SUPERVISOR, Pedro=RESIDENT, Ruben=SUPERVISOR, Angel=CREATOR si querés otro admin),
-   una **contraseña temporal** (mín. 6 caracteres) y **tildá los proyectos** a los que tendrán acceso.
-4. Guardá. Pasales la clave temporal; ellos la cambian en *Cambiar contraseña*.
+3. Completá: **Email real**, **Nombre**, **Apellido**, **Rol** (RESIDENT / SUPERVISOR / OPERATOR),
+   una **contraseña temporal** (mín. 6 caracteres) y **tildá los proyectos** a los que tendrá acceso.
+4. Guardá. Pasale la clave temporal; la cambia en *Cambiar contraseña*.
 
-> También se puede desde la **web** (`/app/users`) si te resulta más cómodo escribir.
-> Si una alta falla, ahora te muestra el **motivo real** (p.ej. “email already registered”).
+> También desde la **web** (`/app/users`). Si una alta falla, ahora muestra el **motivo real**
+> (p.ej. “email already registered”).
 
 ---
 

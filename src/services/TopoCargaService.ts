@@ -11,13 +11,15 @@
  * `computeTopoPayload` más adelante sin cambiar la firma.
  */
 import { Q } from '@nozbe/watermelondb';
-import { database, topoCargasCollection, protocolsCollection, projectsCollection, projectSectorsCollection } from '@db/index';
+import { database, topoCargasCollection, protocolsCollection, projectsCollection, projectSectorsCollection, labAuxTablesCollection } from '@db/index';
 import { enqueue } from './SyncQueueService';
 import { supabase } from '@config/supabase';
 import { bindCargaToProtocols, normalizeCode, type TopoRow } from '@utils/topoBinding';
 import { buildTopoCargaCode, topoSeqGroupKey, nextTopoSeqLocal, cargaDateKey } from '@utils/topoCargaCode';
-import { parseFeatureFlagsJson, topoColumns } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, topoColumns, type TopoColumn } from '@utils/featureFlags';
 import { topoCoordsToLatLng, utmFrameFromSectors, findSectorByPointWithTolerance, type LatLng } from '@utils/CoordinateSystem';
+import { computeTopoFormulaValues } from '@utils/topoFormula';
+import type { AuxTables } from '@utils/formulaEval';
 
 function toNum(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -49,6 +51,22 @@ function computeTopoPayload(row: TopoRow): Record<string, unknown> {
     topoCoordElevation: toNum(row.cota),
     topoValuesJson: custom,
   };
+}
+
+/** Mezcla los valores manuales (custom) con las columnas 'formula' calculadas
+ *  (BUSCAR sobre tablas auxiliares) → JSON `{colId: valor}` para topo_values_json,
+ *  o null si no hay nada. Las fórmulas pisan a un manual del mismo id. */
+function mergeTopoValues(row: TopoRow, columns: TopoColumn[], auxTables: AuxTables): string | null {
+  const manual: Record<string, number | string | null> = { ...(row.custom ?? {}) };
+  const customNum: Record<string, number | null> = {};
+  for (const [k, v] of Object.entries(manual)) customNum[k] = toNum(v);
+  const formula = computeTopoFormulaValues(
+    columns,
+    { coord1: toNum(row.c1), coord2: toNum(row.c2), cota: toNum(row.cota), custom: customNum },
+    auxTables,
+  );
+  const merged: Record<string, number | string | null> = { ...manual, ...formula };
+  return Object.keys(merged).length > 0 ? JSON.stringify(merged) : null;
 }
 
 /** Limpia (null) las columnas topo_* de los protocolos cuyo dueño es `cargaId`.
@@ -83,20 +101,28 @@ interface ProcessingCtx {
   frame: { zone: number; hemisphere: 'N' | 'S' } | null;
   sectorEnabled: boolean;
   sectorTolerance: number;
+  columns: TopoColumn[];
+  auxTables: AuxTables;
 }
 
 /** Contexto del motor: flags (coord_system + procesamiento) + sectores del proyecto +
- *  zona UTM derivada, para calcular el sector con tolerancia. */
+ *  zona UTM derivada + columnas config + tablas auxiliares (para fórmulas/BUSCAR). */
 async function loadProcessingCtx(projectId: string): Promise<ProcessingCtx> {
   const proj = await projectsCollection.find(projectId).catch(() => null);
   const flags = parseFeatureFlagsJson((proj as any)?.featureFlags);
+  const cols = topoColumns(flags);
   if (!flags.topo_processing_enabled) {
-    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0 };
+    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0, columns: cols, auxTables: {} };
   }
   const secRecs = await projectSectorsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]);
   const sectors = (secRecs as any[]).map((s) => ({ id: s.id, name: s.name, points: s.points ?? null }));
-  const cols = topoColumns(flags);
   const sectorCol = cols.find((c) => c.builtin === 'sector' && c.enabled);
+  // Tablas auxiliares del proyecto (para BUSCAR en las fórmulas).
+  const auxRecs = await labAuxTablesCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]);
+  const auxTables: AuxTables = {};
+  for (const t of auxRecs as any[]) {
+    try { auxTables[t.groupKey] = { columns: JSON.parse(t.columnsJson || '[]'), rows: JSON.parse(t.rowsJson || '[]') }; } catch { /* tabla corrupta */ }
+  }
   return {
     processing: true,
     coordSystem: flags.coordinate_system,
@@ -104,6 +130,8 @@ async function loadProcessingCtx(projectId: string): Promise<ProcessingCtx> {
     frame: utmFrameFromSectors(sectors),
     sectorEnabled: !!sectorCol,
     sectorTolerance: sectorCol?.tolerance_m ?? 0,
+    columns: cols,
+    auxTables,
   };
 }
 
@@ -132,6 +160,7 @@ export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedI
       const payload = computeTopoPayload(b.row);
       // Motor: lat/lng + sector (polígono con tolerancia) cuando el procesamiento está ON.
       let lat: number | null = null, lng: number | null = null, sectorId: string | null = null;
+      let valuesJson = payload.topoValuesJson as string | null;
       if (ctx.processing) {
         const e = payload.topoCoordEast as number | null, nrt = payload.topoCoordNorth as number | null;
         if (e != null && nrt != null) {
@@ -144,13 +173,15 @@ export async function applyCargaToProtocols(cargaId: string): Promise<{ touchedI
             }
           }
         }
+        // Columnas 'formula' (BUSCAR sobre tablas auxiliares) → se mezclan con las manuales.
+        valuesJson = mergeTopoValues(b.row, ctx.columns, ctx.auxTables);
       }
       await p.update((rec: any) => {
         rec.topoSourceCargaId = cargaId;
         rec.topoCoordEast = payload.topoCoordEast;
         rec.topoCoordNorth = payload.topoCoordNorth;
         rec.topoCoordElevation = payload.topoCoordElevation;
-        rec.topoValuesJson = payload.topoValuesJson;
+        rec.topoValuesJson = valuesJson;
         rec.topoLatitude = lat;
         rec.topoLongitude = lng;
         rec.topoSectorId = sectorId;

@@ -9,11 +9,13 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bindCargaToProtocols, normalizeCode, type TopoRow } from '@lib/topoBinding';
-import { mergeFeatureFlags, topoColumns } from '@/types';
+import { mergeFeatureFlags, topoColumns, type TopoColumn } from '@/types';
 import {
   topoCoordsToLatLng, utmFrameFromSectors, findSectorByPointWithTolerance,
   type LatLng, type CoordinateSystem,
 } from '@lib/coordinateTopo';
+import { computeTopoFormulaValues } from '@lib/topoFormula';
+import type { AuxTables } from '@lib/formulaEval';
 
 /** Valida y parsea points_json (jsonb) → LatLng[] | null. Espejo del getter
  *  ProjectSector.points del móvil: descarta polígonos con vértices NaN/malformados
@@ -33,20 +35,35 @@ interface ProcessingCtxWeb {
   frame: { zone: number; hemisphere: 'N' | 'S' } | null;
   sectorEnabled: boolean;
   sectorTolerance: number;
+  columns: TopoColumn[];
+  auxTables: AuxTables;
 }
 
-/** Contexto del motor web: flags (coord_system + procesamiento) + sectores + zona UTM. */
+/** Contexto del motor web: flags (coord_system + procesamiento) + sectores + zona UTM
+ *  + columnas config + tablas auxiliares (para fórmulas/BUSCAR). */
 async function loadProcessingCtxWeb(supabase: SupabaseClient, projectId: string): Promise<ProcessingCtxWeb> {
   const { data: proj } = await supabase.from('projects').select('feature_flags').eq('id', projectId).single();
   const flags = mergeFeatureFlags(((proj as { feature_flags?: unknown } | null)?.feature_flags ?? null) as any);
+  const cols = topoColumns(flags);
   if (!flags.topo_processing_enabled) {
-    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0 };
+    return { processing: false, coordSystem: flags.coordinate_system, sectors: [], frame: null, sectorEnabled: false, sectorTolerance: 0, columns: cols, auxTables: {} };
   }
   const { data: secs } = await supabase.from('project_sectors').select('id, name, points_json').eq('project_id', projectId);
   const sectors = ((secs ?? []) as { id: string; name: string; points_json: unknown }[]).map((s) => ({
     id: s.id, name: s.name, points: parseSectorPoints(s.points_json),
   }));
-  const sectorCol = topoColumns(flags).find((c) => c.builtin === 'sector' && c.enabled);
+  const sectorCol = cols.find((c) => c.builtin === 'sector' && c.enabled);
+  // Tablas auxiliares del proyecto (para BUSCAR en las fórmulas).
+  const { data: auxRows } = await supabase
+    .from('lab_aux_tables').select('group_key, columns_json, rows_json').eq('project_id', projectId);
+  const auxTables: AuxTables = {};
+  for (const t of ((auxRows ?? []) as { group_key: string; columns_json: unknown; rows_json: unknown }[])) {
+    const columns = Array.isArray(t.columns_json) ? (t.columns_json as string[])
+      : (() => { try { return JSON.parse(String(t.columns_json || '[]')); } catch { return []; } })();
+    const rows = Array.isArray(t.rows_json) ? (t.rows_json as string[][])
+      : (() => { try { return JSON.parse(String(t.rows_json || '[]')); } catch { return []; } })();
+    auxTables[t.group_key] = { columns, rows };
+  }
   return {
     processing: true,
     coordSystem: flags.coordinate_system,
@@ -54,7 +71,24 @@ async function loadProcessingCtxWeb(supabase: SupabaseClient, projectId: string)
     frame: utmFrameFromSectors(sectors),
     sectorEnabled: !!sectorCol,
     sectorTolerance: sectorCol?.tolerance_m ?? 0,
+    columns: cols,
+    auxTables,
   };
+}
+
+/** Mezcla los valores manuales (custom) con las columnas 'formula' calculadas
+ *  (BUSCAR sobre tablas auxiliares). Devuelve el objeto `{colId: valor}` o null. */
+function mergeTopoValuesWeb(row: TopoRow, columns: TopoColumn[], auxTables: AuxTables): Record<string, unknown> | null {
+  const manual: Record<string, number | string | null> = { ...(row.custom ?? {}) };
+  const customNum: Record<string, number | null> = {};
+  for (const [k, v] of Object.entries(manual)) customNum[k] = toNum(v);
+  const formula = computeTopoFormulaValues(
+    columns,
+    { coord1: toNum(row.c1), coord2: toNum(row.c2), cota: toNum(row.cota), custom: customNum },
+    auxTables,
+  );
+  const merged: Record<string, number | string | null> = { ...manual, ...formula };
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 function toNum(v: unknown): number | null {
@@ -95,25 +129,30 @@ export async function applyCargaWeb(
   const now = Date.now();
   const touchedIds: string[] = [];
   for (const b of applied) {
-    const custom = b.row.custom && Object.keys(b.row.custom).length > 0 ? b.row.custom : null;
+    let values: Record<string, unknown> | null =
+      b.row.custom && Object.keys(b.row.custom).length > 0 ? b.row.custom : null;
     const east = toNum(b.row.c1), north = toNum(b.row.c2);
     // Motor: lat/lng + sector (polígono con tolerancia) cuando el procesamiento está ON.
     let lat: number | null = null, lng: number | null = null, sectorId: string | null = null;
-    if (ctx.processing && east != null && north != null) {
-      const ll = topoCoordsToLatLng(east, north, ctx.coordSystem, ctx.frame);
-      if (ll) {
-        lat = ll.lat; lng = ll.lng;
-        if (ctx.sectorEnabled && ctx.sectors.length > 0) {
-          sectorId = findSectorByPointWithTolerance(ll, ctx.sectors, ctx.sectorTolerance)?.id ?? null;
+    if (ctx.processing) {
+      if (east != null && north != null) {
+        const ll = topoCoordsToLatLng(east, north, ctx.coordSystem, ctx.frame);
+        if (ll) {
+          lat = ll.lat; lng = ll.lng;
+          if (ctx.sectorEnabled && ctx.sectors.length > 0) {
+            sectorId = findSectorByPointWithTolerance(ll, ctx.sectors, ctx.sectorTolerance)?.id ?? null;
+          }
         }
       }
+      // Columnas 'formula' (BUSCAR sobre tablas auxiliares) → se mezclan con las manuales.
+      values = mergeTopoValuesWeb(b.row, ctx.columns, ctx.auxTables);
     }
     const { error } = await supabase.from('protocols').update({
       topo_source_carga_id: cargaId,
       topo_coord_east: east,
       topo_coord_north: north,
       topo_coord_elevation: toNum(b.row.cota),
-      topo_values_json: custom,
+      topo_values_json: values,
       topo_latitude: lat,
       topo_longitude: lng,
       topo_sector_id: sectorId,
