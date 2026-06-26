@@ -65,6 +65,19 @@ export default class Protocol extends Model {
   /** v42 — Snapshot JSON de los llamados entre ensayos (@código.celda) congelado
    *  al ENVIAR: {"código.celda":{sourceId,sourceUpdatedAt,value,status}}. */
   @field('xref_snapshot_json') xrefSnapshotJson!: string | null;
+  // v44 — Capa de Coordenadas Topográficas (módulo "Carga de datos topográficos").
+  // SIEMPRE actualizable (no entra al snapshot congelado del llenado). `topoSourceCargaId`
+  // es la carga que escribió estos valores (ancla para revertir al borrar la carga).
+  @field('topo_source_carga_id') topoSourceCargaId!: string | null;
+  @field('topo_coord_system') topoCoordSystem!: string | null;
+  @field('topo_coord_east') topoCoordEast!: number | null;
+  @field('topo_coord_north') topoCoordNorth!: number | null;
+  @field('topo_coord_elevation') topoCoordElevation!: number | null;
+  @field('topo_latitude') topoLatitude!: number | null;
+  @field('topo_longitude') topoLongitude!: number | null;
+  @field('topo_sector_id') topoSectorId!: string | null;
+  @field('topo_values_json') topoValuesJson!: string | null;
+  @field('topo_updated_at') topoUpdatedAt!: number | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

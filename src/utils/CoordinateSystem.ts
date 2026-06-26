@@ -159,3 +159,56 @@ export function findSectorByPoint(
   }
   return null;
 }
+
+// ─── v44 — Asignación de sector con TOLERANCIA (módulo topográfico) ──────────
+// Proyección equirectangular local a metros: exacta para distancias chicas (el
+// "radio de gracia" en metros), idéntica en móvil y web, sin depender de proj4.
+const M_PER_DEG_LAT = 111_320;
+
+function llToLocalMeters(p: LatLng, origin: LatLng): { x: number; y: number } {
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((origin.lat * Math.PI) / 180);
+  return { x: (p.lng - origin.lng) * mPerDegLng, y: (p.lat - origin.lat) * M_PER_DEG_LAT };
+}
+
+/** Distancia (m) de un punto a un SEGMENTO en el plano local (todo en metros). */
+function pointSegDistanceM(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+
+/**
+ * Asigna un sector a un punto con tolerancia (decisión del usuario):
+ *  Paso 1 — point-in-polygon: si cae DENTRO de algún sector, ese gana (distancia 0).
+ *  Paso 2 — si está fuera de todos, distancia mínima al BORDE (segmentos) de cada sector.
+ *  Paso 3 — el más cercano se asigna SOLO si `distMin ≤ toleranceM`; si no, null ("No encontrado").
+ * `toleranceM` en metros (0 = estricto: solo dentro).
+ */
+export function findSectorByPointWithTolerance(
+  point: LatLng,
+  sectors: { id: string; name: string; points: LatLng[] | null }[],
+  toleranceM: number,
+): { id: string; name: string; distanceM: number } | null {
+  // Paso 1 — dentro gana siempre.
+  for (const s of sectors) {
+    if (!s.points || s.points.length < 3) continue;
+    if (pointInPolygon(point, s.points)) return { id: s.id, name: s.name, distanceM: 0 };
+  }
+  // Paso 2+3 — más cercano por distancia al borde, en metros locales (origen = punto).
+  let best: { id: string; name: string; distanceM: number } | null = null;
+  for (const s of sectors) {
+    if (!s.points || s.points.length < 3) continue;
+    const verts = s.points.map((v) => llToLocalMeters(v, point)); // el punto queda en (0,0)
+    let dmin = Infinity;
+    for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+      const d = pointSegDistanceM(0, 0, verts[j].x, verts[j].y, verts[i].x, verts[i].y);
+      if (d < dmin) dmin = d;
+    }
+    if (!best || dmin < best.distanceM) best = { id: s.id, name: s.name, distanceM: dmin };
+  }
+  if (best && Number.isFinite(toleranceM) && best.distanceM <= toleranceM) return best;
+  return null;
+}

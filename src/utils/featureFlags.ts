@@ -173,6 +173,25 @@ export interface GroupingPreset {
   include_ids?: string[];
 }
 
+/** v44 — Una columna del módulo "Carga de datos topográficos". Define cómo se
+ *  obtiene el dato y si se muestra en la ficha. `source`:
+ *   - 'manual': se digita/sube directo.
+ *   - 'formula': se calcula con el motor (BUSCAR + celdas) — `formula` es la expresión.
+ *   - 'area': "Evaluar dentro del área" — asigna sector por polígono con `tolerance_m` (m).
+ *  `builtin` marca las columnas base (coord1/coord2/cota/sector); las custom no lo llevan. */
+export interface TopoColumn {
+  id: string;
+  name: string;
+  builtin?: 'coord1' | 'coord2' | 'cota' | 'sector';
+  source: 'manual' | 'formula' | 'area';
+  formula?: string;
+  /** Fuente de áreas para 'area' (interino: id de un set de polígonos; def project_sectors). */
+  area_table?: string;
+  tolerance_m?: number;
+  enabled: boolean;
+  show_in_ficha: boolean;
+}
+
 export interface ProjectFeatureFlags {
   // ── Configuración de Protocolos ────────────────────────────────────────
   classic_protocols: boolean;
@@ -216,6 +235,17 @@ export interface ProjectFeatureFlags {
   module_summary_tables: boolean;
   /** v67 — Módulo de Reportes por Correo (panel web). Default OFF. */
   module_email_reports?: boolean;
+  /** v44 — Módulo "Carga de datos topográficos" (web + móvil). Default OFF. */
+  module_topo?: boolean;
+  /** v44 — Reemplazar coordenadas GPS: en las fichas se oculta la tarjeta GPS y se
+   *  fuerza solo topográficas. Default OFF. */
+  topo_replace_gps?: boolean;
+  /** v44 — Con `topo_replace_gps` ON: para ensayos SIN topo, permitir usar la tarjeta GPS. */
+  topo_keep_gps_fallback?: boolean;
+  /** v44 — Enciende el motor de cálculo (fórmulas + áreas) sobre los datos topográficos. */
+  topo_processing_enabled?: boolean;
+  /** v44 — Columnas configuradas del módulo topográfico. */
+  topo_columns?: TopoColumn[];
   /** v43.1 — Filas activas del formulario de muestra (config por proyecto, edita
    *  creador/jefe). Se guarda en feature_flags para propagarse sin migración. */
   sample_form_rows?: { material?: boolean; condition?: boolean; depth?: boolean; coords?: boolean; layers?: boolean };
@@ -281,6 +311,10 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_contacts: false,
   module_summary_tables: false,
   module_email_reports: false,
+  module_topo: false,
+  topo_replace_gps: false,
+  topo_keep_gps_fallback: false,
+  topo_processing_enabled: false,
   // v43.1 — Formulario de muestra: filas activas por defecto + catálogo de materiales.
   sample_form_rows: { material: true, condition: true, depth: false, coords: true, layers: false },
   sample_materials: [],
@@ -356,4 +390,25 @@ export function isGpsCaptureSubjectiveEnabled(flags: ProjectFeatureFlags): boole
 
 export function isGpsCaptureNumericEnabled(flags: ProjectFeatureFlags): boolean {
   return !!flags.map_enabled && !!flags.gps_capture_numeric;
+}
+
+// ── v44 — Módulo "Carga de datos topográficos" ────────────────────────────
+export function isTopoEnabled(flags: ProjectFeatureFlags): boolean {
+  return !!flags.module_topo;
+}
+
+/** Columnas por defecto al prender el módulo: las 2 coordenadas (habilitadas y
+ *  visibles en ficha), la Cota deshabilitada por defecto, y el Sector habilitado. */
+export function defaultTopoColumns(): TopoColumn[] {
+  return [
+    { id: 'coord1', name: 'Coordenada 1 (Este)',  builtin: 'coord1', source: 'manual', enabled: true,  show_in_ficha: true },
+    { id: 'coord2', name: 'Coordenada 2 (Norte)', builtin: 'coord2', source: 'manual', enabled: true,  show_in_ficha: true },
+    { id: 'cota',   name: 'Cota',                  builtin: 'cota',   source: 'manual', enabled: false, show_in_ficha: false },
+    { id: 'sector', name: 'Sector',                builtin: 'sector', source: 'area',   enabled: true,  show_in_ficha: true, tolerance_m: 0 },
+  ];
+}
+
+/** Devuelve las columnas configuradas; si no hay ninguna, los defaults. */
+export function topoColumns(flags: ProjectFeatureFlags): TopoColumn[] {
+  return (flags.topo_columns && flags.topo_columns.length > 0) ? flags.topo_columns : defaultTopoColumns();
 }

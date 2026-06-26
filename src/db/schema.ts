@@ -25,7 +25,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  *      sin abusar de protocol_item_id.
  */
 export const schema = appSchema({
-  version: 43,
+  version: 44,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -175,6 +175,19 @@ export const schema = appSchema({
         // ENVIAR. Habilita doble check (código→id) e indicador de "desactualizado".
         // TEXT local (JSONB en Supabase — parsear antes del push).
         { name: 'xref_snapshot_json', type: 'string', isOptional: true },
+        // v44 — Capa de Coordenadas Topográficas (módulo "Carga de datos topográficos").
+        // SIEMPRE actualizable (no entra al snapshot congelado del llenado). `topo_source_carga_id`
+        // es la carga que escribió estos valores (ancla para revertir al borrar la carga).
+        { name: 'topo_source_carga_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'topo_coord_system', type: 'string', isOptional: true },     // datum
+        { name: 'topo_coord_east', type: 'number', isOptional: true },        // coordenada 1 (Este/X)
+        { name: 'topo_coord_north', type: 'number', isOptional: true },       // coordenada 2 (Norte/Y)
+        { name: 'topo_coord_elevation', type: 'number', isOptional: true },   // Cota/Z
+        { name: 'topo_latitude', type: 'number', isOptional: true },          // WGS84 derivado (sector/PDF/mapa)
+        { name: 'topo_longitude', type: 'number', isOptional: true },
+        { name: 'topo_sector_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'topo_values_json', type: 'string', isOptional: true },       // columnas custom/computadas {colId:value}
+        { name: 'topo_updated_at', type: 'number', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -645,6 +658,28 @@ export const schema = appSchema({
         { name: 'notes', type: 'string', isOptional: true },
         { name: 'created_by_id', type: 'string', isOptional: true },
         { name: 'upload_status', type: 'string', isOptional: true },
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+      ],
+    }),
+
+    // ── topo_cargas (v44) — Módulo "Carga de datos topográficos". Una fila por
+    // CARGA (tarjeta). `rows_json` = snapshot de filas por CÓDIGO de ensayo (fuente
+    // de verdad; se conservan aunque el ensayo aún no exista → binding diferido).
+    // `columns_json` = layout de columnas activo al subir. Código T<ddmmaa>-<seq>.
+    tableSchema({
+      name: 'topo_cargas',
+      columns: [
+        { name: 'project_id', type: 'string', isIndexed: true },
+        { name: 'carga_code', type: 'string', isIndexed: true },
+        { name: 'seq', type: 'number', isOptional: true },
+        { name: 'carga_date', type: 'string', isOptional: true },     // YYYY-MM-DD
+        { name: 'input_method', type: 'string', isOptional: true },   // 'manual' | 'csv'
+        { name: 'created_by_id', type: 'string', isOptional: true },
+        { name: 'upload_status', type: 'string', isOptional: true },
+        { name: 'applied_at', type: 'number', isOptional: true },
+        { name: 'rows_json', type: 'string' },                        // [{code,c1,c2,cota,custom:{}}]
+        { name: 'columns_json', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

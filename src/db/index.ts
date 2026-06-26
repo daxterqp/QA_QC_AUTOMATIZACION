@@ -38,6 +38,7 @@ import SummaryRow from './models/SummaryRow';
 import LabAuxTable from './models/LabAuxTable';
 import RecycleBinEntry from './models/RecycleBinEntry';
 import Sample from './models/Sample';
+import TopoCarga from './models/TopoCarga';
 
 const adapter = new SQLiteAdapter({
   schema,
@@ -62,7 +63,7 @@ export const database = new Database({
     Activity, EquipmentActivity, WorkShift,
     SessionFormTemplate, SessionFormTemplateItem,
     WorkSession, WorkSessionInterval, WorkSessionFormItem, WorkSessionGpsPoint,
-    SummaryRow, LabAuxTable, RecycleBinEntry, Sample,
+    SummaryRow, LabAuxTable, RecycleBinEntry, Sample, TopoCarga,
   ],
 });
 
@@ -103,3 +104,4 @@ export const summaryRowsCollection               = database.get<SummaryRow>('sum
 export const labAuxTablesCollection              = database.get<LabAuxTable>('lab_aux_tables');
 export const recycleBinCollection                = database.get<RecycleBinEntry>('recycle_bin');
 export const samplesCollection                   = database.get<Sample>('samples');
+export const topoCargasCollection                = database.get<TopoCarga>('topo_cargas');

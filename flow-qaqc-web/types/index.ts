@@ -39,6 +39,19 @@ export interface GroupingPreset {
   include_ids?: string[];
 }
 
+/** v44 — Columna del módulo "Carga de datos topográficos" (espejo de móvil). */
+export interface TopoColumn {
+  id: string;
+  name: string;
+  builtin?: 'coord1' | 'coord2' | 'cota' | 'sector';
+  source: 'manual' | 'formula' | 'area';
+  formula?: string;
+  area_table?: string;
+  tolerance_m?: number;
+  enabled: boolean;
+  show_in_ficha: boolean;
+}
+
 export interface ProjectFeatureFlags {
   // ── Configuración de Protocolos ─────────────────────────────────────
   classic_protocols: boolean;
@@ -82,6 +95,16 @@ export interface ProjectFeatureFlags {
   module_summary_tables: boolean;
   /** v67 — Módulo de Reportes por Correo (panel web de plantillas de reporte programado). Default OFF. */
   module_email_reports?: boolean;
+  /** v44 — Módulo "Carga de datos topográficos" (web + móvil). Default OFF. */
+  module_topo?: boolean;
+  /** v44 — Reemplazar coords GPS en fichas (solo topográficas). */
+  topo_replace_gps?: boolean;
+  /** v44 — Con replace ON: usar GPS para ensayos sin topo. */
+  topo_keep_gps_fallback?: boolean;
+  /** v44 — Motor de cálculo (fórmulas + áreas) de datos topográficos. */
+  topo_processing_enabled?: boolean;
+  /** v44 — Columnas configuradas del módulo topográfico. */
+  topo_columns?: TopoColumn[];
 
   /** v45.3 — Agrupamientos del selector de llamadas entre fichas, por tipo de ficha. */
   grouping_presets?: Record<string, GroupingPreset[]>;
@@ -132,6 +155,10 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_contacts: false,
   module_summary_tables: false,
   module_email_reports: false,
+  module_topo: false,
+  topo_replace_gps: false,
+  topo_keep_gps_fallback: false,
+  topo_processing_enabled: false,
 
   traceability_module: false,
   equipment_catalog: false,
@@ -166,6 +193,25 @@ export function mergeFeatureFlags(partial: Partial<ProjectFeatureFlags> | null |
     qr_codes: true,
     protocol_linking: true,
   };
+}
+
+// ── v44 — Módulo "Carga de datos topográficos" (espejo de src/utils/featureFlags.ts) ──
+export function isTopoEnabled(flags: ProjectFeatureFlags): boolean {
+  return !!flags.module_topo;
+}
+
+/** Columnas por defecto al prender el módulo: 2 coordenadas (en ficha), Cota off, Sector on. */
+export function defaultTopoColumns(): TopoColumn[] {
+  return [
+    { id: 'coord1', name: 'Coordenada 1 (Este)',  builtin: 'coord1', source: 'manual', enabled: true,  show_in_ficha: true },
+    { id: 'coord2', name: 'Coordenada 2 (Norte)', builtin: 'coord2', source: 'manual', enabled: true,  show_in_ficha: true },
+    { id: 'cota',   name: 'Cota',                  builtin: 'cota',   source: 'manual', enabled: false, show_in_ficha: false },
+    { id: 'sector', name: 'Sector',                builtin: 'sector', source: 'area',   enabled: true,  show_in_ficha: true, tolerance_m: 0 },
+  ];
+}
+
+export function topoColumns(flags: ProjectFeatureFlags): TopoColumn[] {
+  return (flags.topo_columns && flags.topo_columns.length > 0) ? flags.topo_columns : defaultTopoColumns();
 }
 
 // ── Helpers padre-hijo ──────────────────────────────────────────────────

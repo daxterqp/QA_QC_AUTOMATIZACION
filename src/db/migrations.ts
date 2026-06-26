@@ -960,5 +960,43 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 44,
+      steps: [
+        // v44 — Módulo "Carga de datos topográficos": capa topo en protocols + tabla topo_cargas.
+        addColumns({
+          table: 'protocols',
+          columns: [
+            { name: 'topo_source_carga_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'topo_coord_system', type: 'string', isOptional: true },
+            { name: 'topo_coord_east', type: 'number', isOptional: true },
+            { name: 'topo_coord_north', type: 'number', isOptional: true },
+            { name: 'topo_coord_elevation', type: 'number', isOptional: true },
+            { name: 'topo_latitude', type: 'number', isOptional: true },
+            { name: 'topo_longitude', type: 'number', isOptional: true },
+            { name: 'topo_sector_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'topo_values_json', type: 'string', isOptional: true },
+            { name: 'topo_updated_at', type: 'number', isOptional: true },
+          ],
+        }),
+        createTable({
+          name: 'topo_cargas',
+          columns: [
+            { name: 'project_id', type: 'string', isIndexed: true },
+            { name: 'carga_code', type: 'string', isIndexed: true },
+            { name: 'seq', type: 'number', isOptional: true },
+            { name: 'carga_date', type: 'string', isOptional: true },
+            { name: 'input_method', type: 'string', isOptional: true },
+            { name: 'created_by_id', type: 'string', isOptional: true },
+            { name: 'upload_status', type: 'string', isOptional: true },
+            { name: 'applied_at', type: 'number', isOptional: true },
+            { name: 'rows_json', type: 'string' },
+            { name: 'columns_json', type: 'string', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+      ],
+    },
   ],
 });
