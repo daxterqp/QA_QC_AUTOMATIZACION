@@ -20,6 +20,7 @@ import CalendarPicker from '@components/CalendarPicker';
 import { Colors, Radius } from '../theme/colors';
 import { summaryRowsCollection, protocolTemplatesCollection, protocolTemplateItemsCollection } from '@db/index';
 import { pullSummaryRows, backfillLocalSummary } from '@services/SummaryRowService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import {
   FIXED_SUMMARY_COLUMNS, dynamicColumnsFromRows, parseSummaryConfig, summaryStatus,
   type SummaryColumn,
@@ -225,6 +226,9 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setRefreshing(true);
     try { await load(); } catch { /* ignore */ } finally { setRefreshing(false); }
   }, [load]);
+
+  // #7C — Tiempo real: ensayos aprobados/cambiados actualizan el resumen solo.
+  useRealtimeProjectPull(projectId, load);
 
   // Tipos de ensayo con datos.
   const templates = useMemo(() => {

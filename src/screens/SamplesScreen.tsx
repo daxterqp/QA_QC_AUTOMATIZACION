@@ -35,6 +35,7 @@ import { deleteSampleToRecycle } from '@services/RecycleRestoreService';
 import { renumberSamples } from '@services/RenumberService';
 import { wgs84ToUtm, wgs84ToPsad56Utm, wgs84ToPsad56LatLng, findSectorByPoint } from '@utils/CoordinateSystem';
 import { pushSample, pullSamples, mergeAndSaveFeatureFlags } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { exportSampleDossierPdf } from '@services/DossierExportService';
 import { buildSampleCroquisSpec } from '@services/CroquisService';
 import { useCroquisCapture } from '@context/CroquisCaptureContext';
@@ -186,6 +187,11 @@ export default function SamplesScreen({ route, navigation }: Props) {
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId, loadData]);
+
+  // #7C — Tiempo real: ensayos creados/aprobados en otros equipos actualizan los
+  // contadores por muestra solos (también re-baja muestras por las dudas).
+  const onRealtime = useCallback(async () => { try { await pullSamples(projectId); } catch { /* ignore */ } loadData(); }, [projectId, loadData]);
+  useRealtimeProjectPull(projectId, onRealtime);
 
   // v64 — Última muestra creada (mayor seq). En modo 'last_only' solo ESTA es borrable.
   const lastSampleId = useMemo(() => {

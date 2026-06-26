@@ -12,6 +12,7 @@ import { Q } from '@nozbe/watermelondb';
 import type Location from '@models/Location';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { useTourStep } from '@hooks/useTourStep';
 import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
@@ -73,6 +74,9 @@ export default function LocationListScreen({ navigation, route }: Props) {
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId]);
+
+  // #7C — Tiempo real: cambios de la nube se bajan solos (el observe refresca la lista).
+  useRealtimeProjectPull(projectId);
 
   useEffect(() => {
     const sub = locationsCollection

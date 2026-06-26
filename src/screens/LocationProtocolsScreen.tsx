@@ -16,6 +16,7 @@ import {
 import { Q } from '@nozbe/watermelondb';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { createInstances } from '@services/ProtocolInstanceService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
@@ -228,6 +229,9 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId, loadData]);
+
+  // #7C — Tiempo real: estados/instancias creadas en otros equipos se reflejan solos.
+  useRealtimeProjectPull(projectId, loadData);
 
   const handleOpenProtocol = async (row: TemplateRow) => {
     let instanceId = row.instance?.id;

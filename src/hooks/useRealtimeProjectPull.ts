@@ -3,6 +3,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@config/supabase';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 
+// Contador de módulo → cada instancia del hook usa un nombre de canal único,
+// así nunca colisionan dos pantallas que monten Realtime a la vez.
+let rtSeq = 0;
+
 /**
  * #7C — Tiempo real móvil (Supabase Realtime), con la app abierta.
  *
@@ -21,6 +25,8 @@ const UNSCOPED = ['plan_annotations', 'annotation_comments'];
 export function useRealtimeProjectPull(projectId: string, onChange?: () => void) {
   const cb = useRef(onChange);
   cb.current = onChange;
+  const idRef = useRef<number>(0);
+  if (idRef.current === 0) idRef.current = ++rtSeq;
 
   useFocusEffect(
     useCallback(() => {
@@ -33,7 +39,7 @@ export function useRealtimeProjectPull(projectId: string, onChange?: () => void)
         }, 500);
       };
 
-      const channel = supabase.channel(`rt-mobile-${projectId}`);
+      const channel = supabase.channel(`rt-mobile-${projectId}-${idRef.current}`);
       for (const table of SCOPED) {
         channel.on(
           'postgres_changes',

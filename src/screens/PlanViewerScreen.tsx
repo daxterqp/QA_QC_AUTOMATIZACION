@@ -9,6 +9,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import Pdf from 'react-native-pdf';
@@ -80,6 +81,10 @@ export default function PlanViewerScreen({ navigation, route }: Props) {
   const [specialty, setSpecialty] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<PlanAnnotation[]>([]);
   const [pdfLoading, setPdfLoadingState] = useState(true);
+
+  // #7C — Tiempo real: observaciones/comentarios de plano de otros equipos se
+  // bajan solos; el observe de plan_annotations refresca la lista al instante.
+  useRealtimeProjectPull(plan?.projectId ?? '');
   const pdfLoadingRef = useRef(true);
   // Setter base (sincroniza ref + state)
   const setPdfLoading = useCallback((v: boolean) => {

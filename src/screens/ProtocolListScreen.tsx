@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
+import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
 } from 'react-native';
@@ -79,6 +80,9 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
     catch { /* ignore */ }
     finally { setRefreshing(false); }
   }, [projectId]);
+
+  // #7C — Tiempo real: cambios de estado se bajan solos (el observe refresca la lista).
+  useRealtimeProjectPull(projectId);
 
   useEffect(() => {
     locationsCollection
