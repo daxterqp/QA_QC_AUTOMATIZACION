@@ -19,6 +19,7 @@ import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
 import { validateMask } from '@lib/protocolCode';
+import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
 import { useI18n } from '@lib/i18n';
 
 interface Props {
@@ -189,6 +190,7 @@ export function ProjectConfigModal({
                 )}
                 <Check label="Habilitar procesamiento de datos topográficos" description="Enciende el motor de cálculo (fórmulas + sector por área con tolerancia) sobre las coordenadas cargadas."
                   value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
+                <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
               </div>
             )}
 

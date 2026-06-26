@@ -14,6 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '@components/AppHeader';
+import { TopoColumnsEditor } from '@components/topo/TopoColumnsEditor';
 import { Colors, Radius } from '../theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -283,6 +284,7 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               )}
               <CheckRow label="Habilitar procesamiento de datos topográficos" description="Motor de cálculo (fórmulas + sector por área con tolerancia)."
                 value={!!flags.topo_processing_enabled} onToggle={() => toggleFlag('topo_processing_enabled')} />
+              <TopoColumnsEditor columns={flags.topo_columns} onChange={(cols) => setFlag('topo_columns', cols)} />
             </View>
           )}
 
