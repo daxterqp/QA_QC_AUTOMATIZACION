@@ -15,6 +15,7 @@ import {
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
+import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { createInstances } from '@services/ProtocolInstanceService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
@@ -219,6 +220,15 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
     return unsubscribe;
   }, [loadData, navigation]);
 
+  // #7B — Pull-to-refresh: baja cambios de la nube y recarga local.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); await loadData(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, loadData]);
+
   const handleOpenProtocol = async (row: TemplateRow) => {
     let instanceId = row.instance?.id;
 
@@ -328,6 +338,8 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
           keyExtractor={(item) => item.template.id}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>

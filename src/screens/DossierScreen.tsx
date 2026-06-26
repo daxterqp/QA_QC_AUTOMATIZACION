@@ -18,7 +18,7 @@ import { useTourStep } from '@hooks/useTourStep';
 import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
 import { exportDossierPdf, exportSingleProtocolPdf } from '@services/DossierExportService';
-import { pushProtocolStatus, mergeAndSaveFeatureFlags } from '@services/SupabaseSyncService';
+import { pushProtocolStatus, mergeAndSaveFeatureFlags, pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { parseFeatureFlagsJson, getTemplatePrintConfig, PRINT_HEADER_COLORS, DEFAULT_HEADER_COLOR, PRINT_HEADER_FIELDS, CROQUIS_MAP_TYPES, CROQUIS_PLACEMENTS, type TemplatePrintConfig, type PrintFontLevel, type PrintGraphSize, type PrintHeaderSize } from '@utils/featureFlags';
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { buildProtocolCroquisSpecs, type CroquisResult } from '@services/CroquisService';
@@ -306,6 +306,16 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   // Recargar al volver de ProtocolAudit u otras pantallas
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
+  // #7B — Pull-to-refresh: baja cambios de la nube (estados aprobado/rechazado de
+  // otros equipos) y recarga local.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); await loadData(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, loadData]);
+
   const handleApprove = (protocol: Protocol) => {
     Alert.alert(t('dossier.approveTitle'), t('dossier.approveMessage', { number: protocol.protocolNumber }), [
       { text: t('dossier.cancel'), style: 'cancel' },
@@ -485,6 +495,8 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
         sections={sections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.empty}>{t('dossier.empty')}</Text>

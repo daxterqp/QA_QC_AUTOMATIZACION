@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Alert, Linking, Modal, ActivityIndicator,
@@ -64,6 +64,15 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       .observe()
       .subscribe(setContacts);
     return () => sub.unsubscribe();
+  }, [projectId]);
+
+  // #7B — Pull-to-refresh: re-baja contactos de la nube (la lista se actualiza por el observe).
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullPhoneContacts(projectId); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
   }, [projectId]);
 
   const openAdd = () => {
@@ -259,6 +268,8 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
         data={contacts}
         keyExtractor={c => c.id}
         contentContainerStyle={styles.list}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         ListHeaderComponent={
           contacts.length === 0 ? null : (
             <Text style={styles.hint}>

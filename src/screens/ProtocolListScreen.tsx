@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
 } from 'react-native';
@@ -68,6 +69,15 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
       .observe()
       .subscribe(setProtocols);
     return () => sub.unsubscribe();
+  }, [projectId]);
+
+  // #7B — Pull-to-refresh: baja cambios de la nube (la lista se actualiza por el observe).
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
   }, [projectId]);
 
   useEffect(() => {
@@ -157,6 +167,8 @@ export default function ProtocolListScreen({ navigation, route }: Props) {
         data={filtered}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.list}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         ListEmptyComponent={
           <Text style={styles.empty}>{t('protoList.empty')}</Text>
         }

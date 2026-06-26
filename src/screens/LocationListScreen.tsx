@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ScrollView,
   ActivityIndicator, Animated,
@@ -63,6 +63,15 @@ export default function LocationListScreen({ navigation, route }: Props) {
     pullProjectFromCloud(projectId)
       .catch(() => {})
       .finally(() => setSyncing(false));
+  }, [projectId]);
+
+  // #7B — Pull-to-refresh: re-baja de la nube (la lista se actualiza sola por el observe).
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
   }, [projectId]);
 
   useEffect(() => {
@@ -327,6 +336,8 @@ export default function LocationListScreen({ navigation, route }: Props) {
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>

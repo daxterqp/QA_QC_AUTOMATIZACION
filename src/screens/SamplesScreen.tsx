@@ -178,6 +178,15 @@ export default function SamplesScreen({ route, navigation }: Props) {
     return () => { active = false; };
   }, [projectId, loadData]));
 
+  // #7B — Pull-to-refresh: re-baja muestras de la nube y recarga local.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullSamples(projectId); await loadData(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, loadData]);
+
   // v64 — Última muestra creada (mayor seq). En modo 'last_only' solo ESTA es borrable.
   const lastSampleId = useMemo(() => {
     let best: any = null;
@@ -468,6 +477,8 @@ export default function SamplesScreen({ route, navigation }: Props) {
           keyExtractor={(s: any) => s.id}
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListEmptyComponent={<View style={styles.empty}><Ionicons name="cube-outline" size={40} color={Colors.light} /><Text style={styles.emptyText}>{t('samples.empty')}</Text></View>}
           renderItem={({ item, index }: { item: any; index: number }) => {
             const sel = selectedIds.has(item.id);

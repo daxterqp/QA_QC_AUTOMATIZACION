@@ -7,7 +7,7 @@
  * el freeze de la 1ª columna se eliminó por errores visuales.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
@@ -219,6 +219,13 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   useEffect(() => { load(); }, [load]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // #7B — Pull-to-refresh: load() ya hace pullSummaryRows (baja de la nube) + recarga.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await load(); } catch { /* ignore */ } finally { setRefreshing(false); }
+  }, [load]);
+
   // Tipos de ensayo con datos.
   const templates = useMemo(() => {
     const counts = new Map<string, number>();
@@ -362,7 +369,9 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       />
 
       {!templateId ? (
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />}>
+
           {templates.length === 0 ? (
             <View style={styles.empty}><Ionicons name="grid-outline" size={36} color={Colors.textMuted} /><Text style={styles.emptyText}>{t('summary.emptyNoData')}</Text></View>
           ) : (

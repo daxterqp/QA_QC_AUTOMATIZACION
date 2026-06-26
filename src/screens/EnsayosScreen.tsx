@@ -238,6 +238,15 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     pullProjectFromCloud(projectId).catch(() => {}).finally(() => { loadData(); });
   }, [projectId, loadData]);
 
+  // #7B — Pull-to-refresh: re-baja de la nube y recarga local (versión await del de arriba).
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await pullProjectFromCloud(projectId); await loadData(); }
+    catch { /* ignore */ }
+    finally { setRefreshing(false); }
+  }, [projectId, loadData]);
+
   useEffect(() => {
     refreshFromCloud();
     const unsubscribe = navigation.addListener('focus', refreshFromCloud);
@@ -876,6 +885,8 @@ export default function EnsayosScreen({ navigation, route }: Props) {
           )}
           contentContainerStyle={styles.listContent}
           stickySectionHeadersEnabled={false}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
         />
       )}
 
