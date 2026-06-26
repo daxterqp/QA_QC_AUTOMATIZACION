@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Alert, Linking, Modal, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -33,6 +34,8 @@ const EMPTY_FORM: ContactForm = { name: '', phone: '', role: '' };
 export default function PhoneContactsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const { t } = useI18n();
+
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
 
@@ -267,7 +270,7 @@ export default function PhoneContactsScreen({ navigation, route }: Props) {
       <FlatList
         data={contacts}
         keyExtractor={c => c.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
         refreshing={refreshing}
         onRefresh={onRefresh}
         ListHeaderComponent={

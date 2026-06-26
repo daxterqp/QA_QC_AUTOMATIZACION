@@ -8,6 +8,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
@@ -119,6 +120,7 @@ const polyval = (coef: number[], x: number) => coef.reduce((acc, c, i) => acc + 
 
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { projectId, projectName } = route.params;
 
   // Tour contextual (botón de ayuda / tutorial)
@@ -373,7 +375,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       />
 
       {!templateId ? (
-        <ScrollView contentContainerStyle={styles.list}
+        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />}>
 
           {templates.length === 0 ? (

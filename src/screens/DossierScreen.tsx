@@ -4,6 +4,7 @@ import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, Alert, ActivityIndicator, ScrollView,
   Modal, Switch, TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -49,6 +50,7 @@ function toDateKey(date: Date): string {
 
 export default function DossierScreen({ projectId, projectName, onBack, onOpenProtocol, onPreviewPdf }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const { isOnline } = useNetwork();
   const [allProtocols, setAllProtocols] = useState<Protocol[]>([]);
@@ -499,7 +501,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
         refreshing={refreshing}
         onRefresh={onRefresh}
         ListEmptyComponent={

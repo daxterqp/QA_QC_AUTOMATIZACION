@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -148,6 +149,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
   const { currentUser } = useAuth();
   const { t } = useI18n();
 
+  const insets = useSafeAreaInsets();
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   // Tour refs
   const protocolRowRef = useTourStep('protocol_row');
@@ -341,7 +343,7 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
           data={rows}
           keyExtractor={(item) => item.template.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
           refreshing={refreshing}
           onRefresh={onRefresh}
           ListEmptyComponent={

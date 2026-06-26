@@ -4,6 +4,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Alert, Image, Modal, Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '@components/AppHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { PriorityChip, PRIORITY_META, Priority } from '@components/PriorityChip';
@@ -45,6 +46,8 @@ interface AnnRow {
 export default function AnnotationCommentsScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const { t } = useI18n();
+
+  const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
   const { isActive: tourActive, currentStep: tourStep, nextStep: tourNextStep, jumpToStep, isContextual, dismissTour } = useTour();
@@ -337,7 +340,7 @@ export default function AnnotationCommentsScreen({ navigation, route }: Props) {
         <FlatList
           data={filteredRows}
           keyExtractor={(r) => r.annotation.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
           refreshing={refreshing}
           onRefresh={onRefresh}
           ListEmptyComponent={

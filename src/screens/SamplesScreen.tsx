@@ -14,6 +14,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
   ActivityIndicator, Alert, FlatList,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -69,6 +70,7 @@ function computeEastNorth(lat: number, lng: number, system: CoordinateSystem): {
 
 export default function SamplesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { projectId, projectName } = route.params;
   const { currentUser } = useAuth();
   const canConfig = currentUser?.role === 'CREATOR' || currentUser?.role === 'RESIDENT';
@@ -481,7 +483,7 @@ export default function SamplesScreen({ route, navigation }: Props) {
         <FlatList
           data={filtered}
           keyExtractor={(s: any) => s.id}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: insets.bottom + 40 }}
           keyboardShouldPersistTaps="handled"
           refreshing={refreshing}
           onRefresh={onRefresh}

@@ -23,6 +23,7 @@ import {
   View, Text, StyleSheet, SectionList, ScrollView, TouchableOpacity, ActivityIndicator,
   Modal, TextInput, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -114,6 +115,7 @@ function fmtFecha(ymd: string): string {
 
 export default function EnsayosScreen({ navigation, route }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { projectId, projectName, mode } = route.params;
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   const ensSearchRef = useTourStep('ens_search');
@@ -888,7 +890,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               </View>
             ) : null
           )}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 24 }]}
           stickySectionHeadersEnabled={false}
           refreshing={refreshing}
           onRefresh={onRefresh}

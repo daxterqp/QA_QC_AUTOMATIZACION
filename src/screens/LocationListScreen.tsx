@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ScrollView,
   ActivityIndicator, Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,6 +25,9 @@ export default function LocationListScreen({ navigation, route }: Props) {
 
   const { t } = useI18n();
 
+
+
+  const insets = useSafeAreaInsets();
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
 
   useEffect(() => {
@@ -339,7 +343,7 @@ export default function LocationListScreen({ navigation, route }: Props) {
           data={filtered}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
           refreshing={refreshing}
           onRefresh={onRefresh}
           ListEmptyComponent={
