@@ -47,7 +47,7 @@ export interface StampOptions {
  * Aplica el sello sobre la foto y devuelve un Blob JPEG.
  */
 export async function applyStamp(opts: StampOptions): Promise<Blob> {
-  const { imageUrl, logoUrl, comment, projectName, quality = 0.7 } = opts;
+  const { imageUrl, logoUrl, comment, projectName, quality = 0.88 } = opts;
 
   const img = await loadImage(imageUrl);
 

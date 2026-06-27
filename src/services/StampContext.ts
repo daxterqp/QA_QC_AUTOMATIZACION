@@ -39,16 +39,22 @@ function logoLocalUri(projectId: string): string {
 
 async function resolveLogo(projectId: string): Promise<string | null> {
   const localUri = logoLocalUri(projectId);
+  const s3Key = `logos/project_${projectId}/logo.jpg`;
+  // 1) Intentar SIEMPRE bajar el más reciente de S3 (la promesa se cachea por sesión, así
+  //    que es 1 descarga por sesión). Esto evita servir un logo VIEJO si lo cambiaron en
+  //    otro dispositivo (la key de S3 es fija; antes nos quedábamos con el archivo local).
   try {
-    const info = await FileSystem.getInfoAsync(localUri);
-    if (info.exists && ((info as any).size ?? 1) > 0) return localUri;
-    const s3Key = `logos/project_${projectId}/logo.jpg`;
     if (await s3FileExists(s3Key)) {
-      await downloadFromS3(s3Key, localUri);
+      await downloadFromS3(s3Key, localUri); // sobreescribe el local
       const dl = await FileSystem.getInfoAsync(localUri);
       if (dl.exists && ((dl as any).size ?? 1) > 0) return localUri;
     }
-  } catch { /* logo opcional / offline → null */ }
+  } catch { /* offline o sin red → caemos al local */ }
+  // 2) Fallback: archivo local previo (offline, o S3 sin logo pero ya teníamos uno).
+  try {
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (info.exists && ((info as any).size ?? 1) > 0) return localUri;
+  } catch { /* sin local → null */ }
   return null;
 }
 

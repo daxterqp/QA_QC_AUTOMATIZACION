@@ -89,10 +89,20 @@ export default function CameraScreen({
     p.then((ctx) => setStampEnabled(ctx.stampEnabled)).catch(() => {});
   }, [projectId]);
 
+  // El comentario por-foto es "pegajoso" dentro de una sesión, pero NO debe filtrarse a
+  // otro ensayo/observación si la pantalla se reutiliza con otro objetivo sin desmontar.
+  useEffect(() => { setPhotoComment(''); }, [protocolItemId, annotationCommentId, extraPhotoProtocolId]);
+
   // Comprime + AWAIT del contexto (logo garantizado cargado) + estampa. Devuelve el URI final.
   const processAndStamp = useCallback(async (rawUri: string, pid?: string | null): Promise<string> => {
     const ctxP = stampCtxRef.current ?? loadStampContext(pid ?? projectId);
     const [{ uri: compressed }, ctx] = await Promise.all([compressImage(rawUri), ctxP]);
+    // Si el estampado está activo pero el logo NO cargó (offline en la 1ª foto), forzar un
+    // refresco del contexto para que la PRÓXIMA foto reintente la descarga (si no, el ref
+    // quedaría con la promesa sin-logo y todas las fotos saldrían sin logo).
+    if (ctx.stampEnabled && !ctx.logoUri) {
+      stampCtxRef.current = loadStampContext(pid ?? projectId, { force: true });
+    }
     if (!ctx.stampEnabled) return compressed;
     const coords = ctx.stampGps ? await getStampCoords() : null;
     return applyPhotoStamps({
