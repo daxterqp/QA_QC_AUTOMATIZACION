@@ -773,6 +773,10 @@ function ConfiguracionTab({ projectId }: { projectId: string }) {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [signPreview, setSignPreview] = useState<string | null>(null);
   const [stampComment, setStampComment] = useState('');
+  // v45 — config de estampado a nivel proyecto (sincronizada)
+  const [stampEnabled, setStampEnabled] = useState(true);
+  const [stampGps, setStampGps] = useState(true);
+  const [stampSize, setStampSize] = useState<'normal' | 'compact' | 'very_compact'>('normal');
 
   // Load previews when project data arrives
   useEffect(() => {
@@ -780,10 +784,21 @@ function ConfiguracionTab({ projectId }: { projectId: string }) {
     // Try logo_s3_key from DB, fallback to standard path — always fresh on load
     const logoKey = project.logo_s3_key ?? `logos/project_${project.id}/logo.jpg`;
     setLogoPreview(`/api/s3-image?key=${encodeURIComponent(logoKey)}&fresh=1&t=${Date.now()}`);
-    if (project.stamp_comment) {
-      setStampComment(project.stamp_comment);
-    }
-  }, [project?.id, project?.logo_s3_key, project?.stamp_comment]);
+    if (project.stamp_comment) setStampComment(project.stamp_comment);
+    const p = project as { stamp_enabled?: boolean | null; stamp_gps?: boolean | null; stamp_size?: 'normal' | 'compact' | 'very_compact' | null };
+    if (p.stamp_enabled != null) setStampEnabled(p.stamp_enabled);
+    if (p.stamp_gps != null) setStampGps(p.stamp_gps);
+    if (p.stamp_size) setStampSize(p.stamp_size);
+  }, [project?.id, project?.logo_s3_key, project?.stamp_comment, project]);
+
+  // Guarda inmediatamente toggles/tamaño en el proyecto (sincronizado).
+  async function saveStampConfig(patch: { stamp_enabled?: boolean; stamp_gps?: boolean; stamp_size?: string }) {
+    const supabase = (await import('@lib/supabase/client')).createClient();
+    try {
+      await supabase.from('projects').update({ ...patch, updated_at: Date.now() }).eq('id', projectId);
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    } catch { /* */ }
+  }
 
   useEffect(() => {
     if (currentUser?.id) {
@@ -841,11 +856,21 @@ function ConfiguracionTab({ projectId }: { projectId: string }) {
     <div className="flex flex-col gap-5">
       {/* ── Card: Estampado de fotos (logo + comentario) ─────────────── */}
       <div className="bg-white rounded-xl shadow-subtle p-5 flex flex-col gap-4">
-        <p className="text-sm font-bold text-navy">{t('webUpload.photoStampTitle')}</p>
-        <p className="text-xs text-gray-400 -mt-2">
-          {t('webUpload.photoStampDesc')}
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-navy">{t('webUpload.photoStampTitle')}</p>
+            <p className="text-xs text-gray-400">{t('webUpload.photoStampDesc')}</p>
+          </div>
+          <button
+            onClick={() => { const v = !stampEnabled; setStampEnabled(v); saveStampConfig({ stamp_enabled: v }); }}
+            className={`relative w-11 h-6 rounded-full transition shrink-0 ${stampEnabled ? 'bg-primary' : 'bg-border'}`}
+            aria-label="Estampado activo"
+          >
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${stampEnabled ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
 
+        {stampEnabled && <>
         {/* Logo del proyecto */}
         <div className="flex items-start gap-4">
           <div className="w-20 h-[60px] rounded-lg overflow-hidden bg-surface border border-border flex items-center justify-center flex-shrink-0">
@@ -896,6 +921,43 @@ function ConfiguracionTab({ projectId }: { projectId: string }) {
           </div>
           <StatusBadge s={stampStatus} />
         </div>
+
+        {/* Separador */}
+        <div className="border-t border-border" />
+
+        {/* Datos GPS */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-gray-700">{t('webUpload.stampGpsLabel')}</p>
+            <p className="text-[11px] text-gray-400">{t('webUpload.stampGpsDesc')}</p>
+          </div>
+          <button
+            onClick={() => { const v = !stampGps; setStampGps(v); saveStampConfig({ stamp_gps: v }); }}
+            className={`relative w-11 h-6 rounded-full transition shrink-0 ${stampGps ? 'bg-primary' : 'bg-border'}`}
+            aria-label="Datos GPS"
+          >
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${stampGps ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Tamaño del estampado */}
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-bold text-gray-700">{t('webUpload.stampSizeLabel')}</p>
+          <p className="text-[11px] text-gray-400">{t('webUpload.stampSizeDesc')}</p>
+          <div className="flex gap-2">
+            {(['normal', 'compact', 'very_compact'] as const).map((sz) => {
+              const active = stampSize === sz;
+              return (
+                <button key={sz}
+                  onClick={() => { setStampSize(sz); saveStampConfig({ stamp_size: sz }); }}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold transition ${active ? 'bg-primary text-white border-primary' : 'bg-white text-textSecondary border-border hover:bg-surface'}`}>
+                  {t(`webUpload.stampSize_${sz}`)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        </>}
       </div>
 
       {/* ── Card: Firma del Jefe de Calidad ──────────────────────────── */}

@@ -513,11 +513,22 @@ export default function FileUploadScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (activeTab !== 'personalizar') return;
-    getProjectSettings(projectId).then((s) => {
-      setStampEnabled(s.stampEnabled);
-      setStampGps(s.stampGps);
-      setStampSize(s.stampSize);
-    });
+    // v45 — config de estampado a nivel PROYECTO (sincronizada). Lee del modelo de
+    // proyecto; cae a AsyncStorage solo para proyectos legacy aún sin columnas.
+    (async () => {
+      const s = await getProjectSettings(projectId);
+      let en = s.stampEnabled, gps = s.stampGps, size = s.stampSize, comment = s.stampComment ?? '';
+      try {
+        const proj: any = await database.get<any>('projects').find(projectId);
+        if (proj) {
+          if (proj.stampEnabled != null) en = !!proj.stampEnabled;
+          if (proj.stampGps != null) gps = !!proj.stampGps;
+          if (proj.stampSize) size = proj.stampSize as StampSize;
+          if (proj.stampComment != null) comment = proj.stampComment;
+        }
+      } catch { /* sin proyecto local */ }
+      setStampEnabled(en); setStampGps(gps); setStampSize(size); setStampComment(comment);
+    })();
     // Load user signature: try local first, then download from S3
     if (currentUser?.id) {
       getOrDownloadSignatureUri(currentUser.id).then((uri) => {
@@ -527,10 +538,6 @@ export default function FileUploadScreen({ navigation, route }: Props) {
         }
       }).catch(() => {});
     }
-    // Read stamp_comment from synced project model (shared for all users)
-    database.get<any>('projects').find(projectId).then((proj: any) => {
-      if (proj?.stampComment) setStampComment(proj.stampComment);
-    }).catch(() => {});
     // Cargar el logo global desde S3 a un cache PERSISTENTE (documentDirectory),
     // misma ruta que usa StampContext al estampar (un solo archivo, sin divergencia).
     const localLogoUri = `${FileSystem.documentDirectory}project_logo_${projectId}.jpg`;
@@ -542,23 +549,27 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     }).catch(() => {});
   }, [activeTab, projectId]);
 
-  const toggleStamp = async (val: boolean) => {
-    setStampEnabled(val);
-    await saveProjectSettings(projectId, { stampEnabled: val });
+  // v45 — guarda la config de estampado en el modelo de proyecto (sincroniza a Supabase
+  // → compartida con todos) + backup en AsyncStorage + invalida el cache de StampContext.
+  const saveStampToProject = async (patch: { stampEnabled?: boolean; stampGps?: boolean; stampSize?: StampSize }) => {
+    try {
+      const proj = await projectsCollection.find(projectId);
+      await database.write(async () => {
+        await proj.update((p: any) => {
+          if (patch.stampEnabled !== undefined) p.stampEnabled = patch.stampEnabled;
+          if (patch.stampGps !== undefined) p.stampGps = patch.stampGps;
+          if (patch.stampSize !== undefined) p.stampSize = patch.stampSize;
+        });
+      });
+      pushProjectToSupabase(projectId).catch(() => {});
+    } catch { /* sin proyecto local */ }
+    await saveProjectSettings(projectId, patch); // backup local
     invalidateStampContext(projectId);
   };
 
-  const toggleStampGps = async (val: boolean) => {
-    setStampGps(val);
-    await saveProjectSettings(projectId, { stampGps: val });
-    invalidateStampContext(projectId);
-  };
-
-  const pickStampSize = async (val: StampSize) => {
-    setStampSize(val);
-    await saveProjectSettings(projectId, { stampSize: val });
-    invalidateStampContext(projectId);
-  };
+  const toggleStamp = async (val: boolean) => { setStampEnabled(val); await saveStampToProject({ stampEnabled: val }); };
+  const toggleStampGps = async (val: boolean) => { setStampGps(val); await saveStampToProject({ stampGps: val }); };
+  const pickStampSize = async (val: StampSize) => { setStampSize(val); await saveStampToProject({ stampSize: val }); };
 
   const saveStampComment = async () => {
     setStampCommentSaving(true);

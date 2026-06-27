@@ -15,6 +15,9 @@ interface Props {
   logoKey?: string | null;
   /** Comentario para el estampado */
   stampComment?: string | null;
+  /** v45 — config de estampado a nivel proyecto */
+  stampEnabled?: boolean | null;
+  stampSize?: 'normal' | 'compact' | 'very_compact' | null;
   /** Sub-segmento del nombre (ej: protocol_number) */
   subSeg: string;
   /** Sub-sub-segmento (ej: location_name) */
@@ -28,7 +31,7 @@ interface Props {
  *  Carga las fotos desde S3 (prefijo `projects/<proj>/photos/<sub>-<loc>-extra-`) y permite
  *  agregar / eliminar. Las fotos se estampan con logo + fecha antes de subir. */
 export function ExtraPhotos({
-  bucketId, projectName, projectId, logoKey, stampComment, subSeg, locSeg,
+  bucketId, projectName, projectId, logoKey, stampComment, stampEnabled, stampSize, subSeg, locSeg,
   canEdit = true, onOpenLightbox,
 }: Props) {
   const { t } = useI18n();
@@ -57,7 +60,9 @@ export function ExtraPhotos({
       const blobUrl = URL.createObjectURL(file);
       const finalLogoKey = logoKey ?? (projectId ? `logos/project_${projectId}/logo.jpg` : null);
       const logoUrl = finalLogoKey ? `/api/s3-image-nocache?key=${encodeURIComponent(finalLogoKey)}` : null;
-      const stampedBlob = await applyStamp({ imageUrl: blobUrl, logoUrl, comment: stampComment ?? null, projectName });
+      const stampedBlob = stampEnabled === false
+        ? file
+        : await applyStamp({ imageUrl: blobUrl, logoUrl, comment: stampComment ?? null, projectName, size: stampSize ?? 'normal' });
       URL.revokeObjectURL(blobUrl);
 
       const pos = keys.length + 1;

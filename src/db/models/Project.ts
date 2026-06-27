@@ -19,6 +19,10 @@ export default class Project extends Model {
   @field('created_by_id') createdById!: string | null;
   @field('logo_s3_key') logoS3Key!: string | null;
   @field('stamp_comment') stampComment!: string | null;
+  // v45 — config de estampado a nivel proyecto (sincronizada). null en filas legacy → default.
+  @field('stamp_enabled') stampEnabled!: boolean | null;
+  @field('stamp_gps') stampGps!: boolean | null;
+  @field('stamp_size') stampSize!: string | null;
   // v22 — feature flags JSON serializado. Usar parseFeatureFlags() del helper.
   @field('feature_flags') featureFlags!: string | null;
   // v43 — Identificador del proyecto para el código de muestras (ej. "123").

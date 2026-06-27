@@ -244,6 +244,10 @@ export interface Project {
   created_by_id: string | null;
   logo_s3_key: string | null;
   stamp_comment: string | null;
+  /** v45 — config de estampado a nivel proyecto (sincronizada). */
+  stamp_enabled?: boolean | null;
+  stamp_gps?: boolean | null;
+  stamp_size?: 'normal' | 'compact' | 'very_compact' | null;
   feature_flags: ProjectFeatureFlags | null;
   /** v46 — Identificador del proyecto para el código de muestras (ej. "123"). */
   sample_identifier?: string | null;

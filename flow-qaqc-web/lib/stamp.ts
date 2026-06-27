@@ -30,6 +30,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+export type StampSize = 'normal' | 'compact' | 'very_compact';
+
 export interface StampOptions {
   /** URL de la foto original (blob: URL o URL de S3 con CORS habilitado) */
   imageUrl: string;
@@ -39,15 +41,25 @@ export interface StampOptions {
   comment?: string | null;
   /** Nombre del proyecto — va en la 1ª línea junto al comentario (opcional) */
   projectName?: string | null;
+  /** Tamaño del estampado (letra + logo). Default 'normal'. Espejo del móvil. */
+  size?: StampSize | null;
   /** Calidad JPEG 0–1 (default 0.88) */
   quality?: number;
 }
+
+/** Presets de tamaño (espejo del móvil): factor de fuente (× ancho) + escala del logo. */
+const SIZE_PRESETS: Record<StampSize, { fontFactor: number; logoScale: number }> = {
+  normal: { fontFactor: 0.016, logoScale: 0.13 },
+  compact: { fontFactor: 0.0118, logoScale: 0.10 },
+  very_compact: { fontFactor: 0.0086, logoScale: 0.075 },
+};
 
 /**
  * Aplica el sello sobre la foto y devuelve un Blob JPEG.
  */
 export async function applyStamp(opts: StampOptions): Promise<Blob> {
-  const { imageUrl, logoUrl, comment, projectName, quality = 0.88 } = opts;
+  const { imageUrl, logoUrl, comment, projectName, size, quality = 0.88 } = opts;
+  const preset = SIZE_PRESETS[size ?? 'normal'] ?? SIZE_PRESETS.normal;
 
   const img = await loadImage(imageUrl);
 
@@ -74,7 +86,7 @@ export async function applyStamp(opts: StampOptions): Promise<Blob> {
   const header = [projectName?.trim(), comment?.trim()].filter(Boolean).join(' - ');
   const lines = header ? [header, timestamp] : [timestamp];
 
-  const FONT_SIZE = Math.max(14, Math.round(w * 0.016));
+  const FONT_SIZE = Math.max(11, Math.round(w * preset.fontFactor));
   ctx.font = `bold ${FONT_SIZE}px sans-serif`;
 
   const PAD_X = Math.round(FONT_SIZE * 0.5);
@@ -108,8 +120,7 @@ export async function applyStamp(opts: StampOptions): Promise<Blob> {
       const logoBlobUrl = URL.createObjectURL(blob);
       const logo = await loadImage(logoBlobUrl);
 
-      const logoScale = 0.13;
-      const logoW = w * logoScale;
+      const logoW = w * preset.logoScale;
       const logoH = (logoW / logo.naturalWidth) * logo.naturalHeight;
       const MARGIN = Math.round(w * 0.02);
       const x = w - logoW - MARGIN;

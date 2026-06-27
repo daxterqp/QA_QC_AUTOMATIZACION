@@ -998,5 +998,19 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 45,
+      steps: [
+        // v45 — config de estampado a nivel proyecto (sincronizada, no per-dispositivo).
+        addColumns({
+          table: 'projects',
+          columns: [
+            { name: 'stamp_enabled', type: 'boolean', isOptional: true },
+            { name: 'stamp_gps', type: 'boolean', isOptional: true },
+            { name: 'stamp_size', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

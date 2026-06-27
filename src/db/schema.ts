@@ -25,7 +25,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  *      sin abusar de protocol_item_id.
  */
 export const schema = appSchema({
-  version: 44,
+  version: 45,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -53,6 +53,10 @@ export const schema = appSchema({
         { name: 'created_by_id', type: 'string', isOptional: true },
         { name: 'logo_s3_key', type: 'string', isOptional: true },
         { name: 'stamp_comment', type: 'string', isOptional: true },
+        // v45 — config de estampado a nivel proyecto (sincronizada, no per-dispositivo)
+        { name: 'stamp_enabled', type: 'boolean', isOptional: true },
+        { name: 'stamp_gps', type: 'boolean', isOptional: true },
+        { name: 'stamp_size', type: 'string', isOptional: true },
         // v22 — feature flags por proyecto (JSON string serializado)
         { name: 'feature_flags', type: 'string', isOptional: true },
         { name: 'sample_identifier', type: 'string', isOptional: true }, // v43 — id de proyecto para el código de muestras (ej. "123")

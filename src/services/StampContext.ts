@@ -74,21 +74,29 @@ export async function loadStampContext(
   }
 
   const p = (async (): Promise<StampContext> => {
+    // Fuente de verdad = modelo de proyecto (columnas SINCRONIZADAS, v45). AsyncStorage
+    // queda como fallback para proyectos legacy aún sin columnas pobladas u offline.
     const s = await getProjectSettings(projectId);
-    let comment = s.stampComment;
+    let stampEnabled = s.stampEnabled;
+    let stampGps = s.stampGps;
+    let stampSize: StampSize = s.stampSize;
+    let comment: string | null = s.stampComment;
     let projectName: string | null = null;
     try {
       const proj = await database.get<any>('projects').find(projectId);
-      if (proj?.stampComment) comment = proj.stampComment;
-      if (proj?.name) projectName = proj.name;
-    } catch { /* fallback a settings locales */ }
+      if (proj) {
+        if (proj.stampEnabled != null) stampEnabled = !!proj.stampEnabled;
+        if (proj.stampGps != null) stampGps = !!proj.stampGps;
+        if (proj.stampSize) stampSize = proj.stampSize as StampSize;
+        if (proj.stampComment != null) comment = proj.stampComment;
+        if (proj.name) projectName = proj.name;
+      }
+    } catch { /* sin proyecto local → fallback a settings/defaults */ }
 
-    // Logo: si está activo el estampado y no hay uri local en settings, resolverlo
-    // (cache persistente → S3). Verificado (existe + tamaño > 0).
-    let logoUri = s.stampPhotoUri;
-    if (s.stampEnabled && !logoUri) logoUri = await resolveLogo(projectId);
+    // Logo: si está activo el estampado, resolverlo (cache persistente → S3, verificado).
+    const logoUri = stampEnabled ? await resolveLogo(projectId) : null;
 
-    return { stampEnabled: s.stampEnabled, logoUri, comment, projectName, stampGps: s.stampGps, stampSize: s.stampSize };
+    return { stampEnabled, logoUri, comment, projectName, stampGps, stampSize };
   })();
 
   inFlight.set(projectId, p);

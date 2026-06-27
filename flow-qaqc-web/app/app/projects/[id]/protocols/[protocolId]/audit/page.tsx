@@ -249,7 +249,9 @@ export default function ProtocolAuditPage() {
       const blobUrl = URL.createObjectURL(file);
       const logoKey = project?.logo_s3_key ?? (project?.id ? `logos/project_${project.id}/logo.jpg` : null);
       const logoUrl = logoKey ? `/api/s3-image-nocache?key=${encodeURIComponent(logoKey)}` : null;
-      const stampedBlob = await applyStamp({ imageUrl: blobUrl, logoUrl, comment: project?.stamp_comment ?? null, projectName: project?.name ?? null });
+      const stampedBlob = (project as any)?.stamp_enabled === false
+        ? file
+        : await applyStamp({ imageUrl: blobUrl, logoUrl, comment: project?.stamp_comment ?? null, projectName: project?.name ?? null, size: (project as any)?.stamp_size ?? 'normal' });
       URL.revokeObjectURL(blobUrl);
 
       const projPrefix = s3ProjectPrefix(project?.name ?? projectId);
