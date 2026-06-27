@@ -20,7 +20,7 @@ import { useTour } from '@context/TourContext';
  * Retorna un ref que debe adjuntarse a la View que quieres destacar.
  * Mide cuando: paso activo, waitingElementId, o paso siguiente (pre-medición).
  */
-export function useTourStep(elementId: string): RefObject<View> {
+export function useTourStep(elementId: string): RefObject<View | null> {
   const ref = useRef<View>(null);
   const { currentStep, upcomingStep, registerMeasure, unregisterMeasure, isActive } = useTour();
 
@@ -60,7 +60,7 @@ export function useTourStep(elementId: string): RefObject<View> {
  * puede no estar montado en el primer render.
  */
 export function useTourStepWithLayout(elementId: string): {
-  ref: RefObject<View>;
+  ref: RefObject<View | null>;
   onLayout: () => void;
 } {
   const ref = useRef<View>(null);

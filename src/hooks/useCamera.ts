@@ -10,7 +10,7 @@ import {
 
 export interface UseCameraReturn {
   /** Ref para adjuntar al componente <Camera> */
-  cameraRef: React.RefObject<Camera>;
+  cameraRef: React.RefObject<Camera | null>;
   /** Dispositivo de camara trasera listo para usar */
   device: CameraDevice | undefined;
   /** true cuando los permisos estan concedidos */

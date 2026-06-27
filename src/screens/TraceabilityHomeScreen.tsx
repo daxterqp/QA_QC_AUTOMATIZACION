@@ -244,7 +244,7 @@ export default function TraceabilityHomeScreen({ route, navigation }: Props) {
     }, [projectId, userId]),
   );
 
-  const renderSessionCard = (s: WorkSession, isActive: boolean, tourRef?: React.RefObject<View>) => {
+  const renderSessionCard = (s: WorkSession, isActive: boolean, tourRef?: React.RefObject<View | null>) => {
     const intervals = intervalsBySession[s.id] ?? [];
     const eff = effectiveDurationMs(intervals, now);
     const paused = pausedDurationMs(intervals, now);

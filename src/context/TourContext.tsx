@@ -87,7 +87,7 @@ export interface TourContextType {
   completeTour: () => void;
   dismissTour: () => void;
   isContextual: boolean;
-  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList>>;
+  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList> | null>;
 }
 
 // ── Pasos del tour ───────────────────────────────────────────────────────────
@@ -1087,7 +1087,7 @@ export function useTour(): TourContextType {
 
 interface TourProviderProps {
   children: React.ReactNode;
-  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList>>;
+  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList> | null>;
 }
 
 export function TourProvider({ children, navigationRef }: TourProviderProps) {
