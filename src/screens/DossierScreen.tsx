@@ -631,31 +631,32 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.filledBy}>
-                {t('dossier.supervisor', { name: filledBy })}
-              </Text>
-              {item.locationReference && (
-                <Text style={styles.location}>{t('dossier.locationLine', { ref: item.locationReference })}</Text>
-              )}
-              {signedBy && (
-                <Text style={styles.signedBy}>{t('dossier.approvedBy', { name: signedBy })}</Text>
-              )}
-
-              {/* Badge de ítems (solo clásicos), esquina sup. derecha: ✓ correctos
-                  arriba / ✗ observados abajo. Si no hay observados, solo ✓. */}
-              {countsById[item.id]?.classic && (
-                <View style={styles.itemBadgesCorner}>
+              {/* Supervisor (con ✓ ítems correctos a la misma altura, solo clásicos) */}
+              <View style={styles.metaRow}>
+                <Text style={[styles.filledBy, { flex: 1 }]}>
+                  {t('dossier.supervisor', { name: filledBy })}
+                </Text>
+                {countsById[item.id]?.classic && (
                   <View style={styles.itemBadge}>
                     <Ionicons name="checkmark-circle" size={15} color="#1e8e3e" />
                     <Text style={[styles.itemBadgeText, { color: '#1e8e3e' }]}>{countsById[item.id].ok}</Text>
                   </View>
-                  {countsById[item.id].obs > 0 && (
+                )}
+              </View>
+              {/* Ubicación (con ✗ ítems observados a la misma altura, solo si hay) */}
+              {item.locationReference && (
+                <View style={styles.metaRow}>
+                  <Text style={[styles.location, { flex: 1 }]}>{t('dossier.locationLine', { ref: item.locationReference })}</Text>
+                  {countsById[item.id]?.classic && countsById[item.id].obs > 0 && (
                     <View style={styles.itemBadge}>
                       <Ionicons name="close-circle" size={15} color="#d93025" />
                       <Text style={[styles.itemBadgeText, { color: '#d93025' }]}>{countsById[item.id].obs}</Text>
                     </View>
                   )}
                 </View>
+              )}
+              {signedBy && (
+                <Text style={styles.signedBy}>{t('dossier.approvedBy', { name: signedBy })}</Text>
               )}
 
               {isJefe && isPending && (() => {
@@ -674,7 +675,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 return (
                 <View style={styles.actions}>
                   <TouchableOpacity
-                    style={[styles.approveBtn, needsObs && styles.approveObsBtn]}
+                    // Cuando es "con observación" el texto es largo: se le da más ancho
+                    // (y se le quita a Rechazar) para que entre en una línea sin achicar la letra.
+                    style={[styles.approveBtn, needsObs && styles.approveObsBtn, needsObs && { flex: 1.7 }]}
                     onPress={() => {
                       if (!needsObs) { handleApprove(item); return; }
                       // No conforme: con la opción ON aprueba con observación directo
@@ -683,12 +686,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                       else { onOpenProtocol(item.id, item.status); }
                     }}
                   >
-                    <Text
-                      style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.8}
-                    >
+                    <Text style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]} numberOfLines={1}>
                       {needsObs ? t('protoAudit.approveWithObservation') : t('protoAudit.approveAndSign')}
                     </Text>
                   </TouchableOpacity>
@@ -1038,9 +1036,8 @@ const styles = StyleSheet.create({
   approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3, textAlign: 'center' },
   // Skeleton de los botones de acción hasta calcular conformidad (evita parpadeo).
   btnSkeleton: { backgroundColor: Colors.border, opacity: 0.4, borderColor: Colors.border, minHeight: 38 },
-  // Badge de ítems correctos/observados (protocolos clásicos), esquina sup. der.,
-  // apilados verticalmente (✓ arriba, ✗ abajo).
-  itemBadgesCorner: { position: 'absolute', top: 40, right: 14, alignItems: 'flex-end', gap: 4 },
+  // Fila Supervisor/Ubicación con su badge alineado a la derecha (✓ / ✗).
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   itemBadgeText: { fontSize: 14, fontWeight: '800' },
   // Chip que abre el modal de filtro multiselección.
