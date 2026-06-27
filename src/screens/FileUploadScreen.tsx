@@ -30,6 +30,7 @@ import { s3ProjectPrefix } from '@config/aws';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { useLocationsImport } from '@hooks/useLocationsImport';
 import { getProjectSettings, saveProjectSettings, type StampSize } from '@services/ProjectSettings';
+import { invalidateStampContext } from '@services/StampContext';
 import { saveUserSignature, saveUserSignatureS3Key, getOrDownloadSignatureUri } from '@services/UserSignatureService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
@@ -530,8 +531,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     database.get<any>('projects').find(projectId).then((proj: any) => {
       if (proj?.stampComment) setStampComment(proj.stampComment);
     }).catch(() => {});
-    // Try to load global logo from S3 into a local cache
-    const localLogoUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+    // Cargar el logo global desde S3 a un cache PERSISTENTE (documentDirectory),
+    // misma ruta que usa StampContext al estampar (un solo archivo, sin divergencia).
+    const localLogoUri = `${FileSystem.documentDirectory}project_logo_${projectId}.jpg`;
     s3FileExists(LOGO_S3_KEY).then(exists => {
       if (!exists) return;
       downloadFromS3(LOGO_S3_KEY, localLogoUri)
@@ -543,16 +545,19 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   const toggleStamp = async (val: boolean) => {
     setStampEnabled(val);
     await saveProjectSettings(projectId, { stampEnabled: val });
+    invalidateStampContext(projectId);
   };
 
   const toggleStampGps = async (val: boolean) => {
     setStampGps(val);
     await saveProjectSettings(projectId, { stampGps: val });
+    invalidateStampContext(projectId);
   };
 
   const pickStampSize = async (val: StampSize) => {
     setStampSize(val);
     await saveProjectSettings(projectId, { stampSize: val });
+    invalidateStampContext(projectId);
   };
 
   const saveStampComment = async () => {
@@ -569,6 +574,7 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     } catch { /* fallback */ }
     // Also keep in AsyncStorage as local backup
     await saveProjectSettings(projectId, { stampComment: stampComment.trim() || null });
+    invalidateStampContext(projectId);
     setStampCommentSaving(false);
     Alert.alert(t('fileUpload.saved.title'), t('fileUpload.stamp.commentSavedMsg'));
   };
@@ -592,10 +598,13 @@ export default function FileUploadScreen({ navigation, route }: Props) {
           await project.update(p => { (p as any).logoS3Key = LOGO_S3_KEY; });
         });
       } catch { /* project may not exist locally */ }
-      // Cache locally
-      const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
+      // Cache local en documentDirectory (PERSISTENTE, misma ruta que usa StampContext
+      // para estampar). Sobreescribe el logo viejo → el estampado toma el NUEVO.
+      const localUri = `${FileSystem.documentDirectory}project_logo_${projectId}.jpg`;
+      try { await FileSystem.deleteAsync(localUri, { idempotent: true }); } catch { /* */ }
       await FileSystem.copyAsync({ from: asset.uri, to: localUri });
       setStampPhotoUri(localUri);
+      invalidateStampContext(projectId); // el contexto cacheado tenía el logo viejo
       Alert.alert(t('fileUpload.stamp.logoSavedTitle'), t('fileUpload.stamp.logoSavedMsg'));
     } catch {
       Alert.alert(t('fileUpload.error.title'), t('fileUpload.stamp.logoError'));
