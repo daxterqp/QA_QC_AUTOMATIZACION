@@ -94,6 +94,21 @@ function coerceProtocolRow(row: any): any {
   return row;
 }
 
+/** v53 — Columnas `stamp_*` de `projects`: en Supabase son NOT NULL con DEFAULT,
+ *  pero proyectos creados ANTES de la migración v45 las tienen en `null` en la
+ *  base local (schema `isOptional`). Un `null` EXPLÍCITO en el upsert ignora el
+ *  default y viola la restricción NOT NULL ("null value in column stamp_enabled").
+ *  Solución (misma lección que xref_snapshot_json / topo_values_json / is_hidden):
+ *  OMITIR la columna cuando es null → en filas nuevas aplica el DEFAULT de la DB y
+ *  en filas existentes el upsert (merge-duplicates) conserva el valor de la nube.
+ *  NO coalesceamos a un valor fijo: pisaría la config de estampado del CREADOR. */
+function coerceProjectRow(row: any): any {
+  for (const c of ['stamp_enabled', 'stamp_gps', 'stamp_size', 'stamp_comment']) {
+    if (row[c] == null) delete row[c];
+  }
+  return row;
+}
+
 /** Columnas de `projects` administradas SOLO por la web/CREADOR (cloud-wins): el
  *  push masivo del móvil las omite para no pisar el valor fresco con uno viejo
  *  (y evitar corromper el JSONB). Su escritura desde el móvil va por la ruta
@@ -1312,7 +1327,7 @@ async function pushProject(projectId: string): Promise<{ pushed: number; errors:
   // string escalar en columna jsonb). Su escritura legítima desde el móvil va por
   // su ruta dedicada (ProjectConfigScreen → supabase.update directo), no por aquí.
   // Al omitir estas columnas, el upsert (merge-duplicates) conserva su valor en la nube.
-  const projectRow = toRow(project._raw);
+  const projectRow = coerceProjectRow(toRow(project._raw));
   for (const c of PROJECT_CLOUD_OWNED_COLS) delete projectRow[c];
   await collect('projects', [projectRow]);
   pushed++;
