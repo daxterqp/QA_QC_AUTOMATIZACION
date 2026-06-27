@@ -840,35 +840,57 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
                 ubicación (sin el recuadro "UBICACION") y el módulo GIS integrado. */}
           <View style={styles.dgCard}>
             <Text style={styles.dgTitle}>{t('protoFill.dg.title')}</Text>
-            {/* v32 — Grid estructurado estilo Audit Page (celdas 2 por fila) */}
+            {/* v32 — Grid estructurado estilo Audit Page (celdas 2 por fila).
+                Los ensayos CLÁSICOS (checklist, !numericMode) ocultan Código (vacío) y
+                Ensayo (redundante con el título de la cabecera). Los numéricos los conservan. */}
             <View style={styles.dgGrid}>
-              <View style={styles.dgRow}>
-                <View style={styles.dgCell}>
-                  <Text style={styles.dgLabel}>{t('protoFill.dg.project')}</Text>
-                  <Text style={styles.dgValue} numberOfLines={2}>{projectName || '—'}</Text>
+              {numericMode ? (
+                <>
+                  <View style={styles.dgRow}>
+                    <View style={styles.dgCell}>
+                      <Text style={styles.dgLabel}>{t('protoFill.dg.project')}</Text>
+                      <Text style={styles.dgValue} numberOfLines={2}>{projectName || '—'}</Text>
+                    </View>
+                    <View style={styles.dgCell}>
+                      <Text style={styles.dgLabel}>{t('protoFill.dg.code')}</Text>
+                      <Text style={[styles.dgValue, (protocol as any)?.protocolCode && { color: Colors.navy, fontWeight: '900' }]} numberOfLines={1}>
+                        {(protocol as any)?.protocolCode ?? '—'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.dgRow}>
+                    <View style={styles.dgCell}>
+                      <Text style={styles.dgLabel}>{t('protoFill.dg.test')}</Text>
+                      <Text style={styles.dgValue} numberOfLines={2}>{(protocol as any)?.protocolNumber ?? '—'}</Text>
+                    </View>
+                    <View style={styles.dgCell}>
+                      <Text style={styles.dgLabel}>{t('protoFill.dg.dateTime')}</Text>
+                      <Text style={styles.dgValue} numberOfLines={1}>
+                        {(protocol as any)?.ensayoDate
+                          ? (protocol as any).ensayoDate.split('-').reverse().join('/')
+                          : new Date().toLocaleDateString('es-PE')}
+                        {(protocol as any)?.ensayoTime ? `  ·  ${(protocol as any).ensayoTime}` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.dgRow}>
+                  <View style={styles.dgCell}>
+                    <Text style={styles.dgLabel}>{t('protoFill.dg.project')}</Text>
+                    <Text style={styles.dgValue} numberOfLines={2}>{projectName || '—'}</Text>
+                  </View>
+                  <View style={styles.dgCell}>
+                    <Text style={styles.dgLabel}>{t('protoFill.dg.dateTime')}</Text>
+                    <Text style={styles.dgValue} numberOfLines={1}>
+                      {(protocol as any)?.ensayoDate
+                        ? (protocol as any).ensayoDate.split('-').reverse().join('/')
+                        : new Date().toLocaleDateString('es-PE')}
+                      {(protocol as any)?.ensayoTime ? `  ·  ${(protocol as any).ensayoTime}` : ''}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.dgCell}>
-                  <Text style={styles.dgLabel}>{t('protoFill.dg.code')}</Text>
-                  <Text style={[styles.dgValue, (protocol as any)?.protocolCode && { color: Colors.navy, fontWeight: '900' }]} numberOfLines={1}>
-                    {(protocol as any)?.protocolCode ?? '—'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.dgRow}>
-                <View style={styles.dgCell}>
-                  <Text style={styles.dgLabel}>{t('protoFill.dg.test')}</Text>
-                  <Text style={styles.dgValue} numberOfLines={2}>{(protocol as any)?.protocolNumber ?? '—'}</Text>
-                </View>
-                <View style={styles.dgCell}>
-                  <Text style={styles.dgLabel}>{t('protoFill.dg.dateTime')}</Text>
-                  <Text style={styles.dgValue} numberOfLines={1}>
-                    {(protocol as any)?.ensayoDate
-                      ? (protocol as any).ensayoDate.split('-').reverse().join('/')
-                      : new Date().toLocaleDateString('es-PE')}
-                    {(protocol as any)?.ensayoTime ? `  ·  ${(protocol as any).ensayoTime}` : ''}
-                  </Text>
-                </View>
-              </View>
+              )}
               {location && (
                 <View style={styles.dgRow}>
                   <View style={styles.dgCell}>
