@@ -381,6 +381,7 @@ export default function PlanViewerPage() {
         imageUrl: blobUrl,
         logoUrl,
         comment: (project as any)?.stamp_comment ?? null,
+        projectName: (project as any)?.name ?? null,
       });
       URL.revokeObjectURL(blobUrl);
 

@@ -35,8 +35,10 @@ export interface StampOptions {
   imageUrl: string;
   /** URL del logo del proyecto (opcional) */
   logoUrl?: string | null;
-  /** Texto adicional bajo el timestamp (opcional) */
+  /** Comentario configurado del proyecto (opcional) */
   comment?: string | null;
+  /** Nombre del proyecto — va en la 1ª línea junto al comentario (opcional) */
+  projectName?: string | null;
   /** Calidad JPEG 0–1 (default 0.88) */
   quality?: number;
 }
@@ -45,7 +47,7 @@ export interface StampOptions {
  * Aplica el sello sobre la foto y devuelve un Blob JPEG.
  */
 export async function applyStamp(opts: StampOptions): Promise<Blob> {
-  const { imageUrl, logoUrl, comment, quality = 0.7 } = opts;
+  const { imageUrl, logoUrl, comment, projectName, quality = 0.7 } = opts;
 
   const img = await loadImage(imageUrl);
 
@@ -67,10 +69,10 @@ export async function applyStamp(opts: StampOptions): Promise<Blob> {
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(img, 0, 0, w, h);
 
-  // ── Timestamp + comentario (esquina superior izquierda) ──────────────────
+  // ── Encabezado "Nombre del proyecto - Comentario" + timestamp (sup. izq.) ──
   const timestamp = formatTimestamp(new Date());
-  const labelText = comment?.trim() ? `${timestamp}\n${comment.trim()}` : timestamp;
-  const lines = labelText.split('\n');
+  const header = [projectName?.trim(), comment?.trim()].filter(Boolean).join(' - ');
+  const lines = header ? [header, timestamp] : [timestamp];
 
   const FONT_SIZE = Math.max(14, Math.round(w * 0.016));
   ctx.font = `bold ${FONT_SIZE}px sans-serif`;

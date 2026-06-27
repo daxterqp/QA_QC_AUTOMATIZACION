@@ -57,7 +57,7 @@ export function ExtraPhotos({
       const blobUrl = URL.createObjectURL(file);
       const finalLogoKey = logoKey ?? (projectId ? `logos/project_${projectId}/logo.jpg` : null);
       const logoUrl = finalLogoKey ? `/api/s3-image-nocache?key=${encodeURIComponent(finalLogoKey)}` : null;
-      const stampedBlob = await applyStamp({ imageUrl: blobUrl, logoUrl, comment: stampComment ?? null });
+      const stampedBlob = await applyStamp({ imageUrl: blobUrl, logoUrl, comment: stampComment ?? null, projectName });
       URL.revokeObjectURL(blobUrl);
 
       const pos = keys.length + 1;

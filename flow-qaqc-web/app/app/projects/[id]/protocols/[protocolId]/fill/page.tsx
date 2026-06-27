@@ -322,6 +322,7 @@ export default function ProtocolFillPage() {
         imageUrl: blobUrl,
         logoUrl,
         comment: project?.stamp_comment ?? null,
+        projectName: project?.name ?? null,
       });
       URL.revokeObjectURL(blobUrl);
 

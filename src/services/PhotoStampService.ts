@@ -47,13 +47,14 @@ export async function applyPhotoStamps(
 ): Promise<string> {
   const timestamp = formatTimestamp(new Date());
 
-  // ── Paso 1: bloque superior-izquierdo, una línea por dato (proyecto, fecha, comentario, coords) ──
+  // ── Paso 1: bloque superior-izquierdo, una línea por dato ──
   // Un único texto con \n → la librería renderiza los saltos de línea de forma nativa, con el
-  // mismo fondo/estilo, sin superposición. El nombre del proyecto va PRIMERO; las coords ÚLTIMAS.
+  // mismo fondo/estilo, sin superposición. 1ª línea = "Nombre del proyecto - Comentario"
+  // (ej. "Proyecto Modelo - Fase I"); luego fecha/hora; las coords ÚLTIMAS.
   const lines: string[] = [];
-  if (projectName?.trim()) lines.push(projectName.trim());
+  const header = [projectName?.trim(), comment?.trim()].filter(Boolean).join(' - ');
+  if (header) lines.push(header);
   lines.push(timestamp);
-  if (comment?.trim()) lines.push(comment.trim());
   if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
     lines.push(`${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`);
   }
