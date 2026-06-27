@@ -120,6 +120,7 @@ export function useApproveLevel(protocolId: string) {
             is_locked: true,
             corrections_allowed: false,
             approval_reason: reason ?? null, // v33 — motivo del override (si aplica)
+            rejection_reason: null,          // bug-fix — al aprobar, el motivo de rechazo previo queda levantado
             updated_at: now,
           })
           .eq('id', protocolId);
@@ -208,6 +209,7 @@ export function useApproveProtocol(protocolId: string) {
           corrections_allowed: false,
           // v33 — motivo de aprobación (override fuera de rango); null si conforme.
           approval_reason: reason,
+          rejection_reason: null,          // bug-fix — al aprobar, el motivo de rechazo previo queda levantado
           updated_at: now,
         })
         .eq('id', protocolId);

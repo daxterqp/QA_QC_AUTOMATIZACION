@@ -43,11 +43,8 @@ import AppHeader from '@components/AppHeader';
 import QrCodeView from '@components/QrCodeView';
 import { buildQrIdentifier, buildProtocolDeepLink } from '@utils/qrCode';
 import NumericTable from '@components/NumericTable';
-import {
-  isNumericProtocol, parseNumericRow, parseNumeric, inRange,
-  splitRowComments, scopeKeyFor, extractMatrices, isValidDateText, isValidTimeText,
-} from '@utils/numericProtocol';
-import { resolveScopeCells, extractRefs, type ScopeCell } from '@utils/formulaEval';
+import { isNumericProtocol } from '@utils/numericProtocol';
+import { isProtocolConforming } from '@utils/protocolConformance';
 import { checkProtocolXrefStale, refreshProtocolXrefs } from '@services/XrefRefresh';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
 import { useI18n, tx } from '@i18n/index';
@@ -317,6 +314,9 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         p.signedById = currentUser?.id ?? null;
         (p as any).signedAt = Date.now();
         (p as any).approvalReason = reason;
+        // Bug-fix — al aprobar, el motivo de rechazo de iteraciones anteriores ya
+        // quedó "levantado": se limpia para que no persista en PDF/listas/fichas.
+        p.rejectionReason = null;
       });
     });
     // v25 — Push inmediato (si hay red) + enqueue (garantía offline).
@@ -411,91 +411,9 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const numericMode = isNumericProtocol(items.map(it => ({ validation_method: (it as any).validationMethod ?? null })));
   // v33 — `isConforming` = cumple TODAS las restricciones. El botón Aprobar
   // está SIEMPRE disponible; si no es conforme, se exige motivo (override).
-  const isConforming = (() => {
-    if (items.length === 0) return false;
-    if (!numericMode) {
-      return items.every((i) => i.hasAnswer && (i.isCompliant || (i as any).isNa === true));
-    }
-    // Modo numérico: construir scope live con matrices y validar cada celda
-    const parsedRows = items.map(it => ({
-      item: it,
-      spec: parseNumericRow((it as any).validationMethod ?? null),
-    }));
-    // v42e (M5) — usar `mainRows` (no `parsedRows`): extractMatrices reinterpreta una
-    // fila `val-[]` previa a cualquier matriz como fila normal de datos (igual que el
-    // congelado y NumericTable). Antes el audit la saltaba y una fórmula que la
-    // referenciara daba "Referencia desconocida" → bloqueaba Aprobar falsamente.
-    const { mainRows, matrices } = extractMatrices(parsedRows);
-    const scopeCells: ScopeCell[] = [];
-    for (const { item, spec } of mainRows) {
-      if (spec?.kind !== 'row') continue;
-      const partida = (item as any).partidaItem ?? '';
-      const cellVals = splitRowComments((item as any).comments ?? null, spec.cells.length);
-      for (let i = 0; i < spec.cells.length; i++) {
-        const cell = spec.cells[i];
-        const key = scopeKeyFor(partida, i);
-        // Mismo mapeo de kinds que NumericTable (v32): percent/bool → manual,
-        // date/time/equipment → list (texto). Sin esto, fórmulas que referencien
-        // esas celdas darían "Referencia desconocida" y bloquearían el Aprobar.
-        if (cell.kind === 'manual' || cell.kind === 'percent' || cell.kind === 'bool' || cell.kind === 'free') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
-        else if (cell.kind === 'list' || cell.kind === 'date' || cell.kind === 'time' || cell.kind === 'equipment' || cell.kind === 'text') scopeCells.push({ key, kind: 'list', raw: cellVals[i] ?? '' });
-        else if (cell.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: cell.refKey, matrixId: cell.matrixId, searchCol: cell.searchCol, returnCol: cell.returnCol });
-        // v42e (H4) — fórmulas con xref (@código) no se pueden re-evaluar en este
-        // recompute (xref no disponible aquí) → lanzaban 'xref-unsupported' y
-        // bloqueaban falsamente Aprobar en todo ensayo con llamados. En modo Audit
-        // el valor ya está CONGELADO en comments: lo leemos como manual (igual que el
-        // modo frozen de NumericTable). Las fórmulas SIN @ se recomputan igual que antes.
-        else if (cell.kind === 'formula' && cell.expr?.includes('@')) scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
-        else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
-        else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
-      }
-    }
-    // v46.1 — defensivo: si la resolución lanza, no se debe romper/blanquear el Audit
-    // (incluido el gráfico). Degrada a scope vacío (las celdas computadas mostrarán '—').
-    let scope: Record<string, number | null> = {};
-    let errors: Record<string, string> = {};
-    let textValues: Record<string, string> = {};
-    try { const r = resolveScopeCells(scopeCells, matrices, undefined, auxTables); scope = r.scope; errors = r.errors; textValues = r.textValues; }
-    catch { /* scope vacío */ }
-
-    for (const { item, spec } of mainRows) {
-      if (!spec) {
-        // Items SIN método (encabezados de sección, v31) no bloquean la
-        // aprobación — solo bloquea un método presente que NO parsea.
-        if (((item as any).validationMethod ?? '').trim() !== '') return false;
-        continue;
-      }
-      if (spec.kind !== 'row') continue;
-      const partida = (item as any).partidaItem ?? '';
-      for (let i = 0; i < spec.cells.length; i++) {
-        const cell = spec.cells[i];
-        const key = scopeKeyFor(partida, i);
-        if (cell.hidden) continue;   // v34 — celdas de cálculo ocultas no bloquean
-        if (errors[key]) return false;
-        const v = scope[key];
-        if (cell.kind === 'manual' || cell.kind === 'percent') {
-          if (v == null) return false;
-          if (!inRange(v, cell.range)) return false;
-        } else if (cell.kind === 'list' || cell.kind === 'bool' || cell.kind === 'equipment') {
-          if (!textValues[key]) return false;
-        } else if (cell.kind === 'date' || cell.kind === 'time') {
-          const txt = textValues[key];
-          if (!txt) return false;
-          if (!(cell.kind === 'date' ? isValidDateText(txt) : isValidTimeText(txt))) return false;
-        } else if (cell.kind === 'lookup') {
-          if (!textValues[key] && v == null) return false;
-        } else if (cell.kind === 'formula') {
-          if (v == null) return false;
-          try {
-            const deps = extractRefs(cell.expr);
-            if (!deps.every(d => scope[d] != null)) return false;
-          } catch { return false; }
-          if (cell.range && !inRange(v, cell.range)) return false;
-        }
-      }
-    }
-    return true;
-  })();
+  // Lógica extraída a `isProtocolConforming` (util compartido) para que el
+  // Dossier aplique EXACTAMENTE el mismo gating (aprobar con observación).
+  const isConforming = isProtocolConforming(items as any, auxTables);
   const requiresApprovalReason = !isConforming;
   // Confirmación del modal: valida el motivo obligatorio si no es conforme.
   const confirmApprove = async () => {

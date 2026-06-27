@@ -786,7 +786,7 @@ function buildProtocolPages(
     const cls = cfg.header_size === 'normal' ? '' : ' proto-info-compact';
     return `<div class="proto-info-grid${cls}" style="flex:1;">${rows}`;
   })()}
-    ${protocol.rejectionReason ? `
+    ${protocol.rejectionReason && protocol.status === 'REJECTED' ? `
     <div class="proto-info-row">
       <div class="proto-info-cell" style="background:#fce8e6;flex:1;">
         <span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span>

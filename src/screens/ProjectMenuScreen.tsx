@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -51,6 +51,9 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
   // Parte C — contadores de la tarjeta "Dossier de calidad" (mismos estados
   // que los mini-badges de la lista de proyectos).
   const [dossierCounts, setDossierCounts] = useState({ approved: 0, submitted: 0, rejected: 0 });
+  // Skeleton de los chips del Dossier hasta que el primer recuento resuelva. Evita
+  // el flash "0/0/0" al re-entrar/volver (lo que el usuario percibía como congelado).
+  const [countsReady, setCountsReady] = useState(false);
 
   const loadFlags = useCallback(() => projectsCollection.find(projectId).then((p: any) => {
     setFlags(parseFeatureFlagsJson(p?.featureFlags));
@@ -62,7 +65,8 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
       submitted: protos.filter(pr => (pr as any).status === 'SUBMITTED').length,
       rejected: protos.filter(pr => (pr as any).status === 'REJECTED').length,
     });
-  }).catch(() => {}), [projectId]);
+    setCountsReady(true);
+  }).catch(() => { setCountsReady(true); }), [projectId]);
 
   // v43 — En CADA focus (volver de aprobar/enviar un ensayo) recontamos LOCAL al
   // instante → los contadores del "Dossier de calidad" se actualizan. El pull
@@ -70,13 +74,21 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
   // de subpantalla, para no recargar la red innecesariamente).
   const didPullRef = useRef(false);
   useFocusEffect(useCallback(() => {
-    loadFlags();
-    recountDossier();
-    if (!didPullRef.current) {
-      didPullRef.current = true;
-      pullProjectSettings(projectId).then(loadFlags).catch(() => {});
-      pullProjectFromCloud(projectId).then(recountDossier).catch(() => {});
-    }
+    // Diferir el recuento/lectura local DESPUÉS de la animación de navegación:
+    // al retroceder del Dossier, correr la query en el mismo tick bloqueaba el
+    // hilo JS y la transición se sentía "congelada". runAfterInteractions deja
+    // que el back anime suave y recién entonces refresca (los datos previos
+    // siguen a la vista; los chips muestran skeleton solo en el primer montaje).
+    const task = InteractionManager.runAfterInteractions(() => {
+      loadFlags();
+      recountDossier();
+      if (!didPullRef.current) {
+        didPullRef.current = true;
+        pullProjectSettings(projectId).then(loadFlags).catch(() => {});
+        pullProjectFromCloud(projectId).then(recountDossier).catch(() => {});
+      }
+    });
+    return () => task.cancel();
   }, [projectId, loadFlags, recountDossier]));
 
   // #5 — Pull-to-refresh: re-baja settings + datos del proyecto desde la nube y
@@ -255,17 +267,28 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
           <View style={{ flex: 1 }}>
             <Text style={styles.optionTitle}>Dossier de calidad</Text>
             <Text style={styles.optionSubtitle}>Protocolos del proyecto y exportación del dosier PDF</Text>
-            {/* v32 — chips outline (solo borde de color) para no robar atención */}
+            {/* v32 — chips outline (solo borde de color) para no robar atención.
+                Skeleton mientras el primer recuento carga (evita flash 0/0/0). */}
             <View style={styles.dossierChipsRow}>
-              <View style={[styles.dossierChip, { borderColor: Colors.success }]}>
-                <Text style={[styles.dossierChipText, { color: Colors.success }]}>{dossierCounts.approved} aprobados</Text>
-              </View>
-              <View style={[styles.dossierChip, { borderColor: Colors.primary }]}>
-                <Text style={[styles.dossierChipText, { color: Colors.primary }]}>{dossierCounts.submitted} en revisión</Text>
-              </View>
-              <View style={[styles.dossierChip, { borderColor: Colors.danger }]}>
-                <Text style={[styles.dossierChipText, { color: Colors.danger }]}>{dossierCounts.rejected} rechazados</Text>
-              </View>
+              {countsReady ? (
+                <>
+                  <View style={[styles.dossierChip, { borderColor: Colors.success }]}>
+                    <Text style={[styles.dossierChipText, { color: Colors.success }]}>{dossierCounts.approved} aprobados</Text>
+                  </View>
+                  <View style={[styles.dossierChip, { borderColor: Colors.primary }]}>
+                    <Text style={[styles.dossierChipText, { color: Colors.primary }]}>{dossierCounts.submitted} en revisión</Text>
+                  </View>
+                  <View style={[styles.dossierChip, { borderColor: Colors.danger }]}>
+                    <Text style={[styles.dossierChipText, { color: Colors.danger }]}>{dossierCounts.rejected} rechazados</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.dossierChipSkeleton} />
+                  <View style={styles.dossierChipSkeleton} />
+                  <View style={styles.dossierChipSkeleton} />
+                </>
+              )}
             </View>
           </View>
           <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
@@ -337,6 +360,7 @@ const styles = StyleSheet.create({
   dossierChipsRow: { flexDirection: 'row', gap: 5, marginTop: 7, flexWrap: 'wrap' },
   dossierChip: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, backgroundColor: Colors.white },
   dossierChipText: { fontSize: 10, fontWeight: '800' },
+  dossierChipSkeleton: { width: 66, height: 18, borderRadius: 4, backgroundColor: Colors.border, opacity: 0.5 },
 
   hint: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 6,

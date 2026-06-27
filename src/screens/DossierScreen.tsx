@@ -11,7 +11,10 @@ import { Colors, Radius, Shadow } from '../theme/colors';
 import {
   database, protocolsCollection, usersCollection, projectsCollection,
   locationsCollection, protocolTemplatesCollection, projectSectorsCollection,
+  protocolItemsCollection, labAuxTablesCollection,
 } from '@db/index';
+import { isProtocolConforming } from '@utils/protocolConformance';
+import type { AuxTables } from '@utils/formulaEval';
 import { useAuth } from '@context/AuthContext';
 import { useNetwork } from '@context/NetworkContext';
 import { useTour } from '@context/TourContext';
@@ -55,6 +58,13 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const { isOnline } = useNetwork();
   const [allProtocols, setAllProtocols] = useState<Protocol[]>([]);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
+  // Bug-fix — conformidad por protocolo SUBMITTED: si NO es conforme (algún "No"
+  // / fuera de rango) la aprobación desde el Dossier debe exigir observación,
+  // igual que en la pantalla de revisión. `true` por defecto = conforme.
+  const [conformingById, setConformingById] = useState<Record<string, boolean>>({});
+  // Modal de "Aprobar con observación" (motivo obligatorio) desde el Dossier.
+  const [observeProtocol, setObserveProtocol] = useState<Protocol | null>(null);
+  const [observeReason, setObserveReason] = useState('');
   // Catálogos para los filtros (dinámicos según configuración del proyecto).
   const [typeOptions, setTypeOptions] = useState<{ id: string; label: string }[]>([]);
   const [locOptions, setLocOptions] = useState<{ id: string; label: string }[]>([]);
@@ -243,6 +253,35 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
       .sort((a, b) => a.label.localeCompare(b.label)));
     setLocOptions((locs as any[]).map(l => ({ id: l.id, label: l.name })));
     setSectorOptions((secs as any[]).map(s => ({ id: s.id, label: s.name })));
+
+    // Conformidad de los SUBMITTED (los únicos con botón Aprobar/Rechazar):
+    // carga sus ítems en UNA query + tablas auxiliares una vez, y reusa el mismo
+    // helper que la revisión → mismo gating "aprobar con observación".
+    const submitted = protocols.filter(p => p.status === 'SUBMITTED');
+    if (submitted.length > 0) {
+      try {
+        const ids = submitted.map(p => p.id);
+        const CHUNK = 90; // límite práctico de Q.oneOf
+        const items: any[] = [];
+        for (let i = 0; i < ids.length; i += CHUNK) {
+          const part = await protocolItemsCollection.query(Q.where('protocol_id', Q.oneOf(ids.slice(i, i + CHUNK)))).fetch();
+          items.push(...part);
+        }
+        const itemsByProto = new Map<string, any[]>();
+        for (const it of items) {
+          const k = (it as any).protocolId;
+          const arr = itemsByProto.get(k); if (arr) arr.push(it); else itemsByProto.set(k, [it]);
+        }
+        const tbls = await labAuxTablesCollection.query(Q.where('project_id', projectId)).fetch().catch(() => []);
+        const auxMap: AuxTables = {};
+        for (const tt of tbls as any[]) { try { auxMap[String(tt.groupKey).toLowerCase()] = { columns: JSON.parse(tt.columnsJson ?? '[]'), rows: JSON.parse(tt.rowsJson ?? '[]') }; } catch { /* corrupta */ } }
+        const conf: Record<string, boolean> = {};
+        for (const p of submitted) conf[p.id] = isProtocolConforming(itemsByProto.get(p.id) ?? [], auxMap);
+        setConformingById(conf);
+      } catch { setConformingById({}); }
+    } else {
+      setConformingById({});
+    }
   }, [projectId]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -323,27 +362,50 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   // recarga solo (sin tocar nada) mientras esta pantalla está abierta.
   useRealtimeProjectPull(projectId, loadData);
 
+  /** Aplica la aprobación. `reason` != null → aprobado CON observación (no conforme). */
+  const applyApproval = async (protocol: Protocol, reason: string | null) => {
+    let updated: Protocol | null = null;
+    await database.write(async () => {
+      updated = await protocol.update((p) => {
+        p.status = 'APPROVED';
+        p.isLocked = true;
+        p.signedById = currentUser?.id ?? null;
+        (p as any).signedAt = Date.now();
+        (p as any).approvalReason = reason;
+        // Bug-fix — al aprobar, el motivo de rechazo previo queda levantado.
+        p.rejectionReason = null;
+      });
+    });
+    if (updated) pushProtocolStatus(updated).catch(() => {});
+    upsertSummaryRow(protocol.id).catch(() => {});
+    await loadData();
+  };
+
   const handleApprove = (protocol: Protocol) => {
+    // Si el protocolo NO es conforme (algún "No" / fuera de rango), no se puede
+    // aprobar "normal": se abre el modal de observación (motivo obligatorio),
+    // igual que en la pantalla de revisión.
+    if (conformingById[protocol.id] === false) {
+      setObserveReason('');
+      setObserveProtocol(protocol);
+      return;
+    }
     Alert.alert(t('dossier.approveTitle'), t('dossier.approveMessage', { number: protocol.protocolNumber }), [
       { text: t('dossier.cancel'), style: 'cancel' },
-      {
-        text: t('dossier.approve'),
-        onPress: async () => {
-          let updated: Protocol | null = null;
-          await database.write(async () => {
-            updated = await protocol.update((p) => {
-              p.status = 'APPROVED';
-              p.isLocked = true;
-              p.signedById = currentUser?.id ?? null;
-              (p as any).signedAt = Date.now();
-            });
-          });
-          if (updated) pushProtocolStatus(updated).catch(() => {});
-          upsertSummaryRow(protocol.id).catch(() => {});
-          await loadData();
-        },
-      },
+      { text: t('dossier.approve'), onPress: () => { applyApproval(protocol, null).catch(() => {}); } },
     ]);
+  };
+
+  const confirmObserve = async () => {
+    const reason = observeReason.trim();
+    if (!reason) {
+      Alert.alert(t('protoAudit.reasonRequiredTitle'), t('protoAudit.approve.reasonRequiredMsg'));
+      return;
+    }
+    const proto = observeProtocol;
+    setObserveProtocol(null);
+    setObserveReason('');
+    if (proto) await applyApproval(proto, reason);
   };
 
   const handleReject = (protocol: Protocol) => {
@@ -559,13 +621,17 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 <Text style={styles.signedBy}>{t('dossier.approvedBy', { name: signedBy })}</Text>
               )}
 
-              {isJefe && isPending && (
+              {isJefe && isPending && (() => {
+                const needsObs = conformingById[item.id] === false;
+                return (
                 <View style={styles.actions}>
                   <TouchableOpacity
-                    style={styles.approveBtn}
+                    style={[styles.approveBtn, needsObs && styles.approveObsBtn]}
                     onPress={() => handleApprove(item)}
                   >
-                    <Text style={styles.approveBtnText}>{t('dossier.approve')}</Text>
+                    <Text style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]} numberOfLines={2}>
+                      {needsObs ? t('protoAudit.approveWithObservation') : t('dossier.approve')}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.rejectBtn}
@@ -574,12 +640,41 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                     <Text style={styles.rejectBtnText}>{t('dossier.reject')}</Text>
                   </TouchableOpacity>
                 </View>
-              )}
+                );
+              })()}
             </TouchableOpacity>
           );
         }}
       />
       </View>
+
+      {/* Bug-fix — Aprobar con observación desde el Dossier (motivo obligatorio
+          cuando el protocolo no es conforme), espejo de la pantalla de revisión. */}
+      <Modal visible={!!observeProtocol} transparent animationType="fade" onRequestClose={() => setObserveProtocol(null)}>
+        <View style={styles.obsOverlay}>
+          <View style={styles.obsCard}>
+            <Text style={styles.obsTitle}>{t('protoAudit.approveWithObservation')}</Text>
+            <Text style={styles.obsHint}>{t('protoAudit.approve.reasonRequiredMsg')}</Text>
+            <TextInput
+              style={styles.obsInput}
+              placeholder={t('protoAudit.approve.reasonRequiredMsg')}
+              placeholderTextColor={Colors.textMuted}
+              value={observeReason}
+              onChangeText={setObserveReason}
+              multiline
+              autoFocus
+            />
+            <View style={styles.obsActions}>
+              <TouchableOpacity style={styles.obsCancelBtn} onPress={() => { setObserveProtocol(null); setObserveReason(''); }} activeOpacity={0.7}>
+                <Text style={styles.obsCancelText}>{t('dossier.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.obsConfirmBtn} onPress={() => { confirmObserve().catch(() => {}); }} activeOpacity={0.7}>
+                <Text style={styles.obsConfirmText}>{t('protoAudit.approveWithObservation')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* v43.4 — Config de impresión PDF por TIPO de ensayo (solo Creador) */}
       <Modal visible={showPrintCfg} transparent animationType="slide" onRequestClose={savePrintConfig}>
@@ -827,7 +922,21 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: '#eaf7ee', borderRadius: Radius.md,
     padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#1e8e3e',
   },
-  approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3 },
+  approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3, textAlign: 'center' },
+  // Aprobar con observación (no conforme): ámbar, igual que la revisión.
+  approveObsBtn: { backgroundColor: '#fef7e8', borderColor: '#e37400' },
+  approveObsBtnText: { color: '#b06000' },
+  // Modal de observación
+  obsOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.55)', justifyContent: 'center', padding: 24 },
+  obsCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 18, gap: 10 },
+  obsTitle: { fontSize: 16, fontWeight: '800', color: Colors.navy },
+  obsHint: { fontSize: 12, color: Colors.textSecondary },
+  obsInput: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: 10, fontSize: 14, color: Colors.textPrimary, minHeight: 80, textAlignVertical: 'top', backgroundColor: Colors.white },
+  obsActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  obsCancelBtn: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
+  obsCancelText: { fontSize: 14, fontWeight: '800', color: Colors.textSecondary },
+  obsConfirmBtn: { flex: 1.4, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: Radius.md, backgroundColor: '#e37400' },
+  obsConfirmText: { fontSize: 13, fontWeight: '800', color: Colors.white, textAlign: 'center' },
   rejectBtn: {
     flex: 1, backgroundColor: '#fdf0ef', borderRadius: Radius.md,
     padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#d93025',

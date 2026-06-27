@@ -670,7 +670,7 @@ function buildProtocolPages(
     const perRow = Math.max(1, Math.ceil(cells.length / nRows));
     let rows = '';
     for (let i = 0; i < cells.length; i += perRow) rows += `<div class="proto-info-row">${cells.slice(i, i + perRow).join('')}</div>`;
-    const rej = (p as any).rejection_reason
+    const rej = ((p as any).rejection_reason && (p as any).status === 'REJECTED')
       ? `<div class="proto-info-row"><div class="proto-info-cell" style="background:#fce8e6;flex:1;"><span class="proto-info-label" style="color:#d93025;">Motivo rechazo</span><span class="proto-info-value" style="color:#d93025;">${escHtml((p as any).rejection_reason)}</span></div></div>`
       : '';
     const cls = cfg.header_size === 'normal' ? '' : ' proto-info-compact';
