@@ -769,7 +769,7 @@ function buildProtocolPages(
     // Valor de cada campo disponible.
     const fieldHtml: Record<string, string> = {
       proyecto: cell('Proyecto', projectName),
-      fecha: cell('Fecha', today),
+      fecha: cell('Fecha de impresión', today),
       supervisor: cell('Supervisor', filledName),
       f_realizacion: cell('Fecha realización', fmtDateTime(protocol.filledAt ?? protocol.submittedAt)),
       f_aprobacion: cell('Fecha aprobación', fmtDateTime(protocol.signedAt)),

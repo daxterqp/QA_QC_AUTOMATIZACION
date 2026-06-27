@@ -103,7 +103,7 @@ export const DEFAULT_HEADER_COLOR = '#0e213d';
 /** Catálogo de campos disponibles para el encabezado de datos generales (clave + etiqueta). */
 export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'proyecto', label: 'Proyecto' },
-  { key: 'fecha', label: 'Fecha' },
+  { key: 'fecha', label: 'Fecha de impresión' },
   { key: 'supervisor', label: 'Supervisor' },
   { key: 'f_realizacion', label: 'Fecha realización' },
   { key: 'f_aprobacion', label: 'Fecha aprobación' },
@@ -113,7 +113,7 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
 ];
 // Especialidad va seleccionada por defecto; al renderizar solo aparece en
 // protocolos CLÁSICOS (en numéricos se ignora), por lo que es seguro incluirla.
-export const DEFAULT_HEADER_FIELDS = ['proyecto', 'fecha', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion', 'especialidad'];
+export const DEFAULT_HEADER_FIELDS = ['proyecto', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion', 'especialidad'];
 /** Filas del encabezado por nivel. */
 export const PRINT_HEADER_ROWS: Record<PrintHeaderSize, number> = { normal: 3, compact: 2, xcompact: 1 };
 /** Factor de escala de fuente por nivel (compacta las tablas). */

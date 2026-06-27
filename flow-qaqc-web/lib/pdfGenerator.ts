@@ -657,7 +657,7 @@ function buildProtocolPages(
     const cell = (label: string, value: string) => `<div class="proto-info-cell"><span class="proto-info-label">${escHtml(label)}</span><span class="proto-info-value">${escHtml(value)}</span></div>`;
     const fieldHtml: Record<string, string> = {
       proyecto: cell('Proyecto', projectName),
-      fecha: cell('Fecha', today),
+      fecha: cell('Fecha de impresión', today),
       supervisor: cell('Supervisor', filledName),
       f_realizacion: cell('Fecha realización', fmtDateTime(p.updated_at)),
       f_aprobacion: cell('Fecha aprobación', fmtDateTime(p.signed_at)),
