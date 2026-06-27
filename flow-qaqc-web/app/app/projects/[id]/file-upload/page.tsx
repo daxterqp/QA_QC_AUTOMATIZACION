@@ -971,12 +971,15 @@ export default function FileUploadPage() {
   const visibleTabs = TABS.filter(tab => {
     if (!flags) return tab.id === 'actividades' || tab.id === 'ubicaciones' || tab.id === 'configuracion';
     // Paridad con la config del proyecto: ocultar pestañas de módulos APAGADOS.
-    //  - actividades/equipos (maquinaria) = trazabilidad (tareo).
+    //  - actividades = importar plantillas de protocolos (CORE) → módulos de protocolos
+    //    (clásicos / por ubicación), NO trazabilidad. Ambos ON por defecto.
+    //  - equipos (maquinaria) = trazabilidad (tareo).
     //  - sectores = geolocalización o llenado por sector.
     //  - el resto (ubicaciones, equipos_lab=calibración, planos, dwg, normas, historicos,
     //    configuracion) es estándar y siempre visible.
     switch (tab.id) {
       case 'actividades':
+        return !!flags.classic_protocols || !!flags.module_protocols_by_location;
       case 'equipos':
         return !!flags.traceability_module;
       case 'sectores':

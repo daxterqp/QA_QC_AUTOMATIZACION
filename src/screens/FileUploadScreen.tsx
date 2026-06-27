@@ -96,8 +96,13 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   // Si la pestaña activa pertenece a un módulo que quedó apagado, saltar a Ubicaciones.
   useEffect(() => {
     if (!flags) return;
+    // Actividades = importar plantillas de protocolos (CORE) → atado a los módulos de
+    // protocolos (clásicos / por ubicación), NO a trazabilidad. Equipos (maquinaria) sí
+    // es trazabilidad.
+    const protocolsEnabled = !!flags.classic_protocols || !!flags.module_protocols_by_location;
     const hidden =
-      ((activeTab === 'actividades' || activeTab === 'equipos') && !isTraceabilityEnabled(flags)) ||
+      (activeTab === 'actividades' && !protocolsEnabled) ||
+      (activeTab === 'equipos' && !isTraceabilityEnabled(flags)) ||
       (activeTab === 'sectores' && !(isGeolocationEnabled(flags) || !!flags.fill_by_sector));
     if (hidden) setActiveTab('ubicaciones');
   }, [flags, activeTab]);
@@ -1062,6 +1067,9 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     if (!flags) return true; // mientras carga, no ocultamos (evita parpadeo de la pestaña default)
     switch (tb.key) {
       case 'actividades':
+        // CORE: importar plantillas de protocolos. Visible si el proyecto usa
+        // protocolos (clásicos o por ubicación) — ambos ON por defecto.
+        return !!flags.classic_protocols || !!flags.module_protocols_by_location;
       case 'equipos':
         return isTraceabilityEnabled(flags);
       case 'sectores':
