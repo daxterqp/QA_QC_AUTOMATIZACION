@@ -924,8 +924,9 @@ function buildProtocolPages(
       } else {
         if (!item.has_answer) conformeHtml = `<span class="td-noanswer">—</span>`;
         else if (item.is_na) conformeHtml = `<span style="color:#888;font-weight:700;">N/A</span>`;
-        else if (item.is_compliant === true) conformeHtml = `<span class="td-compliant">✓</span>`;
-        else conformeHtml = `<span class="td-noncompliant">✗</span>`;
+        // ✓/✗ como SVG (igual que el PDF numérico): el glyph Unicode descuadraba el alto de la fila.
+        else if (item.is_compliant === true) conformeHtml = `<svg width="13" height="13" viewBox="0 0 16 16" style="display:inline-block;vertical-align:middle;"><path d="M4.8 9.8 L6.7 12.3 L13.5 4.5" stroke="#137333" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+        else conformeHtml = `<svg width="13" height="13" viewBox="0 0 16 16" style="display:inline-block;vertical-align:middle;"><path d="M4 4 L12 12 M12 4 L4 12" stroke="#d93025" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>`;
       }
       // Multi-cell ocupa más ancho — colapsamos la columna método y la columna obs.
       if (isMultiCellRow) {

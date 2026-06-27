@@ -923,9 +923,11 @@ function buildProtocolPages(
       } else if ((item as any).isNa) {
         conformeHtml = `<span style="color:#e37400;font-weight:700;font-size:10px;">N/A</span>`;
       } else if (item.isCompliant) {
-        conformeHtml = `<span class="td-compliant">✓</span>`;
+        // ✓ como SVG (igual que el PDF numérico): el glyph Unicode ✓ descuadraba
+        // el alto de la fila por sus métricas de fuente.
+        conformeHtml = `<svg width="13" height="13" viewBox="0 0 16 16" style="display:inline-block;vertical-align:middle;"><path d="M4.8 9.8 L6.7 12.3 L13.5 4.5" stroke="#137333" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       } else {
-        conformeHtml = `<span class="td-noncompliant">✗</span>`;
+        conformeHtml = `<svg width="13" height="13" viewBox="0 0 16 16" style="display:inline-block;vertical-align:middle;"><path d="M4 4 L12 12 M12 4 L4 12" stroke="#d93025" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>`;
       }
       const commentHtml = item.comments ? escHtml(item.comments) : '';
       itemsHtml += `
