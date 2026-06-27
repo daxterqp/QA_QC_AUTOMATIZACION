@@ -3,7 +3,8 @@
     "name": "Flow-QA/QC",
     "slug": "scua-qaqc",
     "version": "2.0.6",
-    "scheme": "flow",
+    "newArchEnabled": false,
+    "scheme": ["flow", "com.vxp.scua"],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -30,6 +31,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.vxp.scua",
+      "versionCode": 26,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -49,7 +51,7 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "1.8.0"
+            "kotlinVersion": "2.0.21"
           }
         }
       ],
