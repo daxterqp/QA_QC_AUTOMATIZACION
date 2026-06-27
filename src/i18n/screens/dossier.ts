@@ -59,6 +59,8 @@ const dossier: Record<string, { es: string; en: string; pt: string }> = {
   'dossier.dateFrom': { es: 'Desde', en: 'From', pt: 'De' },
   'dossier.dateTo': { es: 'Hasta', en: 'To', pt: 'Até' },
   'dossier.anyDate': { es: 'Cualquiera', en: 'Any', pt: 'Qualquer' },
+  'dossier.applyFilter': { es: 'Aplicar', en: 'Apply', pt: 'Aplicar' },
+  'dossier.observedHint': { es: 'con observaciones', en: 'with observations', pt: 'com observações' },
 
   // Lista vacía
   'dossier.empty': { es: 'Sin protocolos enviados aun.', en: 'No protocols submitted yet.', pt: 'Nenhum protocolo enviado ainda.' },

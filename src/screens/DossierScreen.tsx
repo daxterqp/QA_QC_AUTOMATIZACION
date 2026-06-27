@@ -14,7 +14,9 @@ import {
   protocolItemsCollection, labAuxTablesCollection,
 } from '@db/index';
 import { isProtocolConforming } from '@utils/protocolConformance';
+import { isNumericProtocol } from '@utils/numericProtocol';
 import type { AuxTables } from '@utils/formulaEval';
+import { DateRangePicker } from '@components/DateRangePicker';
 import { useAuth } from '@context/AuthContext';
 import { useNetwork } from '@context/NetworkContext';
 import { useTour } from '@context/TourContext';
@@ -62,6 +64,11 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   // / fuera de rango) la aprobación desde el Dossier debe exigir observación,
   // igual que en la pantalla de revisión. `true` por defecto = conforme.
   const [conformingById, setConformingById] = useState<Record<string, boolean>>({});
+  // Conteo de ítems por protocolo CLÁSICO: correctos (Sí/N/A) y observados (No).
+  // `classic` distingue clásico de numérico (los numéricos no llevan badge).
+  const [countsById, setCountsById] = useState<Record<string, { ok: number; obs: number; classic: boolean }>>({});
+  // Permite aprobar con observación directo desde la lista (flag del proyecto).
+  const [observeInline, setObserveInline] = useState(false);
   // Modal de "Aprobar con observación" (motivo obligatorio) desde el Dossier.
   const [observeProtocol, setObserveProtocol] = useState<Protocol | null>(null);
   const [observeReason, setObserveReason] = useState('');
@@ -70,14 +77,28 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const [locOptions, setLocOptions] = useState<{ id: string; label: string }[]>([]);
   const [sectorOptions, setSectorOptions] = useState<{ id: string; label: string }[]>([]);
 
-  // Estado de filtros. Fecha/Estado/Tipo siempre; Ubicación/Sector dinámicos.
+  // Estado de filtros — multiselección (Set) + rango de fechas en ms.
   const [showFilters, setShowFilters] = useState(false);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFromMs, setDateFromMs] = useState<number | null>(null);
+  const [dateToMs, setDateToMs] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(['APPROVED', 'SUBMITTED', 'REJECTED']));
-  const [typeFilter, setTypeFilter] = useState('');
-  const [locFilter, setLocFilter] = useState('');
-  const [sectorFilter, setSectorFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [locFilter, setLocFilter] = useState<Set<string>>(new Set());
+  const [sectorFilter, setSectorFilter] = useState<Set<string>>(new Set());
+  // Modal multiselección de Tipo / Ubicación / Sector.
+  const [showFilterPicker, setShowFilterPicker] = useState<null | 'tipo' | 'ubicacion' | 'sector'>(null);
+
+  const toggleInSet = (set: Set<string>, id: string): Set<string> => {
+    const next = new Set(set); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  };
+  // Rango de fechas en formato YYYY-MM-DD para comparar con protocolDayKey.
+  const ymd = (ms: number | null): string => {
+    if (ms == null) return '';
+    const d = new Date(ms); const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+  const dateFrom = ymd(dateFromMs);
+  const dateTo = ymd(dateToMs);
 
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
   const isCreator = currentUser?.role === 'CREATOR';
@@ -254,13 +275,19 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     setLocOptions((locs as any[]).map(l => ({ id: l.id, label: l.name })));
     setSectorOptions((secs as any[]).map(s => ({ id: s.id, label: s.name })));
 
-    // Conformidad de los SUBMITTED (los únicos con botón Aprobar/Rechazar):
-    // carga sus ítems en UNA query + tablas auxiliares una vez, y reusa el mismo
-    // helper que la revisión → mismo gating "aprobar con observación".
-    const submitted = protocols.filter(p => p.status === 'SUBMITTED');
-    if (submitted.length > 0) {
+    // Flag del proyecto: aprobar con observación directo desde la lista.
+    try {
+      const projRows = await projectsCollection.query(Q.where('id', projectId)).fetch();
+      const flags = parseFeatureFlagsJson((projRows[0] as any)?.featureFlags);
+      setObserveInline(!!(flags as any).dossier_observe_inline);
+    } catch { /* deja el valor previo */ }
+
+    // Conteo de ítems (TODAS las tarjetas clásicas) + conformidad (solo SUBMITTED,
+    // que son los únicos con botón Aprobar): carga los ítems en UNA query + tablas
+    // auxiliares una vez. La conformidad reusa el mismo helper que la revisión.
+    if (protocols.length > 0) {
       try {
-        const ids = submitted.map(p => p.id);
+        const ids = protocols.map(p => p.id);
         const CHUNK = 90; // límite práctico de Q.oneOf
         const items: any[] = [];
         for (let i = 0; i < ids.length; i += CHUNK) {
@@ -276,11 +303,27 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
         const auxMap: AuxTables = {};
         for (const tt of tbls as any[]) { try { auxMap[String(tt.groupKey).toLowerCase()] = { columns: JSON.parse(tt.columnsJson ?? '[]'), rows: JSON.parse(tt.rowsJson ?? '[]') }; } catch { /* corrupta */ } }
         const conf: Record<string, boolean> = {};
-        for (const p of submitted) conf[p.id] = isProtocolConforming(itemsByProto.get(p.id) ?? [], auxMap);
+        const counts: Record<string, { ok: number; obs: number; classic: boolean }> = {};
+        for (const p of protocols) {
+          const its = itemsByProto.get(p.id) ?? [];
+          // Solo protocolos CLÁSICOS llevan badge de ítems correctos/observados.
+          const classic = !isNumericProtocol(its.map((it: any) => ({ validation_method: it.validationMethod ?? null })));
+          if (classic) {
+            const ok = its.filter((i: any) => i.hasAnswer && (i.isCompliant || i.isNa === true)).length;
+            const obs = its.filter((i: any) => i.hasAnswer && !i.isCompliant && i.isNa !== true).length;
+            counts[p.id] = { ok, obs, classic: true };
+          } else {
+            counts[p.id] = { ok: 0, obs: 0, classic: false };
+          }
+          // Conformidad solo para los SUBMITTED (los que muestran botón Aprobar).
+          if (p.status === 'SUBMITTED') conf[p.id] = isProtocolConforming(its, auxMap);
+        }
         setConformingById(conf);
-      } catch { setConformingById({}); }
+        setCountsById(counts);
+      } catch { setConformingById({}); setCountsById({}); }
     } else {
       setConformingById({});
+      setCountsById({});
     }
   }, [projectId]);
 
@@ -294,17 +337,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     return toDateKey(new Date(typeof ts === 'number' ? ts : ts?.getTime?.() ?? Date.now()));
   };
 
-  // Fechas disponibles (para los selectores Desde/Hasta), desc.
-  const dateChoices = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of allProtocols) set.add(protocolDayKey(p));
-    return Array.from(set).sort((a, b) => b.localeCompare(a));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProtocols]);
-
-  const hasActiveFilters = !!dateFrom || !!dateTo || !!typeFilter || !!locFilter || !!sectorFilter || statusFilter.size !== 3;
+  const hasActiveFilters = dateFromMs != null || dateToMs != null || typeFilter.size > 0 || locFilter.size > 0 || sectorFilter.size > 0 || statusFilter.size !== 3;
   const clearFilters = () => {
-    setDateFrom(''); setDateTo(''); setTypeFilter(''); setLocFilter(''); setSectorFilter('');
+    setDateFromMs(null); setDateToMs(null); setTypeFilter(new Set()); setLocFilter(new Set()); setSectorFilter(new Set());
     setStatusFilter(new Set(['APPROVED', 'SUBMITTED', 'REJECTED']));
   };
   const toggleStatus = (k: string) => setStatusFilter(prev => {
@@ -317,9 +352,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const sections = useMemo<DaySection[]>(() => {
     const filtered = allProtocols.filter(p => {
       if (!statusFilter.has(p.status)) return false;
-      if (typeFilter && (p as any).templateId !== typeFilter) return false;
-      if (worksByLocations && locFilter && (p as any).locationId !== locFilter) return false;
-      if (worksBySectors && sectorFilter && (p as any).sectorId !== sectorFilter) return false;
+      if (typeFilter.size > 0 && !typeFilter.has((p as any).templateId)) return false;
+      if (worksByLocations && locFilter.size > 0 && !locFilter.has((p as any).locationId)) return false;
+      if (worksBySectors && sectorFilter.size > 0 && !sectorFilter.has((p as any).sectorId)) return false;
       if (dateFrom || dateTo) {
         const day = protocolDayKey(p);
         if (dateFrom && day < dateFrom) return false;
@@ -381,18 +416,12 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     await loadData();
   };
 
+  // Solo se invoca para protocolos CONFORMES (aprobar y firmar directo). El
+  // ruteo del caso no conforme (modal vs abrir) lo decide el botón de la tarjeta.
   const handleApprove = (protocol: Protocol) => {
-    // Si el protocolo NO es conforme (algún "No" / fuera de rango), no se puede
-    // aprobar "normal": se abre el modal de observación (motivo obligatorio),
-    // igual que en la pantalla de revisión.
-    if (conformingById[protocol.id] === false) {
-      setObserveReason('');
-      setObserveProtocol(protocol);
-      return;
-    }
     Alert.alert(t('dossier.approveTitle'), t('dossier.approveMessage', { number: protocol.protocolNumber }), [
       { text: t('dossier.cancel'), style: 'cancel' },
-      { text: t('dossier.approve'), onPress: () => { applyApproval(protocol, null).catch(() => {}); } },
+      { text: t('protoAudit.approveAndSign'), onPress: () => { applyApproval(protocol, null).catch(() => {}); } },
     ]);
   };
 
@@ -508,54 +537,45 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
             })}
           </View>
 
-          {/* Tipo de ensayo (siempre) */}
-          {typeOptions.length > 0 && (
-            <>
-              <Text style={styles.filterLabel}>{t('dossier.testType')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <ChoiceChip label={t('dossier.allMasc')} on={!typeFilter} onPress={() => setTypeFilter('')} />
-                {typeOptions.map(o => <ChoiceChip key={o.id} label={o.label} on={typeFilter === o.id} onPress={() => setTypeFilter(o.id)} />)}
-              </ScrollView>
-            </>
-          )}
+          {/* Tipo / Ubicación / Sector — botones que abren un modal multiselección */}
+          <Text style={styles.filterLabel}>{t('dossier.testType')}{worksByLocations ? ` · ${t('dossier.location')}` : ''}{worksBySectors ? ` · ${t('dossier.sector')}` : ''}</Text>
+          <View style={styles.chipRow}>
+            {typeOptions.length > 0 && (
+              <FilterPickerChip
+                icon="flask-outline"
+                active={typeFilter.size > 0}
+                label={typeFilter.size === 0 ? t('dossier.testType') : typeFilter.size === 1 ? (typeOptions.find(o => typeFilter.has(o.id))?.label ?? t('dossier.testType')) : `${t('dossier.testType')} (${typeFilter.size})`}
+                onPress={() => setShowFilterPicker('tipo')}
+                onClear={() => setTypeFilter(new Set())}
+              />
+            )}
+            {worksByLocations && (
+              <FilterPickerChip
+                icon="location-outline"
+                active={locFilter.size > 0}
+                label={locFilter.size === 0 ? t('dossier.location') : locFilter.size === 1 ? (locOptions.find(o => locFilter.has(o.id))?.label ?? t('dossier.location')) : `${t('dossier.location')} (${locFilter.size})`}
+                onPress={() => setShowFilterPicker('ubicacion')}
+                onClear={() => setLocFilter(new Set())}
+              />
+            )}
+            {worksBySectors && (
+              <FilterPickerChip
+                icon="grid-outline"
+                active={sectorFilter.size > 0}
+                label={sectorFilter.size === 0 ? t('dossier.sector') : sectorFilter.size === 1 ? (sectorOptions.find(o => sectorFilter.has(o.id))?.label ?? t('dossier.sector')) : `${t('dossier.sector')} (${sectorFilter.size})`}
+                onPress={() => setShowFilterPicker('sector')}
+                onClear={() => setSectorFilter(new Set())}
+              />
+            )}
+          </View>
 
-          {/* Ubicación (solo si trabaja por ubicaciones) */}
-          {worksByLocations && (
-            <>
-              <Text style={styles.filterLabel}>{t('dossier.location')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <ChoiceChip label={t('dossier.allFem')} on={!locFilter} onPress={() => setLocFilter('')} />
-                {locOptions.map(o => <ChoiceChip key={o.id} label={o.label} on={locFilter === o.id} onPress={() => setLocFilter(o.id)} />)}
-              </ScrollView>
-            </>
-          )}
-
-          {/* Sector (solo si trabaja por sectores) */}
-          {worksBySectors && (
-            <>
-              <Text style={styles.filterLabel}>{t('dossier.sector')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <ChoiceChip label={t('dossier.allMasc')} on={!sectorFilter} onPress={() => setSectorFilter('')} />
-                {sectorOptions.map(o => <ChoiceChip key={o.id} label={o.label} on={sectorFilter === o.id} onPress={() => setSectorFilter(o.id)} />)}
-              </ScrollView>
-            </>
-          )}
-
-          {/* Rango de fechas (Desde / Hasta) entre las fechas disponibles */}
-          {dateChoices.length > 0 && (
-            <>
-              <Text style={styles.filterLabel}>{t('dossier.dateFrom')}{dateFrom ? ` · ${dateFrom}` : ''}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <ChoiceChip label={t('dossier.anyDate')} on={!dateFrom} onPress={() => setDateFrom('')} />
-                {dateChoices.map(d => <ChoiceChip key={`f-${d}`} label={d} on={dateFrom === d} onPress={() => setDateFrom(d)} />)}
-              </ScrollView>
-              <Text style={styles.filterLabel}>{t('dossier.dateTo')}{dateTo ? ` · ${dateTo}` : ''}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                <ChoiceChip label={t('dossier.anyDate')} on={!dateTo} onPress={() => setDateTo('')} />
-                {dateChoices.map(d => <ChoiceChip key={`t-${d}`} label={d} on={dateTo === d} onPress={() => setDateTo(d)} />)}
-              </ScrollView>
-            </>
-          )}
+          {/* Rango de fechas (Desde / Hasta) con calendario */}
+          <Text style={styles.filterLabel}>{t('dossier.dateFrom')} · {t('dossier.dateTo')}</Text>
+          <DateRangePicker
+            fromMs={dateFromMs}
+            toMs={dateToMs}
+            onChange={(from, to) => { setDateFromMs(from); setDateToMs(to); }}
+          />
         </View>
       )}
 
@@ -621,16 +641,50 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 <Text style={styles.signedBy}>{t('dossier.approvedBy', { name: signedBy })}</Text>
               )}
 
+              {/* Badge de ítems (solo protocolos clásicos): ✓ correctos / ✗ observados */}
+              {countsById[item.id]?.classic && (
+                <View style={styles.itemBadgesRow}>
+                  <View style={styles.itemBadge}>
+                    <Ionicons name="checkmark-circle" size={14} color="#1e8e3e" />
+                    <Text style={[styles.itemBadgeText, { color: '#1e8e3e' }]}>{countsById[item.id].ok}</Text>
+                  </View>
+                  <View style={styles.itemBadge}>
+                    <Ionicons name="close-circle" size={14} color="#d93025" />
+                    <Text style={[styles.itemBadgeText, { color: '#d93025' }]}>{countsById[item.id].obs}</Text>
+                  </View>
+                  {countsById[item.id].obs > 0 && (
+                    <Text style={styles.itemBadgeHint}>{t('dossier.observedHint')}</Text>
+                  )}
+                </View>
+              )}
+
               {isJefe && isPending && (() => {
+                // Espera a que la conformidad esté calculada para evitar el parpadeo
+                // verde→ámbar (antes el botón salía verde y luego cambiaba).
+                const confKnown = item.id in conformingById;
+                if (!confKnown) {
+                  return (
+                    <View style={styles.actions}>
+                      <View style={[styles.approveBtn, styles.btnSkeleton]} />
+                      <View style={[styles.rejectBtn, styles.btnSkeleton]} />
+                    </View>
+                  );
+                }
                 const needsObs = conformingById[item.id] === false;
                 return (
                 <View style={styles.actions}>
                   <TouchableOpacity
                     style={[styles.approveBtn, needsObs && styles.approveObsBtn]}
-                    onPress={() => handleApprove(item)}
+                    onPress={() => {
+                      if (!needsObs) { handleApprove(item); return; }
+                      // No conforme: con la opción ON aprueba con observación directo
+                      // (modal); con OFF (default) hay que ABRIR el protocolo.
+                      if (observeInline) { setObserveReason(''); setObserveProtocol(item); }
+                      else { onOpenProtocol(item.id, item.status); }
+                    }}
                   >
                     <Text style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]} numberOfLines={2}>
-                      {needsObs ? t('protoAudit.approveWithObservation') : t('dossier.approve')}
+                      {needsObs ? t('protoAudit.approveWithObservation') : t('protoAudit.approveAndSign')}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -674,6 +728,51 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal multiselección de Tipo / Ubicación / Sector (patrón de Ensayos) */}
+      <Modal visible={showFilterPicker != null} transparent animationType="fade" onRequestClose={() => setShowFilterPicker(null)}>
+        <TouchableOpacity style={styles.pickOverlay} activeOpacity={1} onPress={() => setShowFilterPicker(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.pickCard} onPress={() => { /* swallow */ }}>
+            <View style={styles.pickHeaderRow}>
+              <Text style={styles.pickTitle}>
+                {showFilterPicker === 'tipo' ? t('dossier.testType') : showFilterPicker === 'ubicacion' ? t('dossier.location') : t('dossier.sector')}
+              </Text>
+              <TouchableOpacity onPress={() => setShowFilterPicker(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={20} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            {(() => {
+              const opts = showFilterPicker === 'tipo' ? typeOptions : showFilterPicker === 'ubicacion' ? locOptions : sectorOptions;
+              const sel = showFilterPicker === 'tipo' ? typeFilter : showFilterPicker === 'ubicacion' ? locFilter : sectorFilter;
+              const setSel = showFilterPicker === 'tipo' ? setTypeFilter : showFilterPicker === 'ubicacion' ? setLocFilter : setSectorFilter;
+              return (
+                <ScrollView style={{ maxHeight: 380 }}>
+                  <TouchableOpacity style={styles.pickItem} onPress={() => setSel(new Set())}>
+                    <View style={styles.pickCheckbox} />
+                    <Text style={[styles.pickItemText, { fontStyle: 'italic', color: Colors.textSecondary }]}>
+                      {showFilterPicker === 'ubicacion' ? t('dossier.allFem') : t('dossier.allMasc')}
+                    </Text>
+                  </TouchableOpacity>
+                  {opts.map(o => {
+                    const on = sel.has(o.id);
+                    return (
+                      <TouchableOpacity key={o.id} style={[styles.pickItem, on && styles.pickItemActive]} onPress={() => setSel(prev => toggleInSet(prev, o.id))}>
+                        <View style={[styles.pickCheckbox, on && styles.pickCheckboxActive]}>
+                          {on && <Ionicons name="checkmark" size={12} color={Colors.white} />}
+                        </View>
+                        <Text style={styles.pickItemText} numberOfLines={1}>{o.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              );
+            })()}
+            <TouchableOpacity style={styles.pickApplyBtn} onPress={() => setShowFilterPicker(null)}>
+              <Text style={styles.pickApplyText}>{t('dossier.applyFilter')}</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* v43.4 — Config de impresión PDF por TIPO de ensayo (solo Creador) */}
@@ -874,10 +973,19 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   );
 }
 
-function ChoiceChip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+/** Chip que abre un modal de selección múltiple (Tipo/Ubicación/Sector). */
+function FilterPickerChip({ icon, active, label, onPress, onClear }: {
+  icon: any; active: boolean; label: string; onPress: () => void; onClear: () => void;
+}) {
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.choiceChip, on && styles.choiceChipOn]}>
-      <Text style={[styles.choiceChipText, on && styles.choiceChipTextOn]} numberOfLines={1}>{label}</Text>
+    <TouchableOpacity style={[styles.pickerChip, active && styles.pickerChipActive]} onPress={onPress} activeOpacity={0.7}>
+      <Ionicons name={icon} size={13} color={active ? Colors.primary : Colors.textSecondary} />
+      <Text style={[styles.pickerChipText, active && styles.pickerChipTextActive]} numberOfLines={1}>{label}</Text>
+      {active && (
+        <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
+          <Ionicons name="close-circle" size={14} color={Colors.primary} />
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }
@@ -923,6 +1031,34 @@ const styles = StyleSheet.create({
     padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#1e8e3e',
   },
   approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3, textAlign: 'center' },
+  // Skeleton de los botones de acción hasta calcular conformidad (evita parpadeo).
+  btnSkeleton: { backgroundColor: Colors.border, opacity: 0.4, borderColor: Colors.border, minHeight: 38 },
+  // Badge de ítems correctos/observados (protocolos clásicos).
+  itemBadgesRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  itemBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  itemBadgeText: { fontSize: 13, fontWeight: '800' },
+  itemBadgeHint: { fontSize: 10.5, color: '#d93025', fontStyle: 'italic' },
+  // Chip que abre el modal de filtro multiselección.
+  pickerChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 180,
+  },
+  pickerChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primary + '0A' },
+  pickerChipText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, flexShrink: 1 },
+  pickerChipTextActive: { color: Colors.primary },
+  // Modal multiselección
+  pickOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.5)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  pickCard: { width: '100%', maxWidth: 420, backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14 },
+  pickHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  pickTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  pickItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 10, borderRadius: Radius.sm },
+  pickItemActive: { backgroundColor: Colors.primary + '12' },
+  pickItemText: { flex: 1, fontSize: 13, color: Colors.textPrimary },
+  pickCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white },
+  pickCheckboxActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  pickApplyBtn: { marginTop: 10, paddingVertical: 11, borderRadius: Radius.sm, backgroundColor: Colors.primary, alignItems: 'center' },
+  pickApplyText: { color: Colors.white, fontSize: 13, fontWeight: '800' },
   // Aprobar con observación (no conforme): ámbar, igual que la revisión.
   approveObsBtn: { backgroundColor: '#fef7e8', borderColor: '#e37400' },
   approveObsBtnText: { color: '#b06000' },

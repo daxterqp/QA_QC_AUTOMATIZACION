@@ -163,6 +163,9 @@ export function ProjectConfigModal({
                 ))}
               </div>
             )}
+            <Check label="Aprobar con observación desde la lista"
+              description="Permite aprobar con observación directo desde la lista del Dossier en la app móvil, sin abrir el protocolo. Por defecto desactivado: los protocolos con observaciones deben abrirse para aprobarse con observación."
+              value={!!flags.dossier_observe_inline} onToggle={() => toggleFlag('dossier_observe_inline')} />
 
             {/* ── v43: Módulos opcionales del proyecto ── */}
             <p className="text-[11px] font-bold uppercase tracking-wider text-textMuted mt-2">{t('projectConfig.projectModulesLabel')}</p>

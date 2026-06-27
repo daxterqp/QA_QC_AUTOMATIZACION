@@ -60,6 +60,9 @@ export interface ProjectFeatureFlags {
   historical_import: boolean;
   multi_level_approval: boolean;
   approval_levels: 1 | 2 | 3;
+  /** Permite "Aprobar con observación" directo desde la LISTA del dossier (móvil).
+   *  Default OFF. Se edita en config y se propaga; la web solo lo persiste. */
+  dossier_observe_inline?: boolean;
 
   // ── Llenado de protocolos (v31, Partes D+E) — conviven entre sí; el
   //    modo "por ubicación" es el default y SIEMPRE está activo ─────────
@@ -138,6 +141,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   historical_import: false,
   multi_level_approval: false,
   approval_levels: 1,
+  dossier_observe_inline: false,
 
   fill_by_sector: false,
   fill_by_type: false,

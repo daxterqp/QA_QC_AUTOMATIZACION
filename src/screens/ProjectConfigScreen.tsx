@@ -258,6 +258,12 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               ))}
             </View>
           )}
+          <CheckRow
+            label="Aprobar con observación desde la lista"
+            description="Permite aprobar con observación directamente desde la lista del Dossier, sin abrir el protocolo. Si está desactivado (por defecto), los protocolos con observaciones deben abrirse para aprobarse con observación."
+            value={!!flags.dossier_observe_inline}
+            onToggle={() => toggleFlag('dossier_observe_inline')}
+          />
 
           {/* ── v43: Módulos opcionales del proyecto (visibilidad en el menú) ── */}
           <Text style={styles.fieldLabel}>{t('projectConfig.projectModulesLabel')}</Text>
