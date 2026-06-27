@@ -51,7 +51,7 @@ const dossier: Record<string, { es: string; en: string; pt: string }> = {
   'dossier.statusApproved': { es: 'Aprobados', en: 'Approved', pt: 'Aprovados' },
   'dossier.statusInReview': { es: 'En revisión', en: 'In review', pt: 'Em revisão' },
   'dossier.statusRejected': { es: 'Rechazados', en: 'Rejected', pt: 'Rejeitados' },
-  'dossier.testType': { es: 'Tipo de ensayo', en: 'Test type', pt: 'Tipo de ensaio' },
+  'dossier.testType': { es: 'Protocolo', en: 'Protocol', pt: 'Protocolo' },
   'dossier.allMasc': { es: 'Todos', en: 'All', pt: 'Todos' },
   'dossier.allFem': { es: 'Todas', en: 'All', pt: 'Todas' },
   'dossier.location': { es: 'Ubicación', en: 'Location', pt: 'Localização' },
