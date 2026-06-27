@@ -29,7 +29,7 @@ import { uploadToS3, downloadFromS3, s3FileExists } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
 import { useExcelImport } from '@hooks/useExcelImport';
 import { useLocationsImport } from '@hooks/useLocationsImport';
-import { getProjectSettings, saveProjectSettings } from '@services/ProjectSettings';
+import { getProjectSettings, saveProjectSettings, type StampSize } from '@services/ProjectSettings';
 import { saveUserSignature, saveUserSignatureS3Key, getOrDownloadSignatureUri } from '@services/UserSignatureService';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
@@ -504,6 +504,8 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   const [signatureLoading, setSignatureLoading] = useState(false);
   const [stampComment, setStampComment] = useState('');
   const [stampCommentSaving, setStampCommentSaving] = useState(false);
+  const [stampGps, setStampGps] = useState(true);
+  const [stampSize, setStampSize] = useState<StampSize>('normal');
 
   // S3 key for global project logo
   const LOGO_S3_KEY = `logos/project_${projectId}/logo.jpg`;
@@ -512,6 +514,8 @@ export default function FileUploadScreen({ navigation, route }: Props) {
     if (activeTab !== 'personalizar') return;
     getProjectSettings(projectId).then((s) => {
       setStampEnabled(s.stampEnabled);
+      setStampGps(s.stampGps);
+      setStampSize(s.stampSize);
     });
     // Load user signature: try local first, then download from S3
     if (currentUser?.id) {
@@ -539,6 +543,16 @@ export default function FileUploadScreen({ navigation, route }: Props) {
   const toggleStamp = async (val: boolean) => {
     setStampEnabled(val);
     await saveProjectSettings(projectId, { stampEnabled: val });
+  };
+
+  const toggleStampGps = async (val: boolean) => {
+    setStampGps(val);
+    await saveProjectSettings(projectId, { stampGps: val });
+  };
+
+  const pickStampSize = async (val: StampSize) => {
+    setStampSize(val);
+    await saveProjectSettings(projectId, { stampSize: val });
   };
 
   const saveStampComment = async () => {
@@ -1029,6 +1043,47 @@ export default function FileUploadScreen({ navigation, route }: Props) {
             </View>
           </View>
         )}
+
+        {/* Datos GPS — decide si se plotean las coordenadas en el estampado */}
+        {stampEnabled && (
+          <View style={styles.stampGpsRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.stampCommentLabel}>{t('fileUpload.stamp.gpsLabel')}</Text>
+              <Text style={styles.settingDesc}>{t('fileUpload.stamp.gpsDesc')}</Text>
+            </View>
+            <Switch
+              value={stampGps}
+              onValueChange={toggleStampGps}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor={stampGps ? Colors.white : Colors.textMuted}
+            />
+          </View>
+        )}
+
+        {/* Tamaño del estampado (letra + logo) — 3 presets */}
+        {stampEnabled && (
+          <View style={styles.stampCommentRow}>
+            <Text style={styles.stampCommentLabel}>{t('fileUpload.stamp.sizeLabel')}</Text>
+            <Text style={styles.settingDesc}>{t('fileUpload.stamp.sizeDesc')}</Text>
+            <View style={styles.stampSizeRow}>
+              {(['normal', 'compact', 'very_compact'] as StampSize[]).map((sz) => {
+                const active = stampSize === sz;
+                return (
+                  <TouchableOpacity
+                    key={sz}
+                    style={[styles.stampSizeChip, active && styles.stampSizeChipActive]}
+                    onPress={() => pickStampSize(sz)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.stampSizeChipText, active && styles.stampSizeChipTextActive]}>
+                      {t(`fileUpload.stamp.size_${sz}`)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
       </View>
 
       {/* v44 — La "Firma" dejó de ser config de proyecto: ahora es personal de cada usuario
@@ -1331,6 +1386,12 @@ const styles = StyleSheet.create({
   },
   stampExampleText: { fontSize: 11, color: Colors.textMuted, flex: 1, lineHeight: 16 },
   stampCommentRow: { marginTop: 12, gap: 6 },
+  stampGpsRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  stampSizeRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  stampSizeChip: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingVertical: 9, alignItems: 'center', backgroundColor: Colors.white },
+  stampSizeChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  stampSizeChipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  stampSizeChipTextActive: { color: Colors.white },
   stampCommentLabel: { fontSize: 13, fontWeight: '700', color: Colors.navy },
   stampCommentInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   stampCommentInput: {

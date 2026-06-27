@@ -6,6 +6,9 @@ import {
   Text,
   ActivityIndicator,
   Image,
+  Modal,
+  TextInput,
+  Pressable,
 } from 'react-native';
 import { Camera } from 'react-native-vision-camera';
 import { useCamera } from '@hooks/useCamera';
@@ -73,6 +76,12 @@ export default function CameraScreen({
   const stampCtxRef = useRef<Promise<StampContext> | null>(null);
   const [stampEnabled, setStampEnabled] = useState(false);
 
+  // Comentario POR FOTO (se ingresa en la cámara) — se plotea debajo del nombre del
+  // proyecto. Es "pegajoso": se mantiene entre fotos hasta que se cambie o se quite.
+  const [photoComment, setPhotoComment] = useState('');
+  const [commentModal, setCommentModal] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+
   useEffect(() => {
     if (!projectId) { stampCtxRef.current = null; setStampEnabled(false); return; }
     const p = loadStampContext(projectId);
@@ -85,9 +94,21 @@ export default function CameraScreen({
     const ctxP = stampCtxRef.current ?? loadStampContext(pid ?? projectId);
     const [{ uri: compressed }, ctx] = await Promise.all([compressImage(rawUri), ctxP]);
     if (!ctx.stampEnabled) return compressed;
-    const coords = await getStampCoords();
-    return applyPhotoStamps(compressed, ctx.logoUri, ctx.comment, coords, ctx.projectName);
-  }, [projectId]);
+    const coords = ctx.stampGps ? await getStampCoords() : null;
+    return applyPhotoStamps({
+      imageUri: compressed,
+      logoUri: ctx.logoUri,
+      comment: ctx.comment,
+      projectName: ctx.projectName,
+      photoComment: photoComment.trim() || null,
+      coords,
+      size: ctx.stampSize,
+    });
+  }, [projectId, photoComment]);
+
+  const openCommentModal = () => { setCommentDraft(photoComment); setCommentModal(true); };
+  const saveComment = () => { setPhotoComment(commentDraft.trim()); setCommentModal(false); };
+  const clearComment = () => { setPhotoComment(''); setCommentDraft(''); setCommentModal(false); };
 
   // ── Captura ──────────────────────────────────────────────────────────────
   const handleCapture = useCallback(async () => {
@@ -281,6 +302,23 @@ export default function CameraScreen({
         </View>
       )}
 
+      {/* Botón "Agregar comentario" (comentario por foto). Solo si el estampado está activo. */}
+      {stampEnabled && (
+      <View style={styles.commentBar}>
+        <TouchableOpacity style={styles.commentBtn} onPress={openCommentModal} activeOpacity={0.8}>
+          <Text style={styles.commentBtnIcon}>💬</Text>
+          <Text style={styles.commentBtnText} numberOfLines={1}>
+            {photoComment ? photoComment : t('camera.addComment')}
+          </Text>
+          {!!photoComment && (
+            <TouchableOpacity onPress={clearComment} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.commentClearX}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      </View>
+      )}
+
       {/* Obturador */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
@@ -296,6 +334,33 @@ export default function CameraScreen({
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Modal de comentario por foto */}
+      <Modal visible={commentModal} transparent animationType="fade" onRequestClose={() => setCommentModal(false)}>
+        <Pressable style={styles.commentOverlay} onPress={() => setCommentModal(false)}>
+          <Pressable style={styles.commentCard} onPress={() => {}}>
+            <Text style={styles.commentTitle}>{t('camera.commentTitle')}</Text>
+            <Text style={styles.commentHint}>{t('camera.commentHint')}</Text>
+            <TextInput
+              style={styles.commentInput}
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              placeholder={t('camera.commentPlaceholder')}
+              placeholderTextColor="#9aa3b2"
+              multiline
+              autoFocus
+            />
+            <View style={styles.commentActions}>
+              <TouchableOpacity style={[styles.commentActionBtn, styles.commentClearBtn]} onPress={clearComment}>
+                <Text style={styles.commentClearText}>{t('camera.commentClear')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.commentActionBtn, styles.commentSaveBtn]} onPress={saveComment}>
+                <Text style={styles.commentSaveText}>{t('camera.commentSave')}</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -338,6 +403,31 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: '#fff',
   },
   thumbnailImage: { width: '100%', height: '100%' },
+  commentBar: {
+    position: 'absolute', bottom: 130, left: 24, right: 24, alignItems: 'center',
+  },
+  commentBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%',
+    backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10,
+  },
+  commentBtnIcon: { fontSize: 16 },
+  commentBtnText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
+  commentClearX: { color: '#fff', fontSize: 14, fontWeight: '900', paddingLeft: 2 },
+  commentOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24 },
+  commentCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 10 },
+  commentTitle: { fontSize: 17, fontWeight: '800', color: '#0e213d' },
+  commentHint: { fontSize: 12, color: '#64748b', lineHeight: 16 },
+  commentInput: {
+    borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12,
+    paddingVertical: 10, fontSize: 15, color: '#0e213d', minHeight: 70, textAlignVertical: 'top',
+  },
+  commentActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+  commentActionBtn: { borderRadius: 10, paddingHorizontal: 18, paddingVertical: 11 },
+  commentClearBtn: { backgroundColor: '#f1f5f9' },
+  commentClearText: { color: '#64748b', fontWeight: '800', fontSize: 14 },
+  commentSaveBtn: { backgroundColor: '#394e7d' },
+  commentSaveText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   bottomBar: {
     position: 'absolute', bottom: 40, left: 0, right: 0, alignItems: 'center',
   },

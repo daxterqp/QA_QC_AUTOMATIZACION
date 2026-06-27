@@ -53,6 +53,37 @@ const camera: Record<string, { es: string; en: string; pt: string }> = {
     en: 'STAMP',
     pt: 'CARIMBO',
   },
+
+  'camera.addComment': {
+    es: 'Agregar comentario',
+    en: 'Add comment',
+    pt: 'Adicionar comentário',
+  },
+  'camera.commentTitle': {
+    es: 'Comentario de la foto',
+    en: 'Photo comment',
+    pt: 'Comentário da foto',
+  },
+  'camera.commentHint': {
+    es: 'Se plotea debajo del nombre del proyecto, en las fotos que tomes (hasta que lo cambies o lo quites).',
+    en: 'Stamped below the project name on the photos you take (until you change or remove it).',
+    pt: 'Carimbado abaixo do nome do projeto nas fotos que você tirar (até alterar ou remover).',
+  },
+  'camera.commentPlaceholder': {
+    es: 'Escribe un comentario…',
+    en: 'Write a comment…',
+    pt: 'Escreva um comentário…',
+  },
+  'camera.commentSave': {
+    es: 'Guardar',
+    en: 'Save',
+    pt: 'Salvar',
+  },
+  'camera.commentClear': {
+    es: 'Quitar',
+    en: 'Remove',
+    pt: 'Remover',
+  },
 };
 
 export default camera;

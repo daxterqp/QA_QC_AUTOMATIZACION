@@ -8,11 +8,18 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+/** Tamaño del bloque de estampado (letra + logo). */
+export type StampSize = 'normal' | 'compact' | 'very_compact';
+
 export interface ProjectStampSettings {
   stampEnabled: boolean;
   stampPhotoUri: string | null;
   signatureUri: string | null;
   stampComment: string | null;
+  /** Si plotear las coordenadas GPS dentro del estampado. Default true. */
+  stampGps: boolean;
+  /** Tamaño de la letra/logo del estampado. Default 'normal'. */
+  stampSize: StampSize;
 }
 
 const key = (projectId: string) => `project_settings_${projectId}`;
@@ -22,6 +29,8 @@ const defaults: ProjectStampSettings = {
   stampPhotoUri: null,
   signatureUri: null,
   stampComment: null,
+  stampGps: true,
+  stampSize: 'normal',
 };
 
 export async function getProjectSettings(projectId: string): Promise<ProjectStampSettings> {

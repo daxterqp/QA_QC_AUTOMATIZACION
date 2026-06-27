@@ -185,7 +185,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       const destUri = `${destDir}${protocolId}_${Date.now()}.jpg`;
       await FileSystem.copyAsync({ from: asset.uri, to: destUri });
       const stamped = ctx.stampEnabled
-        ? await applyPhotoStamps(destUri, ctx.logoUri, ctx.comment, null, ctx.projectName)
+        ? await applyPhotoStamps({ imageUri: destUri, logoUri: ctx.logoUri, comment: ctx.comment, projectName: ctx.projectName, size: ctx.stampSize })
         : destUri;
       const updated = [...extraPhotos, stamped];
       setExtraPhotos(updated);

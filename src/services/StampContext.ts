@@ -14,7 +14,7 @@
  */
 import * as FileSystem from 'expo-file-system';
 import { database } from '@db/index';
-import { getProjectSettings } from '@services/ProjectSettings';
+import { getProjectSettings, type StampSize } from '@services/ProjectSettings';
 import { downloadFromS3, s3FileExists } from '@services/S3Service';
 
 export interface StampContext {
@@ -23,9 +23,13 @@ export interface StampContext {
   logoUri: string | null;
   comment: string | null;
   projectName: string | null;
+  /** Si plotear las coordenadas GPS. */
+  stampGps: boolean;
+  /** Tamaño del estampado (letra + logo). */
+  stampSize: StampSize;
 }
 
-const EMPTY: StampContext = { stampEnabled: false, logoUri: null, comment: null, projectName: null };
+const EMPTY: StampContext = { stampEnabled: false, logoUri: null, comment: null, projectName: null, stampGps: false, stampSize: 'normal' };
 
 const inFlight = new Map<string, Promise<StampContext>>();
 
@@ -78,7 +82,7 @@ export async function loadStampContext(
     let logoUri = s.stampPhotoUri;
     if (s.stampEnabled && !logoUri) logoUri = await resolveLogo(projectId);
 
-    return { stampEnabled: s.stampEnabled, logoUri, comment, projectName };
+    return { stampEnabled: s.stampEnabled, logoUri, comment, projectName, stampGps: s.stampGps, stampSize: s.stampSize };
   })();
 
   inFlight.set(projectId, p);
