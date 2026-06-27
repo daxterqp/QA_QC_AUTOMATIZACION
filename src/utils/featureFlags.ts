@@ -111,7 +111,9 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'ubicacion', label: 'Coordenadas / Ubicación' },
   { key: 'especialidad', label: 'Especialidad' },
 ];
-export const DEFAULT_HEADER_FIELDS = ['proyecto', 'fecha', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion'];
+// Especialidad va seleccionada por defecto; al renderizar solo aparece en
+// protocolos CLÁSICOS (en numéricos se ignora), por lo que es seguro incluirla.
+export const DEFAULT_HEADER_FIELDS = ['proyecto', 'fecha', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion', 'especialidad'];
 /** Filas del encabezado por nivel. */
 export const PRINT_HEADER_ROWS: Record<PrintHeaderSize, number> = { normal: 3, compact: 2, xcompact: 1 };
 /** Factor de escala de fuente por nivel (compacta las tablas). */

@@ -52,7 +52,9 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'ubicacion', label: 'Coordenadas / Ubicación' },
   { key: 'especialidad', label: 'Especialidad' },
 ];
-export const DEFAULT_HEADER_FIELDS = ['proyecto', 'fecha', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion'];
+// Especialidad seleccionada por defecto; al renderizar solo aparece en
+// protocolos CLÁSICOS (en numéricos se ignora).
+export const DEFAULT_HEADER_FIELDS = ['proyecto', 'fecha', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion', 'especialidad'];
 
 export function getCroquisConfig(c: CroquisConfig | undefined): ResolvedCroquis {
   const pl: CroquisPlacement = (c?.placement === 'start' || c?.placement === 'photos') ? c.placement : 'end';
