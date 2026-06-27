@@ -42,26 +42,30 @@ export function useCamera(): UseCameraReturn {
     let cancelled = false;
     (async () => {
       if (!hasPermission) {
-        const status = Camera.getCameraPermissionStatus();
+        // SIEMPRE solicitar primero. `requestPermission()` de vision-camera
+        // muestra el recuadro NATIVO si el permiso nunca fue pedido, y si está
+        // denegado permanentemente ("no volver a preguntar") resuelve de
+        // inmediato a `false` sin mostrar diálogo. NO confiar en
+        // `getCameraPermissionStatus()` para decidir pedir-vs-Ajustes: en Android
+        // ese estado no distingue 'not-determined' de 'denied' y puede devolver
+        // 'denied' para un permiso JAMÁS solicitado, saltándose el recuadro
+        // nativo y mandando directo a Ajustes (el bug que reportó el usuario).
+        const granted = await requestPermission();
 
-        if (status === 'not-determined') {
-          // Primera vez: solicitar directamente
-          await requestPermission();
-        } else if (status === 'denied') {
-          // Denegado permanentemente: ofrecer ir a Ajustes
+        // Solo si tras pedirlo SIGUE sin permiso ofrecemos ir a Ajustes
+        // (caso real de denegado permanente). Así el recuadro nativo siempre
+        // aparece primero cuando Android puede mostrarlo.
+        if (!granted && !cancelled && Camera.getCameraPermissionStatus() !== 'granted') {
           await new Promise<void>((resolve) => {
             Alert.alert(
               'Permiso de cámara requerido',
-              'Flow QA/QC necesita acceso a la cámara para capturar evidencias fotográficas. El permiso fue denegado anteriormente — habilítalo en Ajustes.',
+              'Flow QA/QC necesita acceso a la cámara para capturar evidencias fotográficas. Si lo denegaste, habilítalo en Ajustes.',
               [
                 { text: 'Cancelar', style: 'cancel', onPress: () => resolve() },
                 { text: 'Ir a Ajustes', onPress: () => { Linking.openSettings(); resolve(); } },
               ],
             );
           });
-        } else {
-          // 'restricted' u otro: intentar solicitar por si acaso
-          await requestPermission();
         }
       }
       if (!cancelled) setIsLoading(false);

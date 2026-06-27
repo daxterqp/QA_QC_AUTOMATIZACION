@@ -37,7 +37,10 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION"
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
       ],
       "softwareKeyboardLayoutMode": "resize",
       "config": {
@@ -53,6 +56,13 @@
           "android": {
             "kotlinVersion": "2.0.21"
           }
+        }
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Flow QA/QC necesita acceso a la cámara para capturar evidencias fotográficas.",
+          "enableMicrophonePermission": false
         }
       ],
       "expo-web-browser"
