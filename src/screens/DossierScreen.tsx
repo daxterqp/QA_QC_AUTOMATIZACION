@@ -675,9 +675,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 return (
                 <View style={styles.actions}>
                   <TouchableOpacity
-                    // Cuando es "con observación" el texto es largo: se le da más ancho
-                    // (y se le quita a Rechazar) para que entre en una línea sin achicar la letra.
-                    style={[styles.approveBtn, needsObs && styles.approveObsBtn, needsObs && { flex: 1.7 }]}
+                    // Estándar: el botón de aprobar es más ancho que Rechazar (flex 1.7 vs 1)
+                    // para que "Aprobar con observación" entre en una línea sin achicar la letra.
+                    style={[styles.approveBtn, needsObs && styles.approveObsBtn]}
                     onPress={() => {
                       if (!needsObs) { handleApprove(item); return; }
                       // No conforme: con la opción ON aprueba con observación directo
@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
   signedBy: { fontSize: 12, color: Colors.success, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 6 },
   approveBtn: {
-    flex: 1, backgroundColor: '#eaf7ee', borderRadius: Radius.md,
+    flex: 1.7, backgroundColor: '#eaf7ee', borderRadius: Radius.md,
     padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#1e8e3e',
   },
   approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3, textAlign: 'center' },

@@ -794,13 +794,15 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
             {/* v33 — El botón Aprobar SIEMPRE está disponible; si el ensayo no
                 cumple, el modal exige un motivo de aprobación. */}
             <TouchableOpacity
-              style={[styles.actionBtn, requiresApprovalReason ? styles.actionBtnApproveWarn : styles.actionBtnApprove]}
+              // Estándar: el botón de aprobar es más ancho que Rechazar (flex 1.7 vs 1)
+              // para que "Aprobar con observación" entre en una línea sin achicar la letra.
+              style={[styles.actionBtn, { flex: 1.7 }, requiresApprovalReason ? styles.actionBtnApproveWarn : styles.actionBtnApprove]}
               onPress={() => setShowApproveModal(true)}
               disabled={saving}
             >
               {saving
                 ? <ActivityIndicator color={requiresApprovalReason ? '#b45309' : Colors.success} />
-                : <Text style={[styles.actionBtnTextApprove, requiresApprovalReason && styles.actionBtnTextApproveWarn]}>
+                : <Text style={[styles.actionBtnTextApprove, requiresApprovalReason && styles.actionBtnTextApproveWarn]} numberOfLines={1}>
                     {requiresApprovalReason ? t('protoAudit.approveWithObservation') : t('protoAudit.approveAndSign')}
                   </Text>
               }
