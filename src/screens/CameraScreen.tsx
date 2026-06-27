@@ -15,9 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { compressImage } from '@services/ImageCompressor';
 import { applyPhotoStamps } from '@services/PhotoStampService';
-import { getProjectSettings, type ProjectStampSettings } from '@services/ProjectSettings';
-import { downloadFromS3, s3FileExists } from '@services/S3Service';
-import * as FileSystem from 'expo-file-system';
+import { loadStampContext, type StampContext } from '@services/StampContext';
 import * as Location from 'expo-location';
 import { useI18n } from '@i18n/index';
 
@@ -68,39 +66,27 @@ export default function CameraScreen({
   const [lastPhotoUri, setLastPhotoUri] = useState<string | null>(null);
   const [photoCount, setPhotoCount] = useState(0);
 
-  // ── Configuración de stamps ──────────────────────────────────────────────
-  const [settings, setSettings] = useState<ProjectStampSettings>({
-    stampEnabled: false,
-    stampPhotoUri: null,
-    signatureUri: null,
-    stampComment: null,
-  });
+  // ── Estampado: carga COMPLETA y verificada del contexto (logo descargado de S3 +
+  //    nombre del proyecto + comentario) ANTES de plotear. Guardamos la PROMESA en un ref
+  //    y la await-eamos en cada captura → nunca se estampa una foto sin la marca por un
+  //    problema de carga (el miedo del usuario). `stampEnabled` es solo para el badge UI. ──
+  const stampCtxRef = useRef<Promise<StampContext> | null>(null);
+  const [stampEnabled, setStampEnabled] = useState(false);
 
   useEffect(() => {
-    if (!projectId) return;
-    getProjectSettings(projectId).then(async (s) => {
-      // Read stamp_comment from synced project model (shared for all users)
-      let sharedComment = s.stampComment;
-      try {
-        const proj = await database.get<any>('projects').find(projectId);
-        if (proj?.stampComment) sharedComment = proj.stampComment;
-      } catch { /* fallback to local */ }
+    if (!projectId) { stampCtxRef.current = null; setStampEnabled(false); return; }
+    const p = loadStampContext(projectId);
+    stampCtxRef.current = p;
+    p.then((ctx) => setStampEnabled(ctx.stampEnabled)).catch(() => {});
+  }, [projectId]);
 
-      // Si no hay logo local, intentar descargarlo desde S3 (logo global del proyecto)
-      let logoUri = s.stampPhotoUri;
-      if (!logoUri && s.stampEnabled) {
-        const s3Key = `logos/project_${projectId}/logo.jpg`;
-        const localUri = `${FileSystem.cacheDirectory}project_logo_${projectId}.jpg`;
-        try {
-          const exists = await s3FileExists(s3Key);
-          if (exists) {
-            await downloadFromS3(s3Key, localUri);
-            logoUri = localUri;
-          }
-        } catch { /* logo opcional */ }
-      }
-      setSettings({ ...s, stampPhotoUri: logoUri, stampComment: sharedComment });
-    }).catch(() => {});
+  // Comprime + AWAIT del contexto (logo garantizado cargado) + estampa. Devuelve el URI final.
+  const processAndStamp = useCallback(async (rawUri: string, pid?: string | null): Promise<string> => {
+    const ctxP = stampCtxRef.current ?? loadStampContext(pid ?? projectId);
+    const [{ uri: compressed }, ctx] = await Promise.all([compressImage(rawUri), ctxP]);
+    if (!ctx.stampEnabled) return compressed;
+    const coords = await getStampCoords();
+    return applyPhotoStamps(compressed, ctx.logoUri, ctx.comment, coords, ctx.projectName);
   }, [projectId]);
 
   // ── Captura ──────────────────────────────────────────────────────────────
@@ -118,10 +104,6 @@ export default function CameraScreen({
       setLastPhotoUri(rawUri);
       setPhotoCount((n) => n + 1);
 
-      // v68 — GPS en paralelo (best-effort) para estampar coords. Solo si el estampado está activo;
-      // se resuelve mientras se comprime la foto (no añade latencia perceptible). Si falla → null.
-      const coordsP = settings.stampEnabled ? getStampCoords() : Promise.resolve(null);
-
       if (annotationCommentId) {
         // ── Foto de observación ────────────────────────────────────────────
         // Guardar con URI original AHORA → el usuario puede seguir tomando fotos.
@@ -137,13 +119,10 @@ export default function CameraScreen({
         });
         onPhotoSaved?.(savedId);
 
-        // Background: compresión + stamp + update DB + upload S3
+        // Background: compresión + stamp (AWAIT contexto cargado) + update DB + upload S3
         (async () => {
           try {
-            const { uri: compressed } = await compressImage(rawUri);
-            const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
-              : compressed;
+            const finalUri = await processAndStamp(rawUri);
 
             await database.write(async () => {
               const rec = await annotationCommentPhotosCollection.find(savedId);
@@ -186,13 +165,10 @@ export default function CameraScreen({
         }
         enqueueSync({ opType: 'UPLOAD_PHOTO', entityId: evidenceId, projectId: resolvedPid }).catch(() => {});
 
-        // Background: comprimir → stamp → update DB → upload S3 (intento inline)
+        // Background: comprimir → stamp (AWAIT contexto cargado) → update DB → upload S3
         (async () => {
           try {
-            const { uri: compressed } = await compressImage(rawUri);
-            const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
-              : compressed;
+            const finalUri = await processAndStamp(rawUri, resolvedPid || projectId);
             await database.write(async () => {
               const r2 = await evidencesCollection.find(evidenceId);
               await r2.update((ev) => { ev.localUri = finalUri; });
@@ -211,10 +187,7 @@ export default function CameraScreen({
         // (AsyncStorage, misma key que usa ProtocolFillScreen) y sube a S3.
         (async () => {
           try {
-            const { uri: compressed } = await compressImage(rawUri);
-            const finalUri = settings.stampEnabled
-              ? await applyPhotoStamps(compressed, settings.stampPhotoUri, settings.stampComment, await coordsP)
-              : compressed;
+            const finalUri = await processAndStamp(rawUri);
             const key = `protocol_extra_photos_${extraPhotoProtocolId}`;
             const prev: string[] = JSON.parse((await AsyncStorage.getItem(key)) ?? '[]');
             const updated = [...prev, finalUri];
@@ -231,7 +204,7 @@ export default function CameraScreen({
   }, [
     isTaking, takePhoto,
     protocolItemId, annotationCommentId, extraPhotoProtocolId, onPhotoSaved,
-    settings,
+    processAndStamp, projectId,
   ]);
 
   // ── Sin permisos ─────────────────────────────────────────────────────────
@@ -294,7 +267,7 @@ export default function CameraScreen({
         <View style={styles.counter}>
           <Text style={styles.counterText}>{photoCount !== 1 ? t('camera.photoCountPlural', { count: photoCount }) : t('camera.photoCountSingular', { count: photoCount })}</Text>
         </View>
-        {settings.stampEnabled && (
+        {stampEnabled && (
           <View style={styles.stampBadge}>
             <Text style={styles.stampBadgeText}>{t('camera.stampBadge')}</Text>
           </View>

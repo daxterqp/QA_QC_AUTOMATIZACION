@@ -10,7 +10,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { applyPhotoStamps } from '@services/PhotoStampService';
-import { getProjectSettings } from '@services/ProjectSettings';
+import { loadStampContext } from '@services/StampContext';
 import { uploadExtraPhoto } from '@services/S3PhotoService';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -178,12 +178,15 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
       const projectId = (protocol as any).projectId ?? '';
-      const settings = await getProjectSettings(projectId);
+      // Contexto COMPLETO (logo descargado + nombre + comentario) garantizado antes de plotear.
+      const ctx = await loadStampContext(projectId);
       const destDir = `${FileSystem.documentDirectory}extra_photos/`;
       await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
       const destUri = `${destDir}${protocolId}_${Date.now()}.jpg`;
       await FileSystem.copyAsync({ from: asset.uri, to: destUri });
-      const stamped = await applyPhotoStamps(destUri, settings.stampEnabled ? settings.stampPhotoUri : null);
+      const stamped = ctx.stampEnabled
+        ? await applyPhotoStamps(destUri, ctx.logoUri, ctx.comment, null, ctx.projectName)
+        : destUri;
       const updated = [...extraPhotos, stamped];
       setExtraPhotos(updated);
       await AsyncStorage.setItem(extraPhotosKey, JSON.stringify(updated));
