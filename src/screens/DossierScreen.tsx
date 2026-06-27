@@ -641,19 +641,19 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                 <Text style={styles.signedBy}>{t('dossier.approvedBy', { name: signedBy })}</Text>
               )}
 
-              {/* Badge de ítems (solo protocolos clásicos): ✓ correctos / ✗ observados */}
+              {/* Badge de ítems (solo clásicos), esquina sup. derecha: ✓ correctos
+                  arriba / ✗ observados abajo. Si no hay observados, solo ✓. */}
               {countsById[item.id]?.classic && (
-                <View style={styles.itemBadgesRow}>
+                <View style={styles.itemBadgesCorner}>
                   <View style={styles.itemBadge}>
-                    <Ionicons name="checkmark-circle" size={14} color="#1e8e3e" />
+                    <Ionicons name="checkmark-circle" size={15} color="#1e8e3e" />
                     <Text style={[styles.itemBadgeText, { color: '#1e8e3e' }]}>{countsById[item.id].ok}</Text>
                   </View>
-                  <View style={styles.itemBadge}>
-                    <Ionicons name="close-circle" size={14} color="#d93025" />
-                    <Text style={[styles.itemBadgeText, { color: '#d93025' }]}>{countsById[item.id].obs}</Text>
-                  </View>
                   {countsById[item.id].obs > 0 && (
-                    <Text style={styles.itemBadgeHint}>{t('dossier.observedHint')}</Text>
+                    <View style={styles.itemBadge}>
+                      <Ionicons name="close-circle" size={15} color="#d93025" />
+                      <Text style={[styles.itemBadgeText, { color: '#d93025' }]}>{countsById[item.id].obs}</Text>
+                    </View>
                   )}
                 </View>
               )}
@@ -683,7 +683,12 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                       else { onOpenProtocol(item.id, item.status); }
                     }}
                   >
-                    <Text style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]} numberOfLines={2}>
+                    <Text
+                      style={[styles.approveBtnText, needsObs && styles.approveObsBtnText]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                    >
                       {needsObs ? t('protoAudit.approveWithObservation') : t('protoAudit.approveAndSign')}
                     </Text>
                   </TouchableOpacity>
@@ -1033,11 +1038,11 @@ const styles = StyleSheet.create({
   approveBtnText: { color: '#1e8e3e', fontWeight: '700', fontSize: 12, letterSpacing: 0.3, textAlign: 'center' },
   // Skeleton de los botones de acción hasta calcular conformidad (evita parpadeo).
   btnSkeleton: { backgroundColor: Colors.border, opacity: 0.4, borderColor: Colors.border, minHeight: 38 },
-  // Badge de ítems correctos/observados (protocolos clásicos).
-  itemBadgesRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  // Badge de ítems correctos/observados (protocolos clásicos), esquina sup. der.,
+  // apilados verticalmente (✓ arriba, ✗ abajo).
+  itemBadgesCorner: { position: 'absolute', top: 40, right: 14, alignItems: 'flex-end', gap: 4 },
   itemBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  itemBadgeText: { fontSize: 13, fontWeight: '800' },
-  itemBadgeHint: { fontSize: 10.5, color: '#d93025', fontStyle: 'italic' },
+  itemBadgeText: { fontSize: 14, fontWeight: '800' },
   // Chip que abre el modal de filtro multiselección.
   pickerChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
