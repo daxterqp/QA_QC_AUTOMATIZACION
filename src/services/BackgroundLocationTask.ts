@@ -3,6 +3,34 @@
  * o pantalla bloqueada. Solo se usa cuando flag del proyecto =
  * `traceability_gps_polling === 'background'`.
  *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ ⚠️ BACKGROUND LOCATION DESACTIVADO A NIVEL DE PERMISO (jun 2026).         │
+ * │                                                                          │
+ * │ Se QUITÓ el permiso `ACCESS_BACKGROUND_LOCATION` del AndroidManifest +   │
+ * │ app.json para poder publicar en Google Play SIN el trámite especial de   │
+ * │ ubicación en segundo plano (declaración + "prominent disclosure" + video │
+ * │ + revisión manual de Google). La trazabilidad GPS sigue funcionando en   │
+ * │ PRIMER PLANO (app abierta). Sin el permiso, el SO NO entrega updates con │
+ * │ la pantalla apagada / app cerrada — esta task solo correrá en foreground.│
+ * │                                                                          │
+ * │ ► REACTIVAR BACKGROUND LOCATION (cuando se requiera) — checklist:        │
+ * │   1. Volver a agregar `ACCESS_BACKGROUND_LOCATION`:                       │
+ * │        - android/app/src/main/AndroidManifest.xml                        │
+ * │        - app.json → android.permissions                                  │
+ * │   2. Implementar una pantalla de DIVULGACIÓN PROMINENTE que se muestre   │
+ * │      ANTES del permiso del sistema, explicando que se recopila ubicación │
+ * │      en segundo plano durante la jornada (incluso con la app cerrada),   │
+ * │      con botones Aceptar/Cancelar. (Google la exige; hoy NO existe.)     │
+ * │   3. Subir versionCode, recompilar AAB.                                  │
+ * │   4. Grabar un video (~30s) en YouTube mostrando: la divulgación →       │
+ * │      el usuario aceptando → la jornada con el rastreo en background.     │
+ * │   5. En Play Console → "Location permissions": declarar el propósito de  │
+ * │      la app + la feature (jornada de trabajo de Trazabilidad) + el link  │
+ * │      del video. Enviar a revisión.                                       │
+ * │   Nota: aprueban para TODA la app, no solo la feature. Tarda días y      │
+ * │   puede rebotar si falta la divulgación prominente en el video.          │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
  * Arquitectura:
  *  - `TaskManager.defineTask` registra el handler una vez al cargar el módulo.
  *  - El handler busca la sesión `ACTIVE` del user actual y persiste el punto

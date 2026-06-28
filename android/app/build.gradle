@@ -92,8 +92,8 @@ android {
         applicationId 'com.vxp.scua'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 27
-        versionName "2.0.7"
+        versionCode 28
+        versionName "2.0.8"
     }
     signingConfigs {
         debug {

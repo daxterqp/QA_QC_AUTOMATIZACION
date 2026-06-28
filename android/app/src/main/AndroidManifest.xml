@@ -1,5 +1,11 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <!-- ACCESS_BACKGROUND_LOCATION quitado a propósito (jun 2026) para evitar el
+       trámite de Google Play (declaración + disclosure prominente + video + revisión).
+       Se usa tools:node="remove" para FORZAR que NO aparezca en el manifest fusionado
+       aunque expo-location lo inyecte. La trazabilidad GPS sigue en PRIMER PLANO.
+       REACTIVAR: quitar este remove + re-agregar el permiso; ver checklist en
+       src/services/BackgroundLocationTask.ts ("REACTIVAR BACKGROUND LOCATION"). -->
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.CAMERA"/>
