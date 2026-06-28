@@ -183,6 +183,11 @@ export default function UserManagementScreen({ navigation }: Props) {
     return () => sub.unsubscribe();
   }, []);
   useEffect(() => { loadAccess(); }, [loadAccess]);
+  // Al ABRIR la pantalla, bajar los usuarios de la nube (incluye los
+  // visualizadores que se auto-registraron desde el login). Antes solo se
+  // refrescaba con pull-to-refresh o tras una acción admin, por eso esos
+  // viewers nunca aparecían en la lista del Creador.
+  useEffect(() => { refreshUsersFromCloud().catch(() => {}); }, [refreshUsersFromCloud]);
 
   // #7B — Pull-to-refresh: baja usuarios de la nube (refreshUsersFromCloud crea/actualiza
   // local → el observe refresca la lista) + recarga los accesos por proyecto.
