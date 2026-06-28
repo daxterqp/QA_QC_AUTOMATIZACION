@@ -112,6 +112,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const [printHeaderColor, setPrintHeaderColor] = useState<string>(DEFAULT_HEADER_COLOR);
   const [expandedType, setExpandedType] = useState<string | null>(null);   // tarjeta de ensayo desplegada
   const [showCustomColor, setShowCustomColor] = useState(false);           // cajetín de color hex visible
+  const [printSearch, setPrintSearch] = useState('');                      // filtro de texto de tipos de ensayo
   const openPrintConfig = useCallback(async () => {
     try {
       const [tmpls, projRows] = await Promise.all([
@@ -837,7 +838,31 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                   </View>
                 ) : null}
               </View>
-              {printTemplates.length === 0 ? <Text style={styles.pcEmpty}>{t('dossier.noTestTypes')}</Text> : printTemplates.map(tpl => {
+              {/* Buscador de tipos de ensayo / protocolo (filtra las tarjetas de abajo) */}
+              {printTemplates.length > 3 && (
+                <View style={styles.pcSearchRow}>
+                  <Ionicons name="search" size={15} color={Colors.textMuted} />
+                  <TextInput
+                    style={styles.pcSearchInput}
+                    value={printSearch}
+                    onChangeText={setPrintSearch}
+                    placeholder={t('dossier.searchTypePlaceholder')}
+                    placeholderTextColor={Colors.textMuted}
+                    autoCapitalize="none"
+                  />
+                  {printSearch !== '' && (
+                    <TouchableOpacity onPress={() => setPrintSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+              {(() => {
+                const q = printSearch.trim().toLowerCase();
+                const list = q ? printTemplates.filter(tt => `${tt.idProtocolo} ${tt.name}`.toLowerCase().includes(q)) : printTemplates;
+                if (printTemplates.length === 0) return <Text style={styles.pcEmpty}>{t('dossier.noTestTypes')}</Text>;
+                if (list.length === 0) return <Text style={styles.pcEmpty}>{t('dossier.noTypeMatch')}</Text>;
+                return list.map(tpl => {
                 const c = getTemplatePrintConfig({ print_configs: printCfgs } as any, tpl.idProtocolo);
                 const isOpen = expandedType === tpl.idProtocolo;
                 return (
@@ -956,7 +981,8 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
                     </>) : null}
                   </View>
                 );
-              })}
+                });
+              })()}
             </ScrollView>
             {/* v43.6 — Cancelar (descarta) + Guardar, ambos ghost. La X / Atrás guardan. */}
             <View style={styles.pcActions}>
@@ -1087,6 +1113,8 @@ const styles = StyleSheet.create({
   pcHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.navy, paddingHorizontal: 16, paddingVertical: 13 },
   pcTitle: { color: Colors.white, fontWeight: '800', fontSize: 16 },
   pcHint: { fontSize: 12, color: Colors.textSecondary, paddingHorizontal: 16, paddingTop: 10 },
+  pcSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  pcSearchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
   pcEmpty: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', padding: 20 },
   pcType: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 12, gap: 10, borderWidth: 1, borderColor: Colors.border },
   pcDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 2 },

@@ -60,6 +60,8 @@ const dossier: Record<string, { es: string; en: string; pt: string }> = {
   'dossier.dateTo': { es: 'Hasta', en: 'To', pt: 'Até' },
   'dossier.anyDate': { es: 'Cualquiera', en: 'Any', pt: 'Qualquer' },
   'dossier.applyFilter': { es: 'Aplicar', en: 'Apply', pt: 'Aplicar' },
+  'dossier.searchTypePlaceholder': { es: 'Buscar protocolo…', en: 'Search protocol…', pt: 'Buscar protocolo…' },
+  'dossier.noTypeMatch': { es: 'Ningún protocolo coincide con la búsqueda.', en: 'No protocol matches the search.', pt: 'Nenhum protocolo corresponde à busca.' },
   'dossier.observedHint': { es: 'con observaciones', en: 'with observations', pt: 'com observações' },
 
   // Lista vacía
