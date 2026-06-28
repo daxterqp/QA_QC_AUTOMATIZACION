@@ -120,6 +120,19 @@ export default function ProjectListScreen({ navigation }: Props) {
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
   const isCreator = currentUser?.role === 'CREATOR';
   const isSupervisor = currentUser?.role === 'SUPERVISOR';
+  const isViewer = currentUser?.role === 'VIEWER';
+
+  // Pulso verde del botón "Contáctanos" (solo VIEWER): los invita a pedir acceso.
+  const contactPulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!isViewer) return;
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(contactPulse, { toValue: 0.4, duration: 800, useNativeDriver: true }),
+      Animated.timing(contactPulse, { toValue: 1, duration: 800, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [isViewer, contactPulse]);
 
   // ── Cargar proyectos directamente desde Supabase (fuente de verdad) ────────
   const loadProjectsFromCloud = useCallback(async () => {
@@ -610,16 +623,35 @@ export default function ProjectListScreen({ navigation }: Props) {
           <Text style={styles.navLabel}>Dashboard</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          ref={joinBtnRef}
-          onLayout={joinBtnLayout}
-          style={styles.navItem}
-          onPress={() => setShowJoin(true)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="log-in-outline" size={24} color={Colors.textMuted} />
-          <Text style={styles.navLabel}>Ingresar</Text>
-        </TouchableOpacity>
+        {/* "Ingresar" oculto para VIEWER: evita que un visualizador entre a
+            cualquier proyecto con su contraseña. */}
+        {!isViewer && (
+          <TouchableOpacity
+            ref={joinBtnRef}
+            onLayout={joinBtnLayout}
+            style={styles.navItem}
+            onPress={() => setShowJoin(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="log-in-outline" size={24} color={Colors.textMuted} />
+            <Text style={styles.navLabel}>Ingresar</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* "Contáctanos" verde parpadeante SOLO para VIEWER: los invita a pedir
+            acceso a un administrador. */}
+        {isViewer && (
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => navigation.navigate('Info', { kind: 'contact' })}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ alignItems: 'center', gap: 4, opacity: contactPulse }}>
+              <Ionicons name="mail-outline" size={24} color={Colors.success} />
+              <Text style={[styles.navLabel, { color: Colors.success, fontWeight: '800' }]}>Contáctanos</Text>
+            </Animated.View>
+          </TouchableOpacity>
+        )}
 
         {isJefe && (
           <TouchableOpacity
