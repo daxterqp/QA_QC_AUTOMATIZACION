@@ -10,7 +10,12 @@
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+  <!-- FOREGROUND_SERVICE_LOCATION quitado junto con ACCESS_BACKGROUND_LOCATION (jun 2026):
+       lo usaba SOLO el servicio de rastreo en background. El modo "primer plano" de la
+       trazabilidad usa watchPositionAsync (sin servicio) y no lo requiere. tools:node="remove"
+       fuerza que expo-location no lo re-inyecte. REACTIVAR junto al background (ver
+       src/services/BackgroundLocationTask.ts). -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>

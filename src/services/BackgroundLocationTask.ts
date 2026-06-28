@@ -14,7 +14,8 @@
  * │ la pantalla apagada / app cerrada — esta task solo correrá en foreground.│
  * │                                                                          │
  * │ ► REACTIVAR BACKGROUND LOCATION (cuando se requiera) — checklist:        │
- * │   1. Volver a agregar `ACCESS_BACKGROUND_LOCATION`:                       │
+ * │   1. Volver a agregar `ACCESS_BACKGROUND_LOCATION` y                      │
+ * │      `FOREGROUND_SERVICE_LOCATION` (quitar sus tools:node="remove"):      │
  * │        - android/app/src/main/AndroidManifest.xml                        │
  * │        - app.json → android.permissions                                  │
  * │   2. Implementar una pantalla de DIVULGACIÓN PROMINENTE que se muestre   │
