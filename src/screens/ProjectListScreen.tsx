@@ -92,6 +92,7 @@ export default function ProjectListScreen({ navigation }: Props) {
   const { t, lang } = useI18n();
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Modal ingresar a proyecto
@@ -657,33 +658,65 @@ export default function ProjectListScreen({ navigation }: Props) {
       <Modal visible={showCreate} transparent animationType="slide">
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => { setShowCreate(false); setNewName(''); setNewPassword(''); }}>
           <TouchableOpacity style={styles.modal} activeOpacity={1}>
-            <Text style={styles.modalTitle}>NUEVO PROYECTO</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Nombre del proyecto"
-              placeholderTextColor={Colors.textMuted}
-              value={newName}
-              onChangeText={setNewName}
-              autoFocus
-              returnKeyType="next"
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Contraseña del proyecto"
-              placeholderTextColor={Colors.textMuted}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={createProject}
-            />
-            <Text style={styles.modalHint}>
-              Comparte esta contraseña con tu equipo para que puedan acceder al proyecto.
-            </Text>
+            {/* Encabezado con ícono */}
+            <View style={styles.cpHeader}>
+              <View style={styles.cpHeaderIcon}>
+                <Ionicons name="folder-open" size={22} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cpTitle}>Nuevo proyecto</Text>
+                <Text style={styles.cpSubtitle}>Crea un proyecto y compártelo con tu equipo.</Text>
+              </View>
+            </View>
+
+            {/* Nombre */}
+            <View>
+              <Text style={styles.cpLabel}>Nombre del proyecto</Text>
+              <View style={styles.cpFieldBox}>
+                <Ionicons name="briefcase-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.cpFieldInput}
+                  placeholder="Ej. Edificio Las Palmas"
+                  placeholderTextColor={Colors.textMuted}
+                  value={newName}
+                  onChangeText={setNewName}
+                  autoFocus
+                  returnKeyType="next"
+                />
+              </View>
+            </View>
+
+            {/* Contraseña */}
+            <View>
+              <Text style={styles.cpLabel}>Contraseña del proyecto</Text>
+              <View style={styles.cpFieldBox}>
+                <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.cpFieldInput}
+                  placeholder="Contraseña para tu equipo"
+                  placeholderTextColor={Colors.textMuted}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={!showNewPassword}
+                  returnKeyType="done"
+                  onSubmitEditing={createProject}
+                />
+                <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name={showNewPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.cpHintRow}>
+                <Ionicons name="information-circle-outline" size={14} color={Colors.textMuted} />
+                <Text style={styles.cpHintText}>
+                  Comparte esta contraseña con tu equipo para que puedan acceder al proyecto.
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.modalBtns}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
-                onPress={() => { setShowCreate(false); setNewName(''); setNewPassword(''); }}
+                onPress={() => { setShowCreate(false); setNewName(''); setNewPassword(''); setShowNewPassword(false); }}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
@@ -692,7 +725,8 @@ export default function ProjectListScreen({ navigation }: Props) {
                 onPress={createProject}
                 disabled={!newName.trim() || !newPassword.trim()}
               >
-                <Text style={styles.modalConfirmText}>Crear</Text>
+                <Ionicons name="add" size={18} color={Colors.white} />
+                <Text style={styles.modalConfirmText}>Crear proyecto</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -979,11 +1013,22 @@ const styles = StyleSheet.create({
   modalCancelBtn: { padding: 12 },
   modalCancelText: { color: Colors.textSecondary, fontWeight: '600' },
   modalConfirmBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.primary, borderRadius: Radius.md,
-    paddingHorizontal: 28, paddingVertical: 12,
+    paddingHorizontal: 22, paddingVertical: 12,
   },
   modalBtnDisabled: { backgroundColor: Colors.light },
   modalConfirmText: { color: Colors.white, fontWeight: '700' },
+  // Modal "nuevo proyecto" — encabezado, campos con ícono, ayuda.
+  cpHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 2 },
+  cpHeaderIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.primary + '15', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.primary + '30' },
+  cpTitle: { fontSize: 17, fontWeight: '800', color: Colors.navy },
+  cpSubtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2, lineHeight: 16 },
+  cpLabel: { fontSize: 11.5, fontWeight: '700', color: Colors.textSecondary, marginBottom: 5, marginLeft: 2 },
+  cpFieldBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.surface, borderRadius: Radius.md, paddingHorizontal: 12, borderWidth: 1, borderColor: Colors.border },
+  cpFieldInput: { flex: 1, paddingVertical: 13, fontSize: 15, color: Colors.textPrimary },
+  cpHintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, marginLeft: 2 },
+  cpHintText: { flex: 1, fontSize: 11.5, color: Colors.textMuted, lineHeight: 15 },
 
   propConfigBtn: {
     padding: 16, borderRadius: Radius.md, backgroundColor: '#eef2fa',

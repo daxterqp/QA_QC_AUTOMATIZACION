@@ -25,6 +25,25 @@ const FF_SEMI = 'Montserrat_600SemiBold';
 const FF_BOLD = 'Montserrat_700Bold';
 const FF_XBOLD = 'Montserrat_800ExtraBold';
 
+/** Nivel de seguridad de una contraseña: 0–4 + etiqueta y color. */
+function passwordStrength(pw: string): { score: number; label: string; color: string } {
+  if (!pw) return { score: 0, label: '', color: 'transparent' };
+  let s = 0;
+  if (pw.length >= 8) s++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s++;
+  if (/\d/.test(pw)) s++;
+  if (/[^A-Za-z0-9]/.test(pw)) s++;
+  if (pw.length < 6) s = Math.min(s, 1);
+  const map = [
+    { label: 'Muy débil', color: '#d93025' },
+    { label: 'Débil', color: '#d93025' },
+    { label: 'Media', color: '#e37400' },
+    { label: 'Buena', color: '#1a73e8' },
+    { label: 'Fuerte', color: '#1e8e3e' },
+  ];
+  return { score: s, ...map[s] };
+}
+
 export default function LoginScreen() {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -49,6 +68,8 @@ export default function LoginScreen() {
   const [suEmail, setSuEmail] = useState('');
   const [suPassword, setSuPassword] = useState('');
   const [showSuPassword, setShowSuPassword] = useState(false);
+  const [suConfirm, setSuConfirm] = useState('');
+  const [showSuConfirm, setShowSuConfirm] = useState(false);
   const [signingUp, setSigningUp] = useState(false);
 
   // Inactividad: tras 1 min en el login, vuelve al intro ("toca para comenzar").
@@ -166,9 +187,12 @@ export default function LoginScreen() {
       Alert.alert(t('login.googleErrorTitle'), t('login.googleErrorMsg'));
     }
   };
-  const suValid = suName.trim().length >= 2 && /\S+@\S+\.\S+/.test(suEmail.trim()) && suPassword.length >= 6;
+  const pwStrength = passwordStrength(suPassword);
+  const suConfirmMatches = suPassword.length > 0 && suPassword === suConfirm;
+  const suValid = suName.trim().length >= 2 && /\S+@\S+\.\S+/.test(suEmail.trim())
+    && suPassword.length >= 6 && suConfirmMatches;
   const handleCreateAccount = () => {
-    setSuName(''); setSuEmail(email.trim()); setSuPassword('');
+    setSuName(''); setSuEmail(email.trim()); setSuPassword(''); setSuConfirm('');
     setShowSignup(true);
   };
   const handleSignup = async () => {
@@ -376,45 +400,97 @@ export default function LoginScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{t('login.signupTitle')}</Text>
             <Text style={styles.modalSubtitle}>{t('login.signupSubtitle')}</Text>
-            <View style={styles.fieldBox}>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder={t('login.signupName')}
-                placeholderTextColor={Colors.textMuted}
-                value={suName}
-                onChangeText={setSuName}
-                autoCapitalize="words"
-                returnKeyType="next"
-              />
+
+            {/* Nombre */}
+            <View>
+              <Text style={styles.suFieldLabel}>{t('login.signupNameLabel')}</Text>
+              <View style={styles.fieldBox}>
+                <Ionicons name="person-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder={t('login.signupName')}
+                  placeholderTextColor={Colors.textMuted}
+                  value={suName}
+                  onChangeText={setSuName}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                />
+              </View>
             </View>
-            <View style={styles.fieldBox}>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder={t('login.emailPlaceholder')}
-                placeholderTextColor={Colors.textMuted}
-                value={suEmail}
-                onChangeText={setSuEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="next"
-              />
+
+            {/* Email */}
+            <View>
+              <Text style={styles.suFieldLabel}>{t('login.signupEmailLabel')}</Text>
+              <View style={styles.fieldBox}>
+                <Ionicons name="mail-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder={t('login.emailPlaceholder')}
+                  placeholderTextColor={Colors.textMuted}
+                  value={suEmail}
+                  onChangeText={setSuEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                />
+              </View>
             </View>
-            <View style={styles.fieldBox}>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder={t('login.passwordPlaceholder')}
-                placeholderTextColor={Colors.textMuted}
-                value={suPassword}
-                onChangeText={setSuPassword}
-                secureTextEntry={!showSuPassword}
-                returnKeyType="done"
-                onSubmitEditing={handleSignup}
-              />
-              <TouchableOpacity onPress={() => setShowSuPassword(!showSuPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name={showSuPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
-              </TouchableOpacity>
+
+            {/* Contraseña + medidor de fuerza */}
+            <View>
+              <Text style={styles.suFieldLabel}>{t('login.signupPasswordLabel')}</Text>
+              <View style={styles.fieldBox}>
+                <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder={t('login.passwordPlaceholder')}
+                  placeholderTextColor={Colors.textMuted}
+                  value={suPassword}
+                  onChangeText={setSuPassword}
+                  secureTextEntry={!showSuPassword}
+                  returnKeyType="next"
+                />
+                <TouchableOpacity onPress={() => setShowSuPassword(!showSuPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name={showSuPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              {suPassword.length > 0 && (
+                <View style={styles.pwMeterRow}>
+                  <View style={styles.pwMeterBars}>
+                    {[0, 1, 2, 3].map(i => (
+                      <View key={i} style={[styles.pwBar, { backgroundColor: i < pwStrength.score ? pwStrength.color : 'rgba(0,0,0,0.12)' }]} />
+                    ))}
+                  </View>
+                  <Text style={[styles.pwMeterLabel, { color: pwStrength.color }]}>{pwStrength.label}</Text>
+                </View>
+              )}
             </View>
+
+            {/* Confirmar contraseña */}
+            <View>
+              <Text style={styles.suFieldLabel}>{t('login.signupConfirmLabel')}</Text>
+              <View style={[styles.fieldBox, suConfirm.length > 0 && !suConfirmMatches && styles.fieldBoxError]}>
+                <Ionicons name="lock-closed-outline" size={18} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder={t('login.signupConfirmPlaceholder')}
+                  placeholderTextColor={Colors.textMuted}
+                  value={suConfirm}
+                  onChangeText={setSuConfirm}
+                  secureTextEntry={!showSuConfirm}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSignup}
+                />
+                <TouchableOpacity onPress={() => setShowSuConfirm(!showSuConfirm)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name={showSuConfirm ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              {suConfirm.length > 0 && !suConfirmMatches && (
+                <Text style={styles.suErrorHint}>{t('login.signupMismatch')}</Text>
+              )}
+            </View>
+
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setShowSignup(false)}>
                 <Text style={styles.modalCancel}>{t('login.cancel')}</Text>
@@ -485,7 +561,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18, backgroundColor: 'rgba(255,255,255,0.78)',
   },
   fieldBoxFocused: { borderColor: Colors.primary, backgroundColor: Colors.white },
+  fieldBoxError: { borderColor: '#d93025' },
   fieldInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: Colors.textPrimary, fontFamily: FF_REG },
+  // Modal "crear cuenta" — etiquetas, medidor de fuerza y avisos.
+  suFieldLabel: { fontFamily: FF_SEMI, fontSize: 11.5, color: Colors.textSecondary, marginBottom: 5, marginLeft: 4 },
+  pwMeterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginLeft: 4 },
+  pwMeterBars: { flexDirection: 'row', gap: 4, flex: 1 },
+  pwBar: { flex: 1, height: 4, borderRadius: 2 },
+  pwMeterLabel: { fontFamily: FF_SEMI, fontSize: 11, minWidth: 56, textAlign: 'right' },
+  suErrorHint: { fontFamily: FF_REG, fontSize: 11.5, color: '#d93025', marginTop: 5, marginLeft: 4 },
 
 
   forgotBtn: { alignSelf: 'flex-end', paddingVertical: 2 },
