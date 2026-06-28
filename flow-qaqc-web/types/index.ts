@@ -246,6 +246,7 @@ export interface Project {
   status: string;
   password: string | null;
   created_by_id: string | null;
+  is_demo?: boolean;
   logo_s3_key: string | null;
   stamp_comment: string | null;
   /** v45 — config de estampado a nivel proyecto (sincronizada). */

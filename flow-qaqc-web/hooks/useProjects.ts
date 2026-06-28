@@ -30,7 +30,17 @@ export function useProjects() {
         .select('project_id')
         .eq('user_id', currentUser.id);
       if (accErr) throw accErr;
-      if (!access || access.length === 0) return [];
+      if (!access || access.length === 0) {
+        // VIEWER sin proyectos reales → mostrar los proyectos DEMO (la RLS los
+        // permite solo en este caso). Apenas le asignen uno real, deja de aplicar.
+        if (currentUser.role === 'VIEWER') {
+          const { data: demo, error: demoErr } = await supabase
+            .from('projects').select('*').eq('is_demo', true).order('created_at', { ascending: true });
+          if (demoErr) throw demoErr;
+          return (demo ?? []) as Project[];
+        }
+        return [];
+      }
 
       const ids = access.map((a: { project_id: string }) => a.project_id);
       const { data, error } = await supabase

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Modal, Alert, RefreshControl, Platform, StatusBar, Animated,
+  TextInput, Modal, Alert, RefreshControl, Platform, StatusBar, Animated, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -55,7 +55,7 @@ function PulsingBadge({ count }: { count: number }) {
 }
 
 /** Fila de proyecto tal como viene de Supabase */
-type ProjectRow = { id: string; name: string; status: string };
+type ProjectRow = { id: string; name: string; status: string; is_demo?: boolean };
 
 export default function ProjectListScreen({ navigation }: Props) {
   const { currentUser, logout, isDemo } = useAuth();
@@ -134,6 +134,18 @@ export default function ProjectListScreen({ navigation }: Props) {
     return () => loop.stop();
   }, [isViewer, contactPulse]);
 
+  // Marcar/desmarcar un proyecto como DEMO (solo Creador). Optimista + persiste en nube.
+  const toggleProjectDemo = async (proj: ProjectRow, value: boolean) => {
+    setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, is_demo: value } : p));
+    setSelectedProject(prev => (prev && prev.id === proj.id) ? { ...prev, is_demo: value } : prev);
+    const { error } = await supabase.from('projects').update({ is_demo: value, updated_at: Date.now() }).eq('id', proj.id);
+    if (error) {
+      Alert.alert(t('alerts.error'), `No se pudo actualizar el proyecto demo: ${error.message}`);
+      setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, is_demo: !value } : p));
+      setSelectedProject(prev => (prev && prev.id === proj.id) ? { ...prev, is_demo: !value } : prev);
+    }
+  };
+
   // ── Cargar proyectos directamente desde Supabase (fuente de verdad) ────────
   const loadProjectsFromCloud = useCallback(async () => {
     if (!currentUser) return;
@@ -142,12 +154,12 @@ export default function ProjectListScreen({ navigation }: Props) {
       let data: ProjectRow[] = [];
 
       if (currentUser.role === 'CREATOR') {
-        const { data: res } = await supabase.from('projects').select('id,name,status').order('created_at', { ascending: true });
+        const { data: res } = await supabase.from('projects').select('id,name,status,is_demo').order('created_at', { ascending: true });
         data = (res ?? []) as ProjectRow[];
       } else {
         const [{ data: accessRes }, { data: createdRes }] = await Promise.all([
           supabase.from('user_project_access').select('project_id').eq('user_id', currentUser.id),
-          supabase.from('projects').select('id,name,status').eq('created_by_id', currentUser.id),
+          supabase.from('projects').select('id,name,status,is_demo').eq('created_by_id', currentUser.id),
         ]);
         const ids = new Set([
           ...(accessRes ?? []).map((a: any) => a.project_id as string),
@@ -155,8 +167,15 @@ export default function ProjectListScreen({ navigation }: Props) {
         ]);
         if (ids.size > 0) {
           const { data: projRes } = await supabase
-            .from('projects').select('id,name,status').in('id', Array.from(ids)).order('created_at', { ascending: true });
+            .from('projects').select('id,name,status,is_demo').in('id', Array.from(ids)).order('created_at', { ascending: true });
           data = (projRes ?? []) as ProjectRow[];
+        } else if (currentUser.role === 'VIEWER') {
+          // VIEWER sin proyectos reales → mostrar los proyectos DEMO (la RLS los
+          // permite solo en este caso). Apenas le asignen/entre a uno real, esta
+          // rama deja de ejecutarse y los demo desaparecen.
+          const { data: demoRes } = await supabase
+            .from('projects').select('id,name,status,is_demo').eq('is_demo', true).order('created_at', { ascending: true });
+          data = (demoRes ?? []) as ProjectRow[];
         }
       }
 
@@ -548,6 +567,9 @@ export default function ProjectListScreen({ navigation }: Props) {
                     {item.status === 'ACTIVE' ? 'ACTIVO' : 'CERRADO'}
                   </Text>
                 </View>
+                {item.is_demo && (
+                  <View style={styles.demoBadge}><Text style={styles.demoBadgeText}>DEMO</Text></View>
+                )}
               </View>
               <Ionicons name="chevron-forward" size={20} color={Colors.light} />
             </TouchableOpacity>
@@ -793,6 +815,22 @@ export default function ProjectListScreen({ navigation }: Props) {
             >
               <Text style={styles.propDeleteText}>Eliminar proyecto de mi vista</Text>
             </TouchableOpacity>
+
+            {/* Proyecto DEMO (solo Creador): si está ON, lo ven TODOS los
+                visualizadores que aún no tienen un proyecto real asignado. */}
+            {isCreator && selectedProject && (
+              <View style={styles.demoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.demoLabel}>Proyecto demo</Text>
+                  <Text style={styles.demoHint}>Visible para los visualizadores sin proyecto asignado (escaparate).</Text>
+                </View>
+                <Switch
+                  value={!!selectedProject.is_demo}
+                  onValueChange={(v) => toggleProjectDemo(selectedProject, v)}
+                />
+              </View>
+            )}
+
             <TouchableOpacity style={styles.propCancelBtn} onPress={() => setSelectedProject(null)}>
               <Text style={styles.propCancelText}>Cancelar</Text>
             </TouchableOpacity>
@@ -1061,6 +1099,12 @@ const styles = StyleSheet.create({
   cpFieldInput: { flex: 1, paddingVertical: 13, fontSize: 15, color: Colors.textPrimary },
   cpHintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6, marginLeft: 2 },
   cpHintText: { flex: 1, fontSize: 11.5, color: Colors.textMuted, lineHeight: 15 },
+  // Toggle "Proyecto demo" en propiedades.
+  demoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: Colors.border, marginTop: 4 },
+  demoLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  demoHint: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2, lineHeight: 15 },
+  demoBadge: { backgroundColor: '#e8f0fe', borderColor: '#1a73e8', borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  demoBadgeText: { fontSize: 9, fontWeight: '900', color: '#1a73e8', letterSpacing: 0.5 },
 
   propConfigBtn: {
     padding: 16, borderRadius: Radius.md, backgroundColor: '#eef2fa',
