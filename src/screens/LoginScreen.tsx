@@ -48,6 +48,7 @@ export default function LoginScreen() {
   const [suName, setSuName] = useState('');
   const [suEmail, setSuEmail] = useState('');
   const [suPassword, setSuPassword] = useState('');
+  const [showSuPassword, setShowSuPassword] = useState(false);
   const [signingUp, setSigningUp] = useState(false);
 
   // Inactividad: tras 1 min en el login, vuelve al intro ("toca para comenzar").
@@ -406,10 +407,13 @@ export default function LoginScreen() {
                 placeholderTextColor={Colors.textMuted}
                 value={suPassword}
                 onChangeText={setSuPassword}
-                secureTextEntry
+                secureTextEntry={!showSuPassword}
                 returnKeyType="done"
                 onSubmitEditing={handleSignup}
               />
+              <TouchableOpacity onPress={() => setShowSuPassword(!showSuPassword)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name={showSuPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+              </TouchableOpacity>
             </View>
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setShowSignup(false)}>
