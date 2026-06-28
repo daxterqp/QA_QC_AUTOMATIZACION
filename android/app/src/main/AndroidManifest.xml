@@ -34,6 +34,12 @@
     </intent>
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
+    <!-- LocationTaskService de expo-location declara foregroundServiceType="location"
+         (servicio del rastreo en background, ya retirado). Se elimina del manifest
+         fusionado para que NO quede ningún FGS de tipo location (consistencia con Play).
+         No afecta la captura GPS en primer plano (watchPositionAsync no usa servicio).
+         REACTIVAR junto al background — ver src/services/BackgroundLocationTask.ts. -->
+    <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
     <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyBJbqP-2rHM5SOqdw2SLbjPviP858pBf9s"/>
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
