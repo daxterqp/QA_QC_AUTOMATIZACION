@@ -92,7 +92,7 @@ export function getTemplatePrintConfig(flags: unknown, idProtocolo: string | nul
     font_level: c.font_level ?? 'normal',
     graph_size: c.graph_size ?? 'normal',
     show_photos: c.show_photos ?? true,
-    header_size: c.header_size ?? 'normal',
+    header_size: c.header_size ?? 'compact', // 2 filas por defecto (clásicos y numéricos)
     header_fields: (Array.isArray(c.header_fields) && c.header_fields.length > 0) ? c.header_fields : DEFAULT_HEADER_FIELDS,
     show_qr: c.show_qr ?? true,
     split_tables: c.split_tables ?? false,
