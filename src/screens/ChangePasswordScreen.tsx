@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, Alert, Switch,
+  KeyboardAvoidingView, Platform, Alert, Switch, ScrollView,
 } from 'react-native';
 import { isBiometricEnabled, setBiometricEnabled, isBiometricAvailable } from '@services/BiometricService';
 import AppHeader from '@components/AppHeader';
@@ -78,7 +78,12 @@ export default function ChangePasswordScreen({ navigation }: Props) {
     >
       <AppHeader title={t('changePass.title')} onBack={() => navigation.goBack()} />
 
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.card}>
           <Text style={styles.userLabel}>
             {currentUser?.name} {currentUser?.apellido}
@@ -181,14 +186,14 @@ export default function ChangePasswordScreen({ navigation }: Props) {
             <Text style={styles.dangerBtnText}>{t('changePass.deleteBtn')}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.surface },
-  container: { padding: 20, gap: 16 },
+  container: { padding: 20, paddingBottom: 48, gap: 16 },
   card: {
     backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 24, gap: 12,
     ...Shadow.card,
