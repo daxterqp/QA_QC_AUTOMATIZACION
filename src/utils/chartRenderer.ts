@@ -952,7 +952,9 @@ function renderLogX(
   const legend = opts.noLegend ? { rows: [] as any[], height: 0 } : legendLayout(_legEntries, width);
   const { plot, chrome } = layoutPlot(spec, width, height, yLabels, legend.height, opts);
 
-  const sx = (x: number) => plot.left + ((Math.log10(x) - logMin) / logRange) * (plot.right - plot.left);
+  // Granulometría: eje X INVERTIDO — abertura MAYOR a la IZQUIERDA, menor a la
+  // derecha (convención estándar de la curva granulométrica). Reflejamos el mapeo.
+  const sx = (x: number) => plot.left + ((logMax - Math.log10(x)) / logRange) * (plot.right - plot.left);
   const sy = (y: number) => plot.bottom - ((y - yScale.min) / (yScale.max - yScale.min)) * (plot.bottom - plot.top);
 
   const clipId = `plotclip-${++_clipSeq}`;
@@ -967,11 +969,13 @@ function renderLogX(
 
   for (const s of series) {
     if (s.pts.length < 2) continue;
-    // Ordena por X creciente (granulometría se grafica de tamiz menor a mayor)
+    // Ordena por X creciente; con el eje invertido sus posiciones de pantalla
+    // quedan de derecha a izquierda (correcto para granulometría).
     const sortedPts = [...s.pts].sort((a, b) => a.x - b.x);
     const screenPts = sortedPts.map(p => ({ sx: sx(p.x), sy: sy(p.y) }));
-    const polyline = screenPts.map(p => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' ');
-    svg += `<polyline points="${polyline}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    // Curva SUAVIZADA (Catmull-Rom), como la curva granulométrica clásica
+    // (antes eran segmentos rectos).
+    svg += `<path d="${catmullRomPath(screenPts)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round"/>`;
     for (const p of screenPts) {
       svg += `<circle cx="${p.sx.toFixed(1)}" cy="${p.sy.toFixed(1)}" r="3" fill="${COLORS.bg}" stroke="${s.color}" stroke-width="1.5"/>`;
     }
