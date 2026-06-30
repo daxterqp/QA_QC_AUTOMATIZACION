@@ -34,6 +34,8 @@ export async function POST(req: NextRequest) {
   const maxDim: number = Math.min(16383, Math.max(1024, Number(body?.maxDim) || 8192));
   const quality: number = Math.min(100, Math.max(40, Number(body?.quality) || 80));
   const grid: number = Math.min(3, Math.max(1, Number(body?.grid) || 1)); // 1=simple, 2=2×2, 3=3×3
+  // Hacer transparente el negro de relleno (nodata) de la ortofoto. Default ON.
+  const transparentBlack: boolean = body?.transparentBlack !== false;
 
   if (!srcPath || !projectName) return NextResponse.json({ error: 'Faltan parámetros' }, { status: 400 });
   let isFile = false;
@@ -71,7 +73,7 @@ export async function POST(req: NextRequest) {
       geo = await readGeoTiffGeo(srcPath); // null si el TIFF no trae georreferencia
     }
 
-    const proc = await processOrthophotoTiles(imageToProcess, stageDir, stageToken, grid, maxDim, quality);
+    const proc = await processOrthophotoTiles(imageToProcess, stageDir, stageToken, grid, maxDim, quality, transparentBlack);
     return NextResponse.json({
       ok: true,
       srcBytes,

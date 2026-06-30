@@ -85,6 +85,8 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
   const [maxDim, setMaxDim] = useState(8192);
   const [quality, setQuality] = useState(85);
   const [grid, setGrid] = useState(1); // 1=simple, 2=2×2 (4), 3=3×3 (9)
+  // Hacer transparente el fondo negro (nodata) de la ortofoto. Default ON.
+  const [transparentBlack, setTransparentBlack] = useState(true);
   const [adding, setAdding] = useState(false); // true = mostrando el flujo de carga
 
   // Compat: si no hay versiones pero existe una ortofoto única antigua, sintetizarla.
@@ -200,7 +202,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
       const res = await fetch('/api/orthophoto/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ srcPath: file.path, projectName, maxDim, quality, grid }),
+        body: JSON.stringify({ srcPath: file.path, projectName, maxDim, quality, grid, transparentBlack }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data: ProcResult = await res.json();
@@ -368,6 +370,13 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
             ))}
           </div>
           <p className="text-[10px] text-muted leading-snug" dangerouslySetInnerHTML={{ __html: t('webCSectors.tilingHint') }} />
+          {/* Hacer transparente el fondo negro (nodata) de la ortofoto. */}
+          <label className="flex items-start gap-2 mt-1 cursor-pointer select-none">
+            <input type="checkbox" checked={transparentBlack} onChange={e => setTransparentBlack(e.target.checked)} className="mt-0.5 accent-primary" />
+            <span className="text-[11px] text-textSecondary leading-snug">
+              <strong className="text-textPrimary">Hacer transparente el fondo negro</strong> — quita el relleno negro (nodata) del borde de la ortofoto, como “Display 0,0,0 as NoData” de ArcGIS. Desactívalo si tu imagen tiene negros reales que quieras conservar.
+            </span>
+          </label>
           <div className="flex gap-2">
             <button onClick={() => { setAdding(false); setMsg(null); }} disabled={busy}
               className="px-3 py-2 text-xs font-bold rounded border border-border text-textSecondary hover:bg-surface">

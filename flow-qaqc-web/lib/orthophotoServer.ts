@@ -187,6 +187,27 @@ export interface TilesResult {
  *  la reescala a `maxDimPerTile` y la guarda como WebP en staging
  *  (`_staging-<token>-<r>-<c>.webp`). Cada tesela usa su propia textura en el
  *  mapa → esquiva el límite de ~8192px del visor y multiplica el detalle. */
+/** Umbral (0–255) por canal para considerar un pixel "negro de relleno" (nodata).
+ *  El relleno de las ortofotos es 0,0,0; con la interpolación del resize los
+ *  bordes quedan casi-negros, así que un umbral pequeño limpia también el fringe.
+ *  Imágenes aéreas reales casi nunca tienen pixeles tan oscuros. */
+const BLACK_NODATA_THRESHOLD = 16;
+
+/** Codifica un pipeline sharp a WebP haciendo TRANSPARENTE el negro de relleno
+ *  (equivalente al "Display 0,0,0 as NoData" de ArcGIS/QGIS): añade canal alfa y
+ *  pone alpha=0 en los pixeles casi-negros. Devuelve el buffer WebP (con alfa). */
+async function webpWithBlackTransparent(pipe: sharp.Sharp, quality: number): Promise<Buffer> {
+  const { data, info } = await pipe.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const ch = info.channels; // 4 (RGBA)
+  const thr = BLACK_NODATA_THRESHOLD;
+  for (let i = 0; i + 3 < data.length; i += ch) {
+    if (data[i] <= thr && data[i + 1] <= thr && data[i + 2] <= thr) data[i + 3] = 0;
+  }
+  return sharp(data, { raw: { width: info.width!, height: info.height!, channels: 4 } })
+    .webp({ quality, alphaQuality: 100, effort: 4 })
+    .toBuffer();
+}
+
 export async function processOrthophotoTiles(
   srcPath: string,
   stageDir: string,
@@ -194,6 +215,7 @@ export async function processOrthophotoTiles(
   grid: number,
   maxDimPerTile: number,
   quality: number,
+  transparentBlack = true,
 ): Promise<TilesResult> {
   const meta = await sharp(srcPath, { limitInputPixels: false, failOn: 'none' }).metadata().catch(() => ({} as any));
   const W = meta.width ?? 0, H = meta.height ?? 0;
@@ -209,10 +231,12 @@ export async function processOrthophotoTiles(
       const out = path.join(stageDir, `_staging-${token}-${r}-${c}.webp`);
       let pipe = sharp(srcPath, { limitInputPixels: false, failOn: 'none' });
       if (grid > 1 && W > 0 && H > 0) pipe = pipe.extract({ left, top, width: tw, height: th });
-      await pipe
-        .resize({ width: maxDimPerTile, height: maxDimPerTile, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality, effort: 4 })
-        .toFile(out);
+      pipe = pipe.resize({ width: maxDimPerTile, height: maxDimPerTile, fit: 'inside', withoutEnlargement: true });
+      if (transparentBlack) {
+        fs.writeFileSync(out, await webpWithBlackTransparent(pipe, quality));
+      } else {
+        await pipe.webp({ quality, effort: 4 }).toFile(out);
+      }
       const om = await sharp(out).metadata();
       const bytes = fs.statSync(out).size;
       total += bytes;
@@ -220,10 +244,11 @@ export async function processOrthophotoTiles(
     }
   }
 
-  const previewBuf = await sharp(srcPath, { limitInputPixels: false, failOn: 'none' })
-    .resize({ width: 800, fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: 70 })
-    .toBuffer();
+  const previewPipe = sharp(srcPath, { limitInputPixels: false, failOn: 'none' })
+    .resize({ width: 800, fit: 'inside', withoutEnlargement: true });
+  const previewBuf = transparentBlack
+    ? await webpWithBlackTransparent(previewPipe, 70)
+    : await previewPipe.webp({ quality: 70 }).toBuffer();
 
   return {
     tiles,
