@@ -47,8 +47,8 @@ const pDseca = row('Densidad del suelo seco (g/cm³)', `numerico-fx[#${pDhum}A/(
 // S2 — Punto Proctor (xref) + % de compactación
 const S2 = 'Punto Proctor y compactación';
 const pSel = row('Ensayo Proctor (seleccionar)', `xref-[${PROCTOR_ID}]`, S2);                              // 20  selector
-const pMDS = row('Máxima densidad seca MDS — Proctor (g/cm³)', `xref-[#${pSel}A].${PROCTOR_MDS_PARTIDA}A`, S2); // 21  get
-const pOCH = row('Óptimo contenido de humedad OCH — Proctor (%)', `xref-[#${pSel}A].${PROCTOR_OCH_PARTIDA}A`, S2); // 22  get
+const pMDS = row('Máxima densidad seca del Proctor (g/cm³)', `xref-[#${pSel}A].${PROCTOR_MDS_PARTIDA}A`, S2); // 21  get
+const pOCH = row('Humedad óptima del Proctor (%)', `xref-[#${pSel}A].${PROCTOR_OCH_PARTIDA}A`, S2); // 22  get
 const pEspec = row('Compactación especificada (%)', 'val-[98]:dec[0]', S2);                                // 23
 row('Porcentaje de compactación (%)', `numerico-fx[#${pDseca}A/#${pMDS}A*100]:dec[1]`, S2);               // 24
 

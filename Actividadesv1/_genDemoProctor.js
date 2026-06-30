@@ -48,8 +48,8 @@ const pDseca = row('Densidad seca (g/cm³)', perCol(`numerico-fx[#${pDhum}{c}/(1
 
 // S3 — Densidad máxima seca (resultado + curva). MDS=19, OCH=20 (las usa el Cono).
 const S3 = 'Determinación de densidad máxima seca';
-const pMDS = row('Máxima densidad seca MDS (g/cm³)', `numerico-fx[PUNTOMAXIMOY(#${pHum}A:#${pHum}D, #${pDseca}A:#${pDseca}D, 3)]:dec[3]`, S3); // 19
-const pOCH = row('Óptimo contenido de humedad OCH (%)', `numerico-fx[PUNTOMAXIMOX(#${pHum}A:#${pHum}D, #${pDseca}A:#${pDseca}D, 3)]:dec[2]`, S3); // 20
+const pMDS = row('Máxima densidad seca (g/cm³)', `numerico-fx[PUNTOMAXIMOY(#${pHum}A:#${pHum}D, #${pDseca}A:#${pDseca}D, 3)]:dec[3]`, S3); // 19
+const pOCH = row('Humedad óptima (%)', `numerico-fx[PUNTOMAXIMOX(#${pHum}A:#${pHum}D, #${pDseca}A:#${pDseca}D, 3)]:dec[2]`, S3); // 20
 row('Curva de compactación', `numerico-gr1[x:#${pHum}A:#${pHum}D|y:#${pDseca}A:#${pDseca}D|ajuste:poli3|alto:70|t:Curva de Compactación|xt:Humedad (%)|yt:Densidad seca (g/cm³)|ly:Puntos]`, S3); // 21
 
 // S4 — Granulometría (peso seco total como ingreso + tamices + curva)
