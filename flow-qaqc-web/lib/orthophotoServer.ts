@@ -28,6 +28,11 @@ export interface GeoResult {
   /** Etiqueta legible del CRS de origen (informativo). */
   systemLabel: string;
   epsg: number | null;
+  /** Esquinas CRUDAS del archivo en SU PROPIO CRS (sin convertir) — para
+   *  pre-rellenar el override manual: el usuario solo re-elige el sistema y
+   *  las esquinas ya vienen del archivo. `projected`=true si parecen UTM
+   *  (este/norte) en vez de grados. */
+  rawCorners?: { sw: { x: number; y: number }; ne: { x: number; y: number }; projected: boolean };
 }
 
 /** Construye una definición proj4 para los EPSG que sabemos manejar (Perú +
@@ -82,7 +87,11 @@ export async function readGeoTiffGeo(srcPath: string): Promise<GeoResult | null>
     ];
     // Sanity: coords plausibles (-90..90 / -180..180)
     if (Math.abs(bounds[0][0]) > 90 || Math.abs(bounds[1][0]) > 90 || Math.abs(bounds[0][1]) > 180 || Math.abs(bounds[1][1]) > 180) return null;
-    return { bounds, systemLabel: labelForEpsg(epsg), epsg };
+    // Esquinas crudas (CRS del archivo) para el override manual: si parecen UTM
+    // (fuera del rango grados) marcamos projected → el override sugiere "UTM".
+    const projected = Math.abs(minX) > 180 || Math.abs(maxX) > 180 || Math.abs(minY) > 90 || Math.abs(maxY) > 90;
+    const rawCorners = { sw: { x: minX, y: minY }, ne: { x: maxX, y: maxY }, projected };
+    return { bounds, systemLabel: labelForEpsg(epsg), epsg, rawCorners };
   } catch {
     return null; // no es GeoTIFF válido / sin geo-tags → fallback manual
   } finally {

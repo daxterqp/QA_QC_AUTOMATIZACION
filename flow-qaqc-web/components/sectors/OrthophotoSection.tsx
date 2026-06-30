@@ -55,7 +55,7 @@ interface ProcResult {
   tiles: { r: number; c: number; outBytes: number; width: number; height: number }[];
   srcBytes: number; outBytesTotal: number;
   srcWidth: number | null; srcHeight: number | null; previewDataUrl: string;
-  geo: { bounds: LeafletBounds; systemLabel: string; epsg: number | null } | null;
+  geo: { bounds: LeafletBounds; systemLabel: string; epsg: number | null; rawCorners?: { sw: { x: number; y: number }; ne: { x: number; y: number }; projected: boolean } } | null;
 }
 
 const GRID_PRESETS = [
@@ -234,6 +234,29 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
     const opts = { zone: parseInt(zone, 10), hemisphere };
     const b = cornersToBounds(cornerToWgs84(swC, system, opts), cornerToWgs84(neC, system, opts));
     return { bounds: b, systemLabel: ORTHO_SYSTEM_LABELS[system] };
+  }
+
+  // Override del sistema detectado. Al ACTIVARLO, pre-rellena las esquinas con
+  // las CRUDAS del archivo (en su propio CRS) y sugiere PSAD56 + zona/hemisferio
+  // a partir de la georref detectada → el usuario normalmente solo confirma el
+  // sistema (Método 1: "yo pongo el sistema, tú conviertes").
+  function toggleOverride() {
+    const next = !overrideGeo;
+    if (next && result?.geo?.rawCorners) {
+      const rc = result.geo.rawCorners;
+      setSw({ a: String(rc.sw.y), b: String(rc.sw.x) });
+      setNe({ a: String(rc.ne.y), b: String(rc.ne.x) });
+      setSystem(rc.projected ? 'PSAD56_UTM' : 'PSAD56_LATLNG');
+      if (rc.projected && result.geo.bounds) {
+        // La zona/hemisferio salen del centro de los bounds detectados (el
+        // corrimiento de datum no cambia la zona UTM).
+        const b = result.geo.bounds;
+        const z = Math.floor(((b[0][1] + b[1][1]) / 2 + 180) / 6) + 1;
+        if (z >= 1 && z <= 60) setZone(String(z));
+        setHemisphere(((b[0][0] + b[1][0]) / 2) < 0 ? 'S' : 'N');
+      }
+    }
+    setOverrideGeo(next);
   }
 
   async function handleConfirm() {
@@ -422,9 +445,9 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
               )}
               {/* Override: ingresar el sistema/esquinas a mano aunque el TIF traiga georef. */}
               {result.geo && (
-                <button type="button" onClick={() => setOverrideGeo(v => !v)}
+                <button type="button" onClick={toggleOverride}
                   className="self-start mt-0.5 text-[11px] font-bold text-primary underline hover:text-primary/80">
-                  {overrideGeo ? '↩ Usar el sistema detectado' : '✎ El sistema detectado no es correcto — ingresar manualmente'}
+                  {overrideGeo ? '↩ Usar el sistema detectado' : '✎ El sistema detectado no es correcto — corregirlo'}
                 </button>
               )}
             </div>
@@ -433,6 +456,11 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
           {/* Esquinas manuales solo si no hay geo */}
           {needsManual && (
             <div className="flex flex-col gap-2 border-t border-border pt-2">
+              {overrideGeo && (
+                <p className="text-[11px] text-muted">
+                  Las esquinas se tomaron del archivo en su sistema original. Solo elige el sistema correcto (y la zona si es UTM) y se reconvierten a WGS84.
+                </p>
+              )}
               <label className="text-[11px] font-bold text-textSecondary uppercase">{t('webCSectors.coordSystem')}</label>
               <select value={system} onChange={e => setSystem(e.target.value as OrthoSystem)}
                 className="border border-border rounded px-2 py-1.5 text-sm">
