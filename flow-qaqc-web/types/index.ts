@@ -305,10 +305,24 @@ export interface Sample {
   updated_at: number | null;
 }
 
+/** v72 — Geometría de un overlay ROTADO (Método 2: sistema propio por puntos de
+ *  control). El bounds axis-aligned sigue presente para encuadre/fallback; esto
+ *  añade la orientación real. Web usa `corners`; móvil usa `northUpBounds`+`bearing`. */
+export interface OrthophotoRotation {
+  /** 4 esquinas WGS84 [lat,lng] del rectángulo rotado (tl=oeste-norte, horario). */
+  corners: { tl: [number, number]; tr: [number, number]; br: [number, number]; bl: [number, number] };
+  /** Rumbo CW desde el norte (react-native-maps Overlay.bearing). */
+  bearing: number;
+  /** Bounds north-up [[s,w],[n,e]] para el `bounds` de react-native-maps Overlay. */
+  northUpBounds: [[number, number], [number, number]];
+}
+
 /** v37 — Una tesela de ortofoto (porción georreferenciada). */
 export interface OrthophotoTile {
   s3Key: string;
   bounds: [[number, number], [number, number]];
+  /** v72 — si está presente, la tesela se dibuja ROTADA (sistema propio). */
+  rotation?: OrthophotoRotation;
 }
 
 /** v36 — Una versión de ortofoto cargada (multi-versión por proyecto). */
@@ -325,6 +339,8 @@ export interface OrthophotoVersion {
   outBytes?: number;
   width?: number;
   height?: number;
+  /** v72 — overlay rotado (sistema propio por puntos de control). Móvil + web. */
+  rotation?: OrthophotoRotation;
   createdAt: number;
 }
 

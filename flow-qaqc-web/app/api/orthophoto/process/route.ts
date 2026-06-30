@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { readGeoTiffGeo, processOrthophotoTiles, readKmlGroundOverlay } from '@lib/orthophotoServer';
+import { readGeoTiffGeo, readGeoTiffRawExtent, processOrthophotoTiles, readKmlGroundOverlay } from '@lib/orthophotoServer';
 import { getServerUser } from '@lib/serverAuth';
 
 // Procesa la ortofoto EN LA PC: lee la georreferencia del GeoTIFF (si la trae),
@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
   let tempToCleanup: string | null = null;
   try {
     let geo: { bounds: any; systemLabel: string; epsg: number | null } | null = null;
+    let rawExtent: Awaited<ReturnType<typeof readGeoTiffRawExtent>> = null;
     let imageToProcess = srcPath;
 
     if (ext === '.kml' || ext === '.kmz') {
@@ -70,7 +71,8 @@ export async function POST(req: NextRequest) {
       imageToProcess = kml.imagePath;
       if (kml.isTemp) tempToCleanup = kml.imagePath;
     } else {
-      geo = await readGeoTiffGeo(srcPath); // null si el TIFF no trae georreferencia
+      geo = await readGeoTiffGeo(srcPath);          // null si el TIFF no trae georreferencia conocida
+      rawExtent = await readGeoTiffRawExtent(srcPath); // bbox crudo (CRS propio) para el Método 2
     }
 
     const proc = await processOrthophotoTiles(imageToProcess, stageDir, stageToken, grid, maxDim, quality, transparentBlack);
@@ -80,6 +82,7 @@ export async function POST(req: NextRequest) {
       stageToken,
       grid,
       geo,                       // { bounds, systemLabel, epsg } | null
+      rawExtent,                 // { bbox, width, height, georeferenced } | null (Método 2)
       ...proc,                   // tiles[], srcWidth, srcHeight, outBytesTotal, previewDataUrl
     });
   } catch (e) {

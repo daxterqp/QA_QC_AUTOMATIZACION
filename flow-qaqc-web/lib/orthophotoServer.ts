@@ -101,6 +101,41 @@ export async function readGeoTiffGeo(srcPath: string): Promise<GeoResult | null>
   }
 }
 
+/** Extensión CRUDA del GeoTIFF en SU PROPIO sistema (sin convertir), para el
+ *  Método 2 (sistema propio por puntos de control): aquí no nos importa el EPSG,
+ *  solo el bounding box del archivo en sus unidades nativas. Si el TIFF no trae
+ *  transformación de modelo, cae a coordenadas de PÍXEL [0,0,ancho,alto].
+ *  Devuelve null si no es un TIFF legible. */
+export interface RawExtent {
+  bbox: { minX: number; minY: number; maxX: number; maxY: number };
+  width: number; height: number;
+  /** true si el bbox viene de una georreferencia (model transform); false = píxeles. */
+  georeferenced: boolean;
+}
+export async function readGeoTiffRawExtent(srcPath: string): Promise<RawExtent | null> {
+  let tiff: any = null;
+  try {
+    tiff = await fromFile(srcPath);
+    const image = await tiff.getImage();
+    const width = image.getWidth(), height = image.getHeight();
+    const fd = image.fileDirectory ?? {};
+    const georeferenced = !!(fd.ModelPixelScale || fd.ModelTransformation || fd.ModelTiepoint);
+    let bbox: { minX: number; minY: number; maxX: number; maxY: number };
+    if (georeferenced) {
+      const bb = image.getBoundingBox(); // [minX, minY, maxX, maxY] en CRS del archivo
+      if (!bb || bb.some((n: number) => !isFinite(n))) return null;
+      bbox = { minX: bb[0], minY: bb[1], maxX: bb[2], maxY: bb[3] };
+    } else {
+      bbox = { minX: 0, minY: 0, maxX: width, maxY: height }; // fallback en píxeles
+    }
+    return { bbox, width, height, georeferenced };
+  } catch {
+    return null;
+  } finally {
+    try { await tiff?.close?.(); } catch { /* ignore */ }
+  }
+}
+
 // ── KML / KMZ (GroundOverlay) ───────────────────────────────────────────────
 export interface KmlOverlay {
   bounds: LeafletBounds;   // [[south,west],[north,east]] en WGS84

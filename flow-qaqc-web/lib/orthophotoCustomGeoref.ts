@@ -111,3 +111,131 @@ export function applyAffine(T: Affine, p: XY): LngLat {
   const [a, b, tx, c, d, ty] = T.m;
   return { lng: a * p.x + b * p.y + tx, lat: c * p.x + d * p.y + ty };
 }
+
+// ── Georreferencia MÉTRICA por puntos de control → overlay rotado ───────────
+// Un grid topográfico propio se relaciona con WGS84 por una semejanza MÉTRICA
+// (rotación + escala uniforme + traslación, en metros). Ajustarla en metros (no
+// en grados) hace que la imagen sea un RECTÁNGULO real → web (3 esquinas) y
+// móvil (bounds + bearing) coinciden exacto, y el RMS sale en metros.
+//
+// Flujo: control points (customXY ↔ WGS84) → fit métrico → con el bbox del
+// GeoTIFF (4 esquinas en sistema propio) producimos el overlay rotado.
+
+export interface RawBbox { minX: number; minY: number; maxX: number; maxY: number }
+export interface Corners4 { tl: LngLat; tr: LngLat; br: LngLat; bl: LngLat }
+export interface BoundsSWNE { south: number; west: number; north: number; east: number }
+
+/** Semejanza métrica: T mapea customXY → metros locales alrededor de `origin`. */
+export interface MetricGeoref { T: Similarity; origin: LngLat }
+
+export interface RotatedOverlay {
+  /** 4 esquinas WGS84 del rectángulo rotado (tl=oeste-norte, sentido horario). */
+  corners: Corners4;
+  /** Centro WGS84 del rectángulo. */
+  center: LngLat;
+  /** Rumbo de la imagen, grados CW desde el norte (para react-native-maps). */
+  bearingDeg: number;
+  /** Bounds "north-up" (sin rotar) para el `bounds` de react-native-maps Overlay. */
+  northUpBounds: BoundsSWNE;
+  /** Envolvente axis-aligned de las 4 esquinas (para encuadre / fallback). */
+  envelope: BoundsSWNE;
+}
+
+const DEG = Math.PI / 180;
+const MPERLAT = 110540;                         // metros por grado de latitud (aprox.)
+const mPerLng = (lat: number) => 111320 * Math.cos(lat * DEG); // metros por grado de longitud
+
+/** Ajusta la georreferencia métrica desde ≥2 puntos de control y devuelve el
+ *  RMS en metros. `origin` = centroide WGS84 de los puntos (plano local). */
+export function fitMetricGeoref(pts: ControlPoint[]): { georef: MetricGeoref; rmsMeters: number } | null {
+  if (pts.length < 2) return null;
+  let lng0 = 0, lat0 = 0;
+  for (const p of pts) { lng0 += p.dst.lng; lat0 += p.dst.lat; }
+  lng0 /= pts.length; lat0 /= pts.length;
+  const mLng = mPerLng(lat0);
+  // Reusa fitSimilarity tratando dst como metros locales (lng→este, lat→norte).
+  const metricPts: ControlPoint[] = pts.map(p => ({
+    src: p.src,
+    dst: { lng: (p.dst.lng - lng0) * mLng, lat: (p.dst.lat - lat0) * MPERLAT },
+  }));
+  const T = fitSimilarity(metricPts);
+  if (!T) return null;
+  const georef: MetricGeoref = { T, origin: { lng: lng0, lat: lat0 } };
+  return { georef, rmsMeters: metricRmsError(georef, pts) };
+}
+
+/** customXY → WGS84 usando la georreferencia métrica. */
+export function metricApply(g: MetricGeoref, p: XY): LngLat {
+  const m = applySimilarity(g.T, p);            // {lng:este_m, lat:norte_m}
+  const mLng = mPerLng(g.origin.lat);
+  return { lng: g.origin.lng + m.lng / mLng, lat: g.origin.lat + m.lat / MPERLAT };
+}
+
+/** RMS del ajuste, en METROS — para mostrarle al usuario qué tan bien encajó. */
+export function metricRmsError(g: MetricGeoref, pts: ControlPoint[]): number {
+  if (pts.length === 0) return 0;
+  const mLng = mPerLng(g.origin.lat);
+  let s = 0;
+  for (const p of pts) {
+    const q = metricApply(g, p.src);
+    const de = (q.lng - p.dst.lng) * mLng, dn = (q.lat - p.dst.lat) * MPERLAT;
+    s += de * de + dn * dn;
+  }
+  return Math.sqrt(s / pts.length);
+}
+
+/** Geometría del overlay (centro, rumbo, bounds, envolvente) desde 4 esquinas. */
+export function cornersToRotatedOverlay(corners: Corners4): RotatedOverlay {
+  const { tl, tr, br, bl } = corners;
+  const center: LngLat = {
+    lng: (tl.lng + tr.lng + br.lng + bl.lng) / 4,
+    lat: (tl.lat + tr.lat + br.lat + bl.lat) / 4,
+  };
+  const mLng = mPerLng(center.lat);
+  const toM = (p: LngLat) => ({ e: (p.lng - center.lng) * mLng, n: (p.lat - center.lat) * MPERLAT });
+  const backLng = (e: number) => center.lng + e / mLng;
+  const backLat = (n: number) => center.lat + n / MPERLAT;
+
+  // Rumbo: la arista superior (tl→tr) apunta al "este de la imagen"; en una
+  // imagen north-up eso es 90°. bearing = rumboArista − 90.
+  const mtl = toM(tl), mtr = toM(tr), mbl = toM(bl);
+  const topBearing = Math.atan2(mtr.e - mtl.e, mtr.n - mtl.n) / DEG;
+  const bearingDeg = ((topBearing - 90) % 360 + 360) % 360;
+
+  const w = Math.hypot(mtr.e - mtl.e, mtr.n - mtl.n);
+  const h = Math.hypot(mbl.e - mtl.e, mbl.n - mtl.n);
+  const northUpBounds: BoundsSWNE = {
+    west: backLng(-w / 2), east: backLng(w / 2),
+    south: backLat(-h / 2), north: backLat(h / 2),
+  };
+
+  const lats = [tl.lat, tr.lat, br.lat, bl.lat], lngs = [tl.lng, tr.lng, br.lng, bl.lng];
+  const envelope: BoundsSWNE = {
+    south: Math.min(...lats), north: Math.max(...lats),
+    west: Math.min(...lngs), east: Math.max(...lngs),
+  };
+  return { corners, center, bearingDeg, northUpBounds, envelope };
+}
+
+/** GeoTIFF bbox (sistema propio) + georef métrica → overlay rotado WGS84. */
+export function metricToRotatedOverlay(g: MetricGeoref, bbox: RawBbox): RotatedOverlay {
+  // top-left = (minX, maxY): el GeoTIFF tiene fila 0 = norte.
+  return cornersToRotatedOverlay({
+    tl: metricApply(g, { x: bbox.minX, y: bbox.maxY }),
+    tr: metricApply(g, { x: bbox.maxX, y: bbox.maxY }),
+    br: metricApply(g, { x: bbox.maxX, y: bbox.minY }),
+    bl: metricApply(g, { x: bbox.minX, y: bbox.minY }),
+  });
+}
+
+/** Rota un punto (lng/lat) `bearingDeg` grados CW alrededor de `center`, en el
+ *  plano métrico local. Para tests y para reconstruir esquinas desde
+ *  bounds+bearing si hiciera falta. */
+export function rotateAroundCenter(p: LngLat, center: LngLat, bearingDeg: number): LngLat {
+  const mLng = mPerLng(center.lat);
+  const e = (p.lng - center.lng) * mLng, n = (p.lat - center.lat) * MPERLAT;
+  const r = -bearingDeg * DEG; // CW positivo → rotación horaria del punto
+  const er = e * Math.cos(r) - n * Math.sin(r);
+  const nr = e * Math.sin(r) + n * Math.cos(r);
+  return { lng: center.lng + er / mLng, lat: center.lat + nr / MPERLAT };
+}

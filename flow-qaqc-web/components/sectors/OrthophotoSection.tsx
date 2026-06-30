@@ -16,13 +16,17 @@
  * Requiere la app de ESCRITORIO (Electron) para el procesamiento local.
  */
 
-import { useState } from 'react';
-import { Loader2, Image as ImageIcon, Trash2, MapPin, CheckCircle, AlertCircle, Cpu, CheckCircle2, Circle, Pencil, Plus } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Loader2, Image as ImageIcon, Trash2, MapPin, CheckCircle, AlertCircle, Cpu, CheckCircle2, Circle, Pencil, Plus, X } from 'lucide-react';
 import {
   cornerToWgs84, cornersToBounds, isUtm, ORTHO_SYSTEM_LABELS, normalizeBounds,
   type OrthoSystem, type LeafletBounds,
 } from '@lib/orthophoto';
-import type { OrthophotoVersion } from '@/types';
+import {
+  fitMetricGeoref, metricToRotatedOverlay,
+  type RotatedOverlay,
+} from '@lib/orthophotoCustomGeoref';
+import type { OrthophotoVersion, OrthophotoRotation } from '@/types';
 import { useI18n } from '@lib/i18n';
 
 interface Props {
@@ -56,6 +60,34 @@ interface ProcResult {
   srcBytes: number; outBytesTotal: number;
   srcWidth: number | null; srcHeight: number | null; previewDataUrl: string;
   geo: { bounds: LeafletBounds; systemLabel: string; epsg: number | null; rawCorners?: { sw: { x: number; y: number }; ne: { x: number; y: number }; projected: boolean } } | null;
+  /** Método 2: extensión cruda del archivo en su CRS propio (o píxeles). */
+  rawExtent: { bbox: { minX: number; minY: number; maxX: number; maxY: number }; width: number; height: number; georeferenced: boolean } | null;
+}
+
+/** Una fila de la tabla de puntos de control del Método 2 (texto, se parsea). */
+interface ControlRow { sx: string; sy: string; lat: string; lng: string }
+
+/** Sub-bbox (en sistema propio) de la tesela (r,c) de una grilla grid×grid.
+ *  Imagen norte-arriba: fila 0 = norte (maxY), columna 0 = oeste (minX). */
+function subBboxCustom(bbox: { minX: number; minY: number; maxX: number; maxY: number }, r: number, c: number, grid: number) {
+  const W = bbox.maxX - bbox.minX, H = bbox.maxY - bbox.minY;
+  return {
+    minX: bbox.minX + (c / grid) * W, maxX: bbox.minX + ((c + 1) / grid) * W,
+    maxY: bbox.maxY - (r / grid) * H, minY: bbox.maxY - ((r + 1) / grid) * H,
+  };
+}
+
+/** RotatedOverlay → OrthophotoRotation persistible ([lat,lng], bounds [[s,w],[n,e]]). */
+function toRotation(ov: RotatedOverlay): OrthophotoRotation {
+  const c = ov.corners;
+  return {
+    corners: {
+      tl: [c.tl.lat, c.tl.lng], tr: [c.tr.lat, c.tr.lng],
+      br: [c.br.lat, c.br.lng], bl: [c.bl.lat, c.bl.lng],
+    },
+    bearing: ov.bearingDeg,
+    northUpBounds: [[ov.northUpBounds.south, ov.northUpBounds.west], [ov.northUpBounds.north, ov.northUpBounds.east]],
+  };
 }
 
 const GRID_PRESETS = [
@@ -115,10 +147,27 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
   const [sw, setSw] = useState({ a: '', b: '' });
   const [ne, setNe] = useState({ a: '', b: '' });
   const utm = isUtm(system);
-  // Override: ingresar el sistema/esquinas a mano aunque el TIF traiga georef.
-  const [overrideGeo, setOverrideGeo] = useState(false);
+  // Modo de georreferenciación:
+  //   'auto'   = usar la georref detectada en el archivo.
+  //   'known'  = Método 1: elegir un sistema conocido (PSAD56/UTM…) + esquinas.
+  //   'custom' = Método 2: sistema PROPIO por puntos de control (con rotación).
+  const [georefMode, setGeorefMode] = useState<'auto' | 'known' | 'custom'>('auto');
+  // Método 2 — tabla de puntos de control (≥2 filas válidas: propio ↔ WGS84).
+  const [cps, setCps] = useState<ControlRow[]>(() => Array.from({ length: 4 }, () => ({ sx: '', sy: '', lat: '', lng: '' })));
 
-  const needsManual = !!result && (!result.geo || overrideGeo);
+  const showKnown = georefMode === 'known';   // campos del Método 1
+  const showCustom = georefMode === 'custom'; // campos del Método 2
+
+  // Ajuste métrico EN VIVO del Método 2 (para RMS + validación + preview).
+  const customFit = useMemo(() => {
+    if (!showCustom || !result?.rawExtent) return null;
+    const pts = cps
+      .map(r => ({ x: parseFloat(r.sx.replace(',', '.')), y: parseFloat(r.sy.replace(',', '.')), lat: parseFloat(r.lat.replace(',', '.')), lng: parseFloat(r.lng.replace(',', '.')) }))
+      .filter(r => [r.x, r.y, r.lat, r.lng].every(Number.isFinite))
+      .map(r => ({ src: { x: r.x, y: r.y }, dst: { lng: r.lng, lat: r.lat } }));
+    if (pts.length < 2) return { count: pts.length, fit: null as ReturnType<typeof fitMetricGeoref> };
+    return { count: pts.length, fit: fitMetricGeoref(pts) };
+  }, [showCustom, cps, result?.rawExtent]);
 
   // Persiste el array de versiones + la activa desnormalizada en el proyecto.
   // RESILIENTE: primero los campos NÚCLEO (orthophoto_s3_key/bounds/system, que
@@ -199,7 +248,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
     const file = await window.electronAPI!.pickOrthophoto();
     if (!file) return; // canceló
     setPicked(file);
-    setOverrideGeo(false); // cada archivo nuevo arranca usando su georef detectada
+    setCps(Array.from({ length: 4 }, () => ({ sx: '', sy: '', lat: '', lng: '' })));
     setPhase('processing');
     setBusy(true);
     try {
@@ -211,6 +260,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
       if (!res.ok) throw new Error(await res.text());
       const data: ProcResult = await res.json();
       setResult(data);
+      setGeorefMode(data.geo ? 'auto' : 'known'); // sin georef → arranca en Método 1 manual
       setPhase('confirm');
     } catch (e) {
       setMsg({ ok: false, text: t('webCSectors.errProcessFailed', { error: (e as Error).message }) });
@@ -227,8 +277,25 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
     return utm ? { northing: a, easting: b } : { lat: a, lng: b };
   }
 
-  function resolveBounds(): { bounds: LeafletBounds; systemLabel: string } | null {
-    if (result?.geo && !overrideGeo) return { bounds: result.geo.bounds, systemLabel: result.geo.systemLabel };
+  function resolveBounds(): { bounds: LeafletBounds; systemLabel: string; rotation?: OrthophotoRotation } | null {
+    // Modo AUTO: usar la georref detectada.
+    if (georefMode === 'auto') {
+      if (!result?.geo) return null;
+      return { bounds: result.geo.bounds, systemLabel: result.geo.systemLabel };
+    }
+    // Modo CUSTOM (Método 2): fit métrico por puntos de control + bbox del archivo.
+    if (georefMode === 'custom') {
+      const f = customFit?.fit; const ext = result?.rawExtent;
+      if (!f || !ext) return null;
+      const ov = metricToRotatedOverlay(f.georef, ext.bbox);
+      const env = ov.envelope;
+      return {
+        bounds: [[env.south, env.west], [env.north, env.east]],
+        systemLabel: 'Sistema propio (puntos de control)',
+        rotation: toRotation(ov),
+      };
+    }
+    // Modo KNOWN (Método 1): sistema conocido + 2 esquinas.
     const swC = parseCorner(sw), neC = parseCorner(ne);
     if (!swC || !neC) return null;
     const opts = { zone: parseInt(zone, 10), hemisphere };
@@ -236,27 +303,23 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
     return { bounds: b, systemLabel: ORTHO_SYSTEM_LABELS[system] };
   }
 
-  // Override del sistema detectado. Al ACTIVARLO, pre-rellena las esquinas con
-  // las CRUDAS del archivo (en su propio CRS) y sugiere PSAD56 + zona/hemisferio
-  // a partir de la georref detectada → el usuario normalmente solo confirma el
-  // sistema (Método 1: "yo pongo el sistema, tú conviertes").
-  function toggleOverride() {
-    const next = !overrideGeo;
-    if (next && result?.geo?.rawCorners) {
+  // Método 1 (sistema conocido). Pre-rellena las esquinas con las CRUDAS del
+  // archivo y sugiere PSAD56 + zona/hemisferio → el usuario normalmente solo
+  // confirma el sistema ("yo pongo el sistema, tú conviertes").
+  function enterKnownMode() {
+    if (result?.geo?.rawCorners) {
       const rc = result.geo.rawCorners;
       setSw({ a: String(rc.sw.y), b: String(rc.sw.x) });
       setNe({ a: String(rc.ne.y), b: String(rc.ne.x) });
       setSystem(rc.projected ? 'PSAD56_UTM' : 'PSAD56_LATLNG');
       if (rc.projected && result.geo.bounds) {
-        // La zona/hemisferio salen del centro de los bounds detectados (el
-        // corrimiento de datum no cambia la zona UTM).
         const b = result.geo.bounds;
         const z = Math.floor(((b[0][1] + b[1][1]) / 2 + 180) / 6) + 1;
         if (z >= 1 && z <= 60) setZone(String(z));
         setHemisphere(((b[0][0] + b[1][0]) / 2) < 0 ? 'S' : 'N');
       }
     }
-    setOverrideGeo(next);
+    setGeorefMode('known');
   }
 
   async function handleConfirm() {
@@ -274,8 +337,18 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
       if (!up.ok) throw new Error(await up.text());
       const { s3Key, versionId, tiles: upTiles } = await up.json() as { s3Key: string; versionId: string; tiles: { s3Key: string; r: number; c: number }[] };
 
-      // 2) Calcula los bounds de cada tesela desde el bounds COMPLETO + (r,c,grid).
-      const tiles = (upTiles ?? []).map(t => ({ s3Key: t.s3Key, bounds: tileBounds(resolved.bounds, t.r, t.c, g) }));
+      // 2) Bounds (+ rotación) de cada tesela. Método 2: cada tesela se rota
+      //    mapeando su sub-bbox del sistema propio por la georref métrica.
+      const customGeoref = resolved.rotation ? customFit?.fit?.georef : null;
+      const ext = result?.rawExtent;
+      const tiles = (upTiles ?? []).map(t => {
+        if (customGeoref && ext) {
+          const ov = metricToRotatedOverlay(customGeoref, subBboxCustom(ext.bbox, t.r, t.c, g));
+          const env = ov.envelope;
+          return { s3Key: t.s3Key, bounds: [[env.south, env.west], [env.north, env.east]] as LeafletBounds, rotation: toRotation(ov) };
+        }
+        return { s3Key: t.s3Key, bounds: tileBounds(resolved.bounds, t.r, t.c, g) };
+      });
 
       // 3) Nueva VERSIÓN (no sobrescribe) y queda activa.
       const version: OrthophotoVersion = {
@@ -288,6 +361,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
         grid: g,
         sourceName: picked?.name,
         outBytes: result?.outBytesTotal,
+        rotation: resolved.rotation,
         createdAt: Date.now(),
       };
       await persistVersions([...versions, version], version);
@@ -443,20 +517,30 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
               ) : (
                 <p className="text-[11px] text-amber-700 flex items-center gap-1"><AlertCircle size={11} /> {t('webCSectors.coordsMissing')}</p>
               )}
-              {/* Override: ingresar el sistema/esquinas a mano aunque el TIF traiga georef. */}
-              {result.geo && (
-                <button type="button" onClick={toggleOverride}
-                  className="self-start mt-0.5 text-[11px] font-bold text-primary underline hover:text-primary/80">
-                  {overrideGeo ? '↩ Usar el sistema detectado' : '✎ El sistema detectado no es correcto — corregirlo'}
+              {/* Método de georreferenciación (excluyentes: uno u otro). */}
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {result.geo && (
+                  <button type="button" onClick={() => setGeorefMode('auto')}
+                    className={`px-2 py-1 text-[11px] font-bold rounded border ${georefMode === 'auto' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
+                    Usar el detectado
+                  </button>
+                )}
+                <button type="button" onClick={enterKnownMode}
+                  className={`px-2 py-1 text-[11px] font-bold rounded border ${showKnown ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
+                  {result.geo ? 'Otro sistema conocido' : 'Sistema conocido'}
                 </button>
-              )}
+                <button type="button" onClick={() => setGeorefMode('custom')}
+                  className={`px-2 py-1 text-[11px] font-bold rounded border ${showCustom ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
+                  Sistema propio (puntos de control)
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Esquinas manuales solo si no hay geo */}
-          {needsManual && (
+          {/* ── Método 1: sistema conocido (PSAD56/UTM…) + 2 esquinas ── */}
+          {showKnown && (
             <div className="flex flex-col gap-2 border-t border-border pt-2">
-              {overrideGeo && (
+              {result.geo && (
                 <p className="text-[11px] text-muted">
                   Las esquinas se tomaron del archivo en su sistema original. Solo elige el sistema correcto (y la zona si es UTM) y se reconvierten a WGS84.
                 </p>
@@ -498,8 +582,77 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
             </div>
           )}
 
+          {/* ── Método 2: sistema PROPIO por puntos de control (con rotación) ── */}
+          {showCustom && (
+            <div className="flex flex-col gap-2 border-t border-border pt-2">
+              <p className="text-[11px] text-muted leading-snug">
+                Ingresa <strong>≥2 puntos de control</strong>: su coordenada en <strong>tu sistema propio</strong> (la misma del archivo) y su equivalente en <strong>WGS84</strong> (lat/lng). Se ajusta una rotación + escala y la ortofoto se coloca <strong>girada</strong>.
+              </p>
+              {result.rawExtent ? (
+                <p className="text-[11px] text-primary leading-snug">
+                  Extensión del archivo · X: {result.rawExtent.bbox.minX.toLocaleString('es-PE', { maximumFractionDigits: 2 })} … {result.rawExtent.bbox.maxX.toLocaleString('es-PE', { maximumFractionDigits: 2 })} · Y: {result.rawExtent.bbox.minY.toLocaleString('es-PE', { maximumFractionDigits: 2 })} … {result.rawExtent.bbox.maxY.toLocaleString('es-PE', { maximumFractionDigits: 2 })}
+                  {!result.rawExtent.georeferenced && ' (en píxeles — el archivo no trae georreferencia)'}
+                </p>
+              ) : (
+                <p className="text-[11px] text-amber-700">No se pudo leer la extensión del archivo; el Método 2 no está disponible para este archivo.</p>
+              )}
+
+              {result.rawExtent && (
+                <button type="button"
+                  onClick={() => { const b = result.rawExtent!.bbox; setCps([
+                    { sx: String(b.minX), sy: String(b.maxY), lat: '', lng: '' },
+                    { sx: String(b.maxX), sy: String(b.maxY), lat: '', lng: '' },
+                    { sx: String(b.maxX), sy: String(b.minY), lat: '', lng: '' },
+                    { sx: String(b.minX), sy: String(b.minY), lat: '', lng: '' },
+                  ]); }}
+                  className="self-start text-[11px] font-bold text-primary underline hover:text-primary/80">
+                  Rellenar X/Y con las 4 esquinas del archivo (solo completas el WGS84)
+                </button>
+              )}
+
+              <div className="flex flex-col gap-1">
+                <div className="grid grid-cols-[1.4rem_1fr_1fr_1fr_1fr_1.4rem] gap-1 text-[10px] font-bold text-textSecondary uppercase px-0.5">
+                  <span className="text-center">#</span><span>Este/X propio</span><span>Norte/Y propio</span><span>Latitud</span><span>Longitud</span><span></span>
+                </div>
+                {cps.map((row, i) => (
+                  <div key={i} className="grid grid-cols-[1.4rem_1fr_1fr_1fr_1fr_1.4rem] gap-1 items-center">
+                    <span className="text-[11px] text-muted text-center">{i + 1}</span>
+                    {(['sx', 'sy', 'lat', 'lng'] as const).map(f => (
+                      <input key={f} value={row[f]} inputMode="decimal"
+                        onChange={e => { const v = e.target.value; setCps(cs => cs.map((r, j) => j === i ? { ...r, [f]: v } : r)); }}
+                        className="border border-border rounded px-1.5 py-1 text-xs w-full" />
+                    ))}
+                    <button type="button" onClick={() => setCps(cs => cs.filter((_, j) => j !== i))} disabled={cps.length <= 2}
+                      className="flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setCps(cs => [...cs, { sx: '', sy: '', lat: '', lng: '' }])}
+                  className="self-start flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary/80 mt-0.5">
+                  <Plus size={12} /> Agregar punto
+                </button>
+              </div>
+
+              {/* RMS + rotación en vivo */}
+              {customFit && (
+                customFit.count < 2
+                  ? <p className="text-[11px] text-amber-700">Faltan puntos de control válidos: {customFit.count}/2 mínimo.</p>
+                  : customFit.fit && result.rawExtent
+                    ? (() => {
+                        const rms = customFit.fit.rmsMeters;
+                        const bearing = metricToRotatedOverlay(customFit.fit.georef, result.rawExtent.bbox).bearingDeg;
+                        return <p className={`text-[11px] font-bold ${rms < 2 ? 'text-success' : rms < 10 ? 'text-amber-700' : 'text-danger'}`}>
+                          Ajuste con {customFit.count} puntos · error RMS ≈ {rms.toFixed(2)} m · rotación {bearing.toFixed(1)}°
+                        </p>;
+                      })()
+                    : <p className="text-[11px] text-danger">Puntos degenerados (colineales o repetidos): no se puede ajustar.</p>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end">
-            <button onClick={() => { setPhase('idle'); setResult(null); setPicked(null); setAdding(false); setOverrideGeo(false); }} disabled={busy}
+            <button onClick={() => { setPhase('idle'); setResult(null); setPicked(null); setAdding(false); setGeorefMode('auto'); }} disabled={busy}
               className="px-3 py-1.5 text-xs font-bold rounded border border-border text-textSecondary hover:bg-surface">
               {t('common.cancel')}
             </button>
