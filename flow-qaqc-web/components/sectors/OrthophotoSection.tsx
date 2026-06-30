@@ -371,11 +371,9 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
           </div>
           <p className="text-[10px] text-muted leading-snug" dangerouslySetInnerHTML={{ __html: t('webCSectors.tilingHint') }} />
           {/* Hacer transparente el fondo negro (nodata) de la ortofoto. */}
-          <label className="flex items-start gap-2 mt-1 cursor-pointer select-none">
-            <input type="checkbox" checked={transparentBlack} onChange={e => setTransparentBlack(e.target.checked)} className="mt-0.5 accent-primary" />
-            <span className="text-[11px] text-textSecondary leading-snug">
-              <strong className="text-textPrimary">Hacer transparente el fondo negro</strong> — quita el relleno negro (nodata) del borde de la ortofoto, como “Display 0,0,0 as NoData” de ArcGIS. Desactívalo si tu imagen tiene negros reales que quieras conservar.
-            </span>
+          <label className="flex items-center gap-2 mt-1 cursor-pointer select-none">
+            <input type="checkbox" checked={transparentBlack} onChange={e => setTransparentBlack(e.target.checked)} className="accent-primary" />
+            <span className="text-xs font-bold text-textPrimary">Hacer transparente el fondo negro</span>
           </label>
           <div className="flex gap-2">
             <button onClick={() => { setAdding(false); setMsg(null); }} disabled={busy}
