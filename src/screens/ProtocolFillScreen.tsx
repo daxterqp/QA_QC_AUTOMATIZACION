@@ -935,9 +935,20 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
               const hasTopo = pa.topoCoordEast != null || pa.topoCoordNorth != null || pa.topoCoordElevation != null || !!pa.topoValuesJson;
               const decision = decideCoordCards(projectFlags, hasGps, hasTopo);
               const gpsCaptureOn = (numericMode && projectFlags.gps_capture_numeric) || (!numericMode && projectFlags.gps_capture_subjective);
+              // En modo EDICIÓN, la barra GPS debe mostrarse para poder CAPTURAR aunque
+              // el ensayo aún no tenga coordenadas. `decision.showGps` se basa en hasGps
+              // (correcto para solo-lectura: oculta tarjeta vacía), pero eso creaba un
+              // círculo vicioso con el módulo topográfico ON (no había forma de capturar
+              // el primer punto). `gpsEditableShow` = el GPS está PERMITIDO por los flags.
+              const gpsEditableShow = !projectFlags.module_topo
+                ? true
+                : projectFlags.topo_replace_gps
+                  ? (!!projectFlags.topo_keep_gps_fallback && !hasTopo)
+                  : true;
+              const showGpsBar = gpsCaptureOn && (decision.showGps || (!isReadOnly && gpsEditableShow));
               return (
                 <>
-                  {gpsCaptureOn && decision.showGps && (
+                  {showGpsBar && (
                     <GPSCaptureBar protocol={protocol} readOnly={isReadOnly} sectorLocked={sectorLocked} />
                   )}
                   {projectFlags.module_topo && decision.showTopo && (
