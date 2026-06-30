@@ -6,7 +6,12 @@
  */
 
 export interface CroquisSectorIn { name: string; color: string; points: { lat: number; lng: number }[] }
-export interface CroquisOrtho { dataUri: string; swLat: number; swLng: number; neLat: number; neLng: number }
+export interface CroquisOrtho {
+  dataUri: string; swLat: number; swLng: number; neLat: number; neLng: number;
+  /** Método 2 (sistema propio): 3 esquinas WGS84 [lat,lng] del rectángulo ROTADO.
+   *  Si está, la imagen se dibuja con una matriz afín (rotada), no estirada al bbox. */
+  corners?: { tl: [number, number]; tr: [number, number]; bl: [number, number] };
+}
 export interface CroquisFigureOpts {
   sectors: CroquisSectorIn[];                 // sectores con geometría del proyecto
   point: { lat: number; lng: number };        // ensayo
@@ -74,10 +79,31 @@ export function buildCroquisFigureHtml(opts: CroquisFigureOpts): string {
   let bg = `<rect x="0" y="0" width="${CW}" height="${CH}" fill="#ffffff"/>`;
   let scrim = '';
   if (showOrtho && ortho) {
-    const ix = X(ortho.swLng), iright = X(ortho.neLng), iy = Y(ortho.neLat), ibottom = Y(ortho.swLat);
-    const iw = iright - ix, ih = ibottom - iy;
-    if (iw > 0 && ih > 0) {
-      bg = `<image href="${ortho.dataUri}" x="${ix.toFixed(1)}" y="${iy.toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}" preserveAspectRatio="none"/>`;
+    let drawn = false;
+    if (ortho.corners) {
+      // Método 2: matriz afín que mapea el cuadrado [0,B]×[0,B] de la imagen a las
+      // 3 esquinas WGS84 proyectadas (tl→(0,0), tr→(B,0), bl→(0,B)). Maneja la
+      // rotación Y la escala no uniforme lng/lat del croquis correctamente.
+      const B = 100;
+      const tl = { x: X(ortho.corners.tl[1]), y: Y(ortho.corners.tl[0]) };
+      const tr = { x: X(ortho.corners.tr[1]), y: Y(ortho.corners.tr[0]) };
+      const bl = { x: X(ortho.corners.bl[1]), y: Y(ortho.corners.bl[0]) };
+      const a = (tr.x - tl.x) / B, b = (tr.y - tl.y) / B;
+      const c = (bl.x - tl.x) / B, d = (bl.y - tl.y) / B;
+      if ([a, b, c, d, tl.x, tl.y].every(Number.isFinite)) {
+        bg = `<image href="${ortho.dataUri}" x="0" y="0" width="${B}" height="${B}" preserveAspectRatio="none" transform="matrix(${a.toFixed(5)} ${b.toFixed(5)} ${c.toFixed(5)} ${d.toFixed(5)} ${tl.x.toFixed(2)} ${tl.y.toFixed(2)})"/>`;
+        drawn = true;
+      }
+    }
+    if (!drawn) {
+      const ix = X(ortho.swLng), iright = X(ortho.neLng), iy = Y(ortho.neLat), ibottom = Y(ortho.swLat);
+      const iw = iright - ix, ih = ibottom - iy;
+      if (iw > 0 && ih > 0) {
+        bg = `<image href="${ortho.dataUri}" x="${ix.toFixed(1)}" y="${iy.toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}" preserveAspectRatio="none"/>`;
+        drawn = true;
+      }
+    }
+    if (drawn) {
       const op = Math.max(0, Math.min(0.7, 1 - baseOpacity));
       if (op > 0) scrim = `<rect x="0" y="0" width="${CW}" height="${CH}" fill="#ffffff" opacity="${op.toFixed(2)}"/>`;
     }

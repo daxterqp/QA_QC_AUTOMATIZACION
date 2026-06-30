@@ -478,7 +478,7 @@ async function loadGeomSectors(projectId: string): Promise<CroquisSectorIn[]> {
 }
 
 /** v43.6 — Ortofoto del proyecto a base64 + bounds (Leaflet [[swLat,swLng],[neLat,neLng]]). */
-async function loadCroquisOrtho(row: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null): Promise<CroquisOrtho | null> {
+async function loadCroquisOrtho(row: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown; orthophoto_tiles_json?: unknown } | null): Promise<CroquisOrtho | null> {
   try {
     const key = row?.orthophoto_s3_key;
     const b = row?.orthophoto_bounds_json;
@@ -489,7 +489,20 @@ async function loadCroquisOrtho(row: { orthophoto_s3_key?: string | null; orthop
     if (![swLat, swLng, neLat, neLng].every(Number.isFinite)) return null;
     const dataUri = await fetchToBase64(s3Url(key), key);
     if (!dataUri) return null;
-    return { dataUri, swLat, swLng, neLat, neLng };
+    // Método 2: si la tesela activa (la del s3_key) trae rotación, pasamos sus 3
+    // esquinas para dibujarla GIRADA en el croquis (si no, se estira al bbox).
+    let corners: CroquisOrtho['corners'];
+    try {
+      const tj = row?.orthophoto_tiles_json;
+      const tiles = Array.isArray(tj) ? tj : (typeof tj === 'string' ? JSON.parse(tj) : null);
+      if (Array.isArray(tiles)) {
+        const tile = tiles.find((t: any) => t?.s3Key === key) ?? tiles[0];
+        const c = tile?.rotation?.corners;
+        const ok = (p: any) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]);
+        if (c && ok(c.tl) && ok(c.tr) && ok(c.bl)) corners = { tl: c.tl, tr: c.tr, bl: c.bl };
+      }
+    } catch { /* sin rotación → bbox axis-aligned */ }
+    return { dataUri, swLat, swLng, neLat, neLng, corners };
   } catch { return null; }
 }
 
@@ -1123,10 +1136,10 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
   // v43.6 — Config de impresión por tipo (la define el CREADOR en móvil; vive en
   // projects.feature_flags, JSONB compartido). El PDF web honra esa misma config.
   let projectFlags: unknown = {};
-  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null = null;
+  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown; orthophoto_tiles_json?: unknown } | null = null;
   try {
     const { data: pr } = await supabase.from('projects')
-      .select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json').eq('id', projectId).maybeSingle();
+      .select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json, orthophoto_tiles_json').eq('id', projectId).maybeSingle();
     projectFlags = (pr as { feature_flags?: unknown } | null)?.feature_flags ?? {};
     orthoRow = pr as typeof orthoRow;
   } catch { /* sin flags → defaults */ }
@@ -1420,10 +1433,10 @@ export async function exportSingleProtocolPdf(
   // móvil; viven en projects.feature_flags). idProtocolo se reusa para QR y header.
   let projectFlags: unknown = {};
   let idProto: string | null = null;
-  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown } | null = null;
+  let orthoRow: { orthophoto_s3_key?: string | null; orthophoto_bounds_json?: unknown; orthophoto_tiles_json?: unknown } | null = null;
   try {
     const [prRes, tRes] = await Promise.all([
-      supabase.from('projects').select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json').eq('id', full.protocol.project_id).maybeSingle(),
+      supabase.from('projects').select('feature_flags, orthophoto_s3_key, orthophoto_bounds_json, orthophoto_tiles_json').eq('id', full.protocol.project_id).maybeSingle(),
       full.protocol.template_id
         ? supabase.from('protocol_templates').select('id_protocolo').eq('id', full.protocol.template_id).maybeSingle()
         : Promise.resolve({ data: null }),
