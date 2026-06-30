@@ -13,6 +13,8 @@ import { useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, Tooltip, ImageOverlay, LayersControl, LayerGroup, useMap } from 'react-leaflet';
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet';
 import { normalizeBounds } from '@lib/orthophoto';
+import type { OrthophotoRotation } from '@/types';
+import RotatedImageOverlay from './RotatedImageOverlay';
 import { useI18n } from '@lib/i18n';
 import 'leaflet/dist/leaflet.css';
 
@@ -28,6 +30,8 @@ export interface MapOrthophoto {
   /** Bounding box WGS84: [[southLat, westLng], [northLat, eastLng]] */
   bounds: LatLngBoundsExpression;
   opacity?: number;
+  /** v72 — si está presente, se dibuja ROTADA (Método 2: sistema propio). */
+  rotation?: OrthophotoRotation;
 }
 
 function FitToSectors({ sectors, orthos }: { sectors: MapSector[]; orthos?: MapOrthophoto[] }) {
@@ -99,9 +103,13 @@ export default function SectorMap({
 
         {orthos.length > 0 && (
           <LayersControl.Overlay checked name={t('webCSectors.mapOverlayOrtho')}>
-            {/* Una capa por TESELA, en tilePane → debajo de los polígonos de sector. */}
+            {/* Una capa por TESELA, en tilePane → debajo de los polígonos de sector.
+                Con rotación (Método 2) → overlay por 3 esquinas; si no, axis-aligned. */}
             <LayerGroup>
-              {orthos.map((o, i) => (
+              {orthos.map((o, i) => o.rotation ? (
+                <RotatedImageOverlay key={i} url={o.url} opacity={o.opacity ?? 1} paneName="tilePane"
+                  topLeft={o.rotation.corners.tl} topRight={o.rotation.corners.tr} bottomLeft={o.rotation.corners.bl} />
+              ) : (
                 <ImageOverlay key={i} url={o.url} bounds={o.bounds} opacity={o.opacity ?? 1} pane="tilePane" />
               ))}
             </LayerGroup>
