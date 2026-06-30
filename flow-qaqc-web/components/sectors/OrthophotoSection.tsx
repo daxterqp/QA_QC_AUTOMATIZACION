@@ -107,15 +107,18 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
   // Versión pendiente de confirmar como "capa de proyecto".
   const [confirmActivate, setConfirmActivate] = useState<OrthophotoVersion | null>(null);
 
-  // Esquinas manuales (solo si el TIFF no trae georreferencia).
+  // Esquinas manuales (si el TIFF no trae georreferencia, o si el usuario
+  // decide INGRESAR MANUALMENTE para sobrescribir el sistema detectado).
   const [system, setSystem] = useState<OrthoSystem>('WGS84_LATLNG');
   const [zone, setZone] = useState('18');
   const [hemisphere, setHemisphere] = useState<'N' | 'S'>('S');
   const [sw, setSw] = useState({ a: '', b: '' });
   const [ne, setNe] = useState({ a: '', b: '' });
   const utm = isUtm(system);
+  // Override: ingresar el sistema/esquinas a mano aunque el TIF traiga georef.
+  const [overrideGeo, setOverrideGeo] = useState(false);
 
-  const needsManual = !!result && !result.geo;
+  const needsManual = !!result && (!result.geo || overrideGeo);
 
   // Persiste el array de versiones + la activa desnormalizada en el proyecto.
   // RESILIENTE: primero los campos NÚCLEO (orthophoto_s3_key/bounds/system, que
@@ -196,6 +199,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
     const file = await window.electronAPI!.pickOrthophoto();
     if (!file) return; // canceló
     setPicked(file);
+    setOverrideGeo(false); // cada archivo nuevo arranca usando su georef detectada
     setPhase('processing');
     setBusy(true);
     try {
@@ -224,7 +228,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
   }
 
   function resolveBounds(): { bounds: LeafletBounds; systemLabel: string } | null {
-    if (result?.geo) return { bounds: result.geo.bounds, systemLabel: result.geo.systemLabel };
+    if (result?.geo && !overrideGeo) return { bounds: result.geo.bounds, systemLabel: result.geo.systemLabel };
     const swC = parseCorner(sw), neC = parseCorner(ne);
     if (!swC || !neC) return null;
     const opts = { zone: parseInt(zone, 10), hemisphere };
@@ -416,6 +420,13 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
               ) : (
                 <p className="text-[11px] text-amber-700 flex items-center gap-1"><AlertCircle size={11} /> {t('webCSectors.coordsMissing')}</p>
               )}
+              {/* Override: ingresar el sistema/esquinas a mano aunque el TIF traiga georef. */}
+              {result.geo && (
+                <button type="button" onClick={() => setOverrideGeo(v => !v)}
+                  className="self-start mt-0.5 text-[11px] font-bold text-primary underline hover:text-primary/80">
+                  {overrideGeo ? '↩ Usar el sistema detectado' : '✎ El sistema detectado no es correcto — ingresar manualmente'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -460,7 +471,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
           )}
 
           <div className="flex gap-2 justify-end">
-            <button onClick={() => { setPhase('idle'); setResult(null); setPicked(null); setAdding(false); }} disabled={busy}
+            <button onClick={() => { setPhase('idle'); setResult(null); setPicked(null); setAdding(false); setOverrideGeo(false); }} disabled={busy}
               className="px-3 py-1.5 text-xs font-bold rounded border border-border text-textSecondary hover:bg-surface">
               {t('common.cancel')}
             </button>
