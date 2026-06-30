@@ -68,10 +68,18 @@ export default function SectorMap({
   const { t } = useI18n();
   // Saneamos bounds aquí (no confiar en lo persistido): descarta teselas con
   // bounds corruptos en vez de crashear todo el mapa (RangeError de Leaflet).
+  // La rotación (Método 2) se valida aparte: si sus 4 esquinas/bearing no son
+  // finitos, se ignora y cae al render axis-aligned (no se pinta torcida).
+  const finitePair = (p: any) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]);
   const orthos = (orthophotos ?? [])
     .map(o => {
       const b = normalizeBounds(o.bounds);
-      return b ? { ...o, bounds: b as LatLngBoundsExpression } : null;
+      if (!b) return null;
+      const r = o.rotation;
+      const rotOk = !!r && Number.isFinite(r.bearing)
+        && finitePair(r.corners?.tl) && finitePair(r.corners?.tr)
+        && finitePair(r.corners?.br) && finitePair(r.corners?.bl);
+      return { ...o, bounds: b as LatLngBoundsExpression, rotation: rotOk ? r : undefined };
     })
     .filter(Boolean) as MapOrthophoto[];
   const geomSectors = sectors.filter(s => s.points && s.points.length >= 3);

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { useMap } from 'react-leaflet';
+import { useLeafletContext } from '@react-leaflet/core';
 import L from 'leaflet';
 
 type LL = [number, number]; // [lat, lng]
@@ -30,15 +30,20 @@ function getRotatedClass() {
       L.setOptions(this, options);
     },
     onAdd(this: any, map: any) {
+      // Animación de zoom: marcamos la capa como zoom-animada y dejamos que el
+      // padre (_animateZoom, usa this._bounds) escale el div durante el zoom; al
+      // terminar, _reset recomputa la matriz exacta.
+      this._zoomAnimated = map._zoomAnimated;
       if (!this._image) this._initImage();
       if (this.options.opacity < 1) this._updateOpacity();
-      // Sin animación de zoom (no marcamos zoom-animated): recomputamos al final.
       map.on('zoomend resetview', this._reset, this);
+      if (this._zoomAnimated) map.on('zoomanim', this._animateZoom, this);
       this.getPane().appendChild(this._image);
       this._reset();
     },
     onRemove(this: any, map: any) {
       map.off('zoomend resetview', this._reset, this);
+      if (this._zoomAnimated) map.off('zoomanim', this._animateZoom, this);
       (L.ImageOverlay as any).prototype.onRemove.call(this, map);
     },
     _initImage(this: any) {
@@ -47,7 +52,7 @@ function getRotatedClass() {
       img.src = this._url;
       this._rawImage = img;
       L.DomUtil.addClass(img, 'leaflet-image-layer');
-      const div = this._image = L.DomUtil.create('div', 'leaflet-image-layer');
+      const div = this._image = L.DomUtil.create('div', 'leaflet-image-layer ' + (this._zoomAnimated ? 'leaflet-zoom-animated' : ''));
       this._updateZIndex();
       div.appendChild(img);
       (div as any).onselectstart = L.Util.falseFn;
@@ -96,16 +101,19 @@ export interface RotatedImageOverlayProps {
 }
 
 export default function RotatedImageOverlay({ url, topLeft, topRight, bottomLeft, opacity = 1, paneName = 'tilePane' }: RotatedImageOverlayProps) {
-  const map = useMap();
+  const context = useLeafletContext();
   const layerRef = useRef<any>(null);
 
-  // Crear/destruir la capa cuando cambia la URL o el pane.
+  // Crear/destruir la capa cuando cambia la URL o el pane. Se agrega al CONTENEDOR
+  // de capas padre (el LayerGroup del control de capas), no al mapa directo, para
+  // que el toggle "Ortofoto" la muestre/oculte igual que a las teselas normales.
   useEffect(() => {
     const Cls = getRotatedClass();
     const layer = new Cls(url, topLeft, topRight, bottomLeft, { opacity, pane: paneName, interactive: false });
-    layer.addTo(map);
+    const container = context.layerContainer || context.map;
+    container.addLayer(layer);
     layerRef.current = layer;
-    return () => { try { map.removeLayer(layer); } catch { /* ignore */ } layerRef.current = null; };
+    return () => { try { container.removeLayer(layer); } catch { /* ignore */ } layerRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, paneName]);
 

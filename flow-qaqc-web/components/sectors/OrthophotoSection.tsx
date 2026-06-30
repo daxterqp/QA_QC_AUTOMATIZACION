@@ -68,12 +68,21 @@ interface ProcResult {
 interface ControlRow { sx: string; sy: string; lat: string; lng: string }
 
 /** Sub-bbox (en sistema propio) de la tesela (r,c) de una grilla grid×grid.
- *  Imagen norte-arriba: fila 0 = norte (maxY), columna 0 = oeste (minX). */
-function subBboxCustom(bbox: { minX: number; minY: number; maxX: number; maxY: number }, r: number, c: number, grid: number) {
+ *  Imagen norte-arriba: fila 0 = norte (maxY), columna 0 = oeste (minX).
+ *  Usa las MISMAS fronteras de píxel que el servidor (`Math.round(i*size/n)`),
+ *  pasando el ancho/alto en PÍXELES del archivo (pxW/pxH), para que las teselas
+ *  rotadas encajen sin costuras cuando grid>1. */
+function subBboxCustom(
+  bbox: { minX: number; minY: number; maxX: number; maxY: number },
+  r: number, c: number, grid: number, pxW: number, pxH: number,
+) {
+  const fr = (i: number, size: number) => (size > 0 ? Math.round((i * size) / grid) / size : i / grid);
+  const fx0 = fr(c, pxW), fx1 = fr(c + 1, pxW);
+  const fy0 = fr(r, pxH), fy1 = fr(r + 1, pxH);
   const W = bbox.maxX - bbox.minX, H = bbox.maxY - bbox.minY;
   return {
-    minX: bbox.minX + (c / grid) * W, maxX: bbox.minX + ((c + 1) / grid) * W,
-    maxY: bbox.maxY - (r / grid) * H, minY: bbox.maxY - ((r + 1) / grid) * H,
+    minX: bbox.minX + fx0 * W, maxX: bbox.minX + fx1 * W,
+    maxY: bbox.maxY - fy0 * H, minY: bbox.maxY - fy1 * H,
   };
 }
 
@@ -325,7 +334,12 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
   async function handleConfirm() {
     setMsg(null);
     const resolved = resolveBounds();
-    if (!resolved) { setMsg({ ok: false, text: t('webCSectors.errMissingCorners') }); return; }
+    if (!resolved) {
+      setMsg({ ok: false, text: showCustom
+        ? 'Faltan puntos de control válidos (mínimo 2, no colineales) para el sistema propio.'
+        : t('webCSectors.errMissingCorners') });
+      return;
+    }
     setBusy(true);
     try {
       // 1) Sube todas las teselas (staging → S3, carpeta única por versión).
@@ -343,7 +357,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
       const ext = result?.rawExtent;
       const tiles = (upTiles ?? []).map(t => {
         if (customGeoref && ext) {
-          const ov = metricToRotatedOverlay(customGeoref, subBboxCustom(ext.bbox, t.r, t.c, g));
+          const ov = metricToRotatedOverlay(customGeoref, subBboxCustom(ext.bbox, t.r, t.c, g, ext.width, ext.height));
           const env = ov.envelope;
           return { s3Key: t.s3Key, bounds: [[env.south, env.west], [env.north, env.east]] as LeafletBounds, rotation: toRotation(ov) };
         }
@@ -367,7 +381,7 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
       await persistVersions([...versions, version], version);
 
       setMsg({ ok: true, text: t('webCSectors.orthoLoaded') });
-      setPhase('idle'); setPicked(null); setResult(null); setAdding(false);
+      setPhase('idle'); setPicked(null); setResult(null); setAdding(false); setGeorefMode('auto');
       onSaved();
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
@@ -529,10 +543,14 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
                   className={`px-2 py-1 text-[11px] font-bold rounded border ${showKnown ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
                   {result.geo ? 'Otro sistema conocido' : 'Sistema conocido'}
                 </button>
-                <button type="button" onClick={() => setGeorefMode('custom')}
-                  className={`px-2 py-1 text-[11px] font-bold rounded border ${showCustom ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
-                  Sistema propio (puntos de control)
-                </button>
+                {/* Método 2 solo si el archivo trae una grilla real (georreferenciado).
+                    Sin georef, el bbox sería en píxeles (y=0 arriba) y voltearía la imagen. */}
+                {result.rawExtent?.georeferenced && (
+                  <button type="button" onClick={() => setGeorefMode('custom')}
+                    className={`px-2 py-1 text-[11px] font-bold rounded border ${showCustom ? 'border-primary bg-primary/10 text-primary' : 'border-border text-textSecondary hover:bg-surface'}`}>
+                    Sistema propio (puntos de control)
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -588,13 +606,10 @@ export function OrthophotoSection({ projectId, projectName, versions: versionsPr
               <p className="text-[11px] text-muted leading-snug">
                 Ingresa <strong>≥2 puntos de control</strong>: su coordenada en <strong>tu sistema propio</strong> (la misma del archivo) y su equivalente en <strong>WGS84</strong> (lat/lng). Se ajusta una rotación + escala y la ortofoto se coloca <strong>girada</strong>.
               </p>
-              {result.rawExtent ? (
+              {result.rawExtent && (
                 <p className="text-[11px] text-primary leading-snug">
                   Extensión del archivo · X: {result.rawExtent.bbox.minX.toLocaleString('es-PE', { maximumFractionDigits: 2 })} … {result.rawExtent.bbox.maxX.toLocaleString('es-PE', { maximumFractionDigits: 2 })} · Y: {result.rawExtent.bbox.minY.toLocaleString('es-PE', { maximumFractionDigits: 2 })} … {result.rawExtent.bbox.maxY.toLocaleString('es-PE', { maximumFractionDigits: 2 })}
-                  {!result.rawExtent.georeferenced && ' (en píxeles — el archivo no trae georreferencia)'}
                 </p>
-              ) : (
-                <p className="text-[11px] text-amber-700">No se pudo leer la extensión del archivo; el Método 2 no está disponible para este archivo.</p>
               )}
 
               {result.rawExtent && (
