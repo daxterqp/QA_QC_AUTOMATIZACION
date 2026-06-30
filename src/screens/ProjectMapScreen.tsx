@@ -98,9 +98,12 @@ export default function ProjectMapScreen({ route, navigation }: Props) {
   // v34 — Ortofoto liviana georreferenciada (imagen WebP en S3 + bbox WGS84).
   // `orthoActive` = la activa cruda (s3Key+bounds); `orthophoto` = ya con uri LOCAL
   // descargada (el bucket es privado → no sirve la URL pública; se baja a caché).
-  type Tile = { s3Key: string; bounds: [[number, number], [number, number]] };
+  // v72 — rotación (Método 2: sistema propio). Si está, el Overlay usa
+  // `northUpBounds` + `bearing` (rotación) en vez del bounds axis-aligned.
+  type OrthoRotation = { bearing: number; northUpBounds: [[number, number], [number, number]] };
+  type Tile = { s3Key: string; bounds: [[number, number], [number, number]]; rotation?: OrthoRotation };
   const [orthoTiles, setOrthoTiles] = useState<Tile[]>([]);
-  const [orthoLayers, setOrthoLayers] = useState<{ bounds: [[number, number], [number, number]]; uri: string }[]>([]);
+  const [orthoLayers, setOrthoLayers] = useState<{ bounds: [[number, number], [number, number]]; uri: string; rotation?: OrthoRotation }[]>([]);
   const [orthoStatus, setOrthoStatus] = useState<'none' | 'loading' | 'ready' | 'error'>('none');
   const [orthoKeyOnly, setOrthoKeyOnly] = useState(false); // referencia recibida
   const [resyncing, setResyncing] = useState(false);
@@ -168,11 +171,15 @@ export default function ProjectMapScreen({ route, navigation }: Props) {
         const rawTiles = proj?.orthophotoTilesJson;
         const key = proj?.orthophotoS3Key;
         setOrthoKeyOnly(!!rawTiles || !!key);
+        // Rotación válida = bearing finito + northUpBounds plausible (Método 2).
+        const validRotation = (r: any): OrthoRotation | undefined =>
+          (r && Number.isFinite(r.bearing) && validBounds(r.northUpBounds))
+            ? { bearing: r.bearing, northUpBounds: r.northUpBounds } : undefined;
         let tiles: Tile[] = [];
         try {
           if (rawTiles) {
             const arr = JSON.parse(rawTiles);
-            if (Array.isArray(arr)) tiles = arr.filter((t: any) => t?.s3Key && validBounds(t.bounds)).map((t: any) => ({ s3Key: t.s3Key, bounds: t.bounds }));
+            if (Array.isArray(arr)) tiles = arr.filter((t: any) => t?.s3Key && validBounds(t.bounds)).map((t: any) => ({ s3Key: t.s3Key, bounds: t.bounds, rotation: validRotation(t.rotation) }));
           }
           if (tiles.length === 0 && key && proj?.orthophotoBoundsJson) {
             const b = JSON.parse(proj.orthophotoBoundsJson);
@@ -196,7 +203,7 @@ export default function ProjectMapScreen({ route, navigation }: Props) {
     (async () => {
       const dir = `${FileSystem.cacheDirectory}ortho/`;
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-      const layers: { bounds: [[number, number], [number, number]]; uri: string }[] = [];
+      const layers: { bounds: [[number, number], [number, number]]; uri: string; rotation?: OrthoRotation }[] = [];
       let anyErr = false;
       for (const t of orthoTiles) {
         try {
@@ -204,7 +211,7 @@ export default function ProjectMapScreen({ route, navigation }: Props) {
           const localUri = `${dir}${safe}`;
           const info = await FileSystem.getInfoAsync(localUri);
           if (!info.exists) await downloadFromS3(t.s3Key, localUri);
-          layers.push({ bounds: t.bounds, uri: localUri });
+          layers.push({ bounds: t.bounds, uri: localUri, rotation: t.rotation });
         } catch (e) {
           console.warn('[ortho] descarga de tesela falló:', e);
           anyErr = true;
@@ -512,13 +519,15 @@ export default function ProjectMapScreen({ route, navigation }: Props) {
             <UrlTile urlTemplate={mapTileUrl} maximumZ={20} zIndex={-1} />
           )}
 
-          {/* v34 — Ortofoto liviana como capa base, DEBAJO de sectores y marcadores. */}
+          {/* v34 — Ortofoto liviana como capa base, DEBAJO de sectores y marcadores.
+              v72 — con rotación (Método 2) usa northUpBounds + bearing. */}
           {showOrthoImg && orthoLayers.map((o, i) => (
             <Overlay
               key={i}
-              bounds={o.bounds}
+              bounds={o.rotation ? o.rotation.northUpBounds : o.bounds}
               image={{ uri: o.uri }}
               opacity={0.9}
+              bearing={o.rotation ? o.rotation.bearing : undefined}
             />
           ))}
 
