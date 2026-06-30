@@ -18,7 +18,7 @@
  * Las instancias creadas aquí NO llevan ubicación (location_id null); las 3
  * vistas leen las MISMAS instancias. El modo "por ubicación" sigue intacto.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, ScrollView, TouchableOpacity, ActivityIndicator,
   Modal, TextInput, Alert,
@@ -235,10 +235,18 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     }
   }, [projectId, mode]);
 
-  // Al enfocar la pantalla, bajar de la nube lo nuevo (ensayos creados en PC u otros
-  // equipos) y recargar local — así un ensayo de PC aparece sin re-abrir el proyecto.
+  // PERF — Antes esto bajaba TODO el proyecto de la nube en CADA focus y recién
+  // mostraba la lista (bloqueaba; escalaba O(tamaño del proyecto) por entrada).
+  // Ahora: muestra lo LOCAL al instante y baja de la nube UNA sola vez (1ª entrada)
+  // en SEGUNDO PLANO. El tiempo real (useRealtimeProjectPull) mantiene la lista viva
+  // mientras está abierta; el pull-to-refresh fuerza una sincronización completa.
+  const didCloudPullRef = useRef(false);
   const refreshFromCloud = useCallback(() => {
-    pullProjectFromCloud(projectId).catch(() => {}).finally(() => { loadData(); });
+    loadData(); // local: instantáneo
+    if (!didCloudPullRef.current) {
+      didCloudPullRef.current = true;
+      pullProjectFromCloud(projectId).then(() => loadData()).catch(() => {});
+    }
   }, [projectId, loadData]);
 
   // #7B — Pull-to-refresh: re-baja de la nube y recarga local (versión await del de arriba).

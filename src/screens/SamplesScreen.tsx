@@ -9,7 +9,7 @@
  * captura de coordenadas + sector reutiliza la MISMA lógica de convergencia del ensayo
  * numérico (GpsCaptureModal). Código de muestra: M-{proyecto}-{ddmmyy}-{seq:4}.
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
   ActivityIndicator, Alert, FlatList,
@@ -174,10 +174,17 @@ export default function SamplesScreen({ route, navigation }: Props) {
     }
   }, [projectId]);
 
+  // PERF — muestra lo LOCAL al instante; baja de la nube UNA sola vez (1ª entrada)
+  // en segundo plano. El tiempo real mantiene la lista viva; el pull-to-refresh
+  // fuerza la sincronización completa. (Antes pulleaba en CADA focus y bloqueaba.)
+  const didCloudPullRef = useRef(false);
   useFocusEffect(useCallback(() => {
     let active = true;
-    setLoading(true);
-    pullSamples(projectId).catch(() => {}).finally(() => { if (active) loadData(); });
+    loadData();
+    if (!didCloudPullRef.current) {
+      didCloudPullRef.current = true;
+      pullSamples(projectId).then(() => { if (active) loadData(); }).catch(() => {});
+    }
     return () => { active = false; };
   }, [projectId, loadData]));
 
