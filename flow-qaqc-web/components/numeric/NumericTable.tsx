@@ -131,12 +131,14 @@ function devGenWebValue(cell: { kind: string; decimals?: number; range?: { min: 
   const clampDec = (d: number) => Math.max(0, Math.min(6, d));
   const dec = typeof cell.decimals === 'number' ? cell.decimals : 2;
   const range = cell.range ?? null;
-  // PRIORIDAD: `:ej[valor]` de la ficha (patrón congruente, ruido ±0.15%) > aleatorio.
+  // PRIORIDAD: `:ej[valor]` de la ficha (patrón congruente, ruido ±0.05%) > aleatorio.
+  // ±0.05% (no ±0.15%): con ±0.15% el ruido se componía sobre las ~6 entradas y sacaba
+  // el GC del Cono fuera de [100,101.5] (~8% de las corridas).
   const sample = cell.sample;
   const hasEj = sample != null && sample !== '';
   const num = hasEj ? Number(String(sample).replace(',', '.')) : NaN;
   const noisy = (base: number, d: number): string => {
-    const v = base * (1 + (Math.random() - 0.5) * 0.003);
+    const v = base * (1 + (Math.random() - 0.5) * 0.001);
     const c = range ? Math.min(range.max, Math.max(range.min, v)) : v;
     return c.toFixed(clampDec(d));
   };

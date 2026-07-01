@@ -1366,7 +1366,10 @@ function devGenCellValue(cell: NumericCellSpec, colIdx: number, descNorm: string
   const base: number | string | null | undefined = hasEj ? sample : (rule ? (rule.perCol[colIdx] ?? rule.perCol[0]) : undefined);
   const dec = (cell as { decimals?: number }).decimals;
   const range = (cell as { range?: { min: number; max: number } }).range;
-  const frac = hasEj ? 0.003 : 0.01; // :ej → ruido chico (±0.15%) para corridas limpias
+  // :ej → ruido chico (±0.05%) para que las CORRIDAS queden congruentes: con ±0.15% el
+  // ruido se componía sobre las ~6 entradas y sacaba el GC del Cono fuera de [100,101.5]
+  // (~8% de las veces). ±0.05% mantiene GC[100.1,101.0] y la curva Proctor limpia.
+  const frac = hasEj ? 0.001 : 0.01;
   const asNum = (v: number | string | null | undefined): number | undefined => {
     if (v == null) return undefined;
     const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
