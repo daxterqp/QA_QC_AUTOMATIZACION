@@ -72,6 +72,9 @@ const pNgol = row('N° de golpes', inEj('numerico-[15:35]:dec[0]', [19, 26, 33])
 const pWll = row('Contenido de humedad (%)', inEj('numerico-[10:40]:dec[1]', [22.0, 21.4, 21.0]), S2);
 const pLogN = row('log(N°) — auxiliar', perCol(`numerico-fx[LOG(#${pNgol}{c})]:dec[5]:oculto`, 3), S2);
 const pLL = row('Límite Líquido — LL (%)', `numerico-fx[PENDIENTE(#${pLogN}A:#${pLogN}C, #${pWll}A:#${pWll}C)*LOG(25)+INTERSECCION(#${pLogN}A:#${pLogN}C, #${pWll}A:#${pWll}C)]:dec[1]`, S2);
+// Recta de flujo (Casagrande) en semi-log: humedad vs N° de golpes.
+row('Recta de flujo (semi-log)',
+  `numerico-gr5[x:#${pNgol}A:#${pNgol}C|y:#${pWll}A:#${pWll}C|alto:55|t:Recta de Flujo — Límite Líquido|xt:N° de golpes|yt:Humedad (%)|ly:Puntos de ensayo]`, S2);
 
 // ── S3 — Límite Plástico + Índice de Plasticidad ──
 const S3 = 'Límite Plástico e Índice de Plasticidad';
