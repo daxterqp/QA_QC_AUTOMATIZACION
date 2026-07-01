@@ -19,10 +19,10 @@ const header = (met, sec) => { p += 1; rows.push([ID, NAME, p, '', met, sec]); r
 const S0 = 'Perfil de temperaturas in situ';
 header('col-[A][N° etapa] // col-[B][Temperatura (°C)]', S0);                                              // 1
 const pPlanta = row('Temperatura de salida de planta', `val-[1] // numerico-[150:165]:dec[1]:ej[155]`, S0);   // 2
-const pArribo = row('Temperatura de arribo en obra', `val-[2] // numerico-[140:155]:dec[1]:ej[145]`, S0);     // 3
+const pArribo = row('Temperatura de arribo en obra', `val-[2] // numerico-[135:160]:dec[1]:ej[145]`, S0);     // 3  (rango alineado al dictamen ≥135)
 const pDesc = row('Temperatura de descarga en pavimentadora', `val-[3] // numerico-[135:145]:dec[1]:ej[140]`, S0); // 4
 const pInicio = row('Temperatura de inicio de compactación', `val-[4] // numerico-[120:140]:dec[1]:ej[130]`, S0); // 5
-const pFinal = row('Temperatura de cierre de compactación', `val-[5] // numerico-[110:120]:dec[1]:ej[115]`, S0);  // 6
+const pFinal = row('Temperatura de cierre de compactación', `val-[5] // numerico-[110:140]:dec[1]:ej[115]`, S0);  // 6  (rango alineado al dictamen ≥110, sin tope típico)
 // Curva de enfriamiento (temperatura vs etapa).
 row('Perfil térmico (curva de enfriamiento)',
   `numerico-gr1[x:#${pPlanta}A:#${pFinal}A|y:#${pPlanta}B:#${pFinal}B|alto:60|t:Perfil Térmico del Tramo|xt:Etapa (1=Planta … 5=Cierre)|yt:Temperatura (°C)|ly:Temperatura]`, S0); // 7
