@@ -127,22 +127,35 @@ interface Props {
  *  genérica (sin reglas de Proctor): manual/percent → aleatorio en rango; free → aleatorio;
  *  text → "PRUEBA"; bool → 1. Las demás (list/equipment/date/time/comment/xref/fórmula) se
  *  dejan sin tocar. Espejo simplificado de devGenCellValue del móvil (src/components/NumericTable). */
-function devGenWebValue(cell: { kind: string; decimals?: number; range?: { min: number; max: number } | null }): string | null {
+function devGenWebValue(cell: { kind: string; decimals?: number; range?: { min: number; max: number } | null; sample?: string }): string | null {
   const clampDec = (d: number) => Math.max(0, Math.min(6, d));
   const dec = typeof cell.decimals === 'number' ? cell.decimals : 2;
   const range = cell.range ?? null;
+  // PRIORIDAD: `:ej[valor]` de la ficha (patrón congruente, ruido ±0.15%) > aleatorio.
+  const sample = cell.sample;
+  const hasEj = sample != null && sample !== '';
+  const num = hasEj ? Number(String(sample).replace(',', '.')) : NaN;
+  const noisy = (base: number, d: number): string => {
+    const v = base * (1 + (Math.random() - 0.5) * 0.003);
+    const c = range ? Math.min(range.max, Math.max(range.min, v)) : v;
+    return c.toFixed(clampDec(d));
+  };
   switch (cell.kind) {
     case 'manual':
     case 'percent':
+      if (hasEj && Number.isFinite(num)) return noisy(num, dec);
       return range
         ? (range.min + (0.35 + Math.random() * 0.35) * (range.max - range.min)).toFixed(clampDec(dec))
         : (Math.random() * 100).toFixed(clampDec(dec));
     case 'free':
+      if (hasEj && Number.isFinite(num)) return noisy(num, typeof cell.decimals === 'number' ? cell.decimals : 1);
       return (10 + Math.random() * 990).toFixed(clampDec(typeof cell.decimals === 'number' ? cell.decimals : 1));
+    case 'list':
+      return hasEj ? String(sample) : null;  // opción de ejemplo (ej. la capa)
     case 'text':
-      return 'PRUEBA';
+      return hasEj ? String(sample) : 'PRUEBA';
     case 'bool':
-      return '1';
+      return hasEj ? String(sample) : '1';
     default:
       return null;
   }
@@ -473,7 +486,7 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
       if (spec?.kind !== 'row') continue;
       let touched = false;
       for (let i = 0; i < spec.cells.length; i++) {
-        const v = devGenWebValue(spec.cells[i] as { kind: string; decimals?: number; range?: { min: number; max: number } | null });
+        const v = devGenWebValue(spec.cells[i] as { kind: string; decimals?: number; range?: { min: number; max: number } | null; sample?: string });
         if (v == null) continue;
         map[`${item.id}:${colLetter(i)}`] = v;
         touched = true;

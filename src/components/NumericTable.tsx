@@ -1347,39 +1347,53 @@ function devRandIn(min: number, max: number, decimals: number): string {
   return (min + frac * (max - min)).toFixed(Math.max(0, Math.min(6, decimals)));
 }
 
-/** Aplica ±0.5% de ruido a un valor base y lo acota al rango de la celda. */
-function devNoisy(base: number, range: { min: number; max: number } | null | undefined, decimals: number): string {
-  const noisy = base * (1 + (Math.random() - 0.5) * 0.01);
+/** Aplica ruido (±`frac/2`) a un valor base y lo acota al rango de la celda.
+ *  Default ±0.5%; los valores `:ej[]` de la ficha usan un ruido menor para que
+ *  las corridas se vean congruentes (curva limpia). */
+function devNoisy(base: number, range: { min: number; max: number } | null | undefined, decimals: number, frac = 0.01): string {
+  const noisy = base * (1 + (Math.random() - 0.5) * frac);
   const v = range ? Math.min(range.max, Math.max(range.min, noisy)) : noisy;
   return v.toFixed(Math.max(0, Math.min(6, decimals)));
 }
 
-/** Genera un valor de ingreso para una celda. Para Proctor usa el valor real de la
- *  ficha (por descripción) con ruido pequeño; si no matchea, valores genéricos.
+/** Genera un valor de ingreso para una celda. PRIORIDAD: `:ej[valor]` de la ficha
+ *  (patrón congruente) > regla Proctor por descripción > aleatorio en rango.
  *  Devuelve null para celdas calculadas/solo-lectura (no se rellenan). */
 function devGenCellValue(cell: NumericCellSpec, colIdx: number, descNorm: string, matrices: Record<string, MatrixData>, auxTables?: AuxTables): string | null {
-  const rule = PROCTOR_RULES.find(r => r.match.test(descNorm));
-  const base = rule ? (rule.perCol[colIdx] ?? rule.perCol[0]) : undefined;
+  const sample = (cell as { sample?: string }).sample;
+  const hasEj = sample != null && sample !== '';
+  const rule = hasEj ? undefined : PROCTOR_RULES.find(r => r.match.test(descNorm));
+  const base: number | string | null | undefined = hasEj ? sample : (rule ? (rule.perCol[colIdx] ?? rule.perCol[0]) : undefined);
   const dec = (cell as { decimals?: number }).decimals;
   const range = (cell as { range?: { min: number; max: number } }).range;
+  const frac = hasEj ? 0.003 : 0.01; // :ej → ruido chico (±0.15%) para corridas limpias
+  const asNum = (v: number | string | null | undefined): number | undefined => {
+    if (v == null) return undefined;
+    const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
+    return Number.isFinite(n) ? n : undefined;
+  };
   switch (cell.kind) {
     case 'manual':
-    case 'percent':
-      if (typeof base === 'number') return devNoisy(base, range, dec ?? 2);
+    case 'percent': {
+      const b = asNum(base);
+      if (b != null) return devNoisy(b, range, dec ?? 2, frac);
       return range ? devRandIn(range.min, range.max, dec ?? 2) : (Math.random() * 100).toFixed(dec ?? 2);
-    case 'free':
-      if (typeof base === 'number') return devNoisy(base, range, dec ?? 1);
+    }
+    case 'free': {
+      const b = asNum(base);
+      if (b != null) return devNoisy(b, range, dec ?? 1, frac);
       return (10 + Math.random() * 990).toFixed(dec ?? 1);
+    }
     case 'list': {
       const opts = resolveListOptionsMobile((cell as { source: ListSource }).source, matrices, auxTables);
       if (base != null) {
         const hit = opts.find(o => String(o) === String(base));
-        if (hit != null) return String(hit);   // código real exacto (BUSCAR resuelve igual)
+        if (hit != null) return String(hit);   // código/opción real exacto (BUSCAR resuelve igual)
       }
       return opts.length ? String(opts[Math.floor(Math.random() * opts.length)]) : null;
     }
     case 'text':
-      return tx('numericTable.devTestValue');
+      return hasEj ? String(base) : tx('numericTable.devTestValue');
     case 'date': {
       const d = new Date();
       return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -1389,7 +1403,7 @@ function devGenCellValue(cell: NumericCellSpec, colIdx: number, descNorm: string
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     }
     case 'bool':
-      return '1';
+      return hasEj ? String(base) : '1';
     case 'equipment':
       return 'DEV-001';
     case 'comment': {
