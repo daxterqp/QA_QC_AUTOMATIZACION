@@ -73,8 +73,8 @@ interface LabelField { k: string; v: string }
  *  │                                    CÓDIGO   │  código DEBAJO del QR
  *  │ campos a TODO lo ancho (fecha, responsables,│
  *  │ proyecto…)                                  │
- *  │ ── [logo alargado, chico] al pie ──         │
- *  └─────────────────────────────────────────────┘
+ *  │                    [logo chico, esq. inf. der.] │  sin filete
+ *  └─────────────────────────────────────────────┘  marco RECTO (sin curvas)
  *  Todo negro puro (térmica monocroma); tipografía embebida.
  *  El logo es el PNG "Flow - QA - QC Alargado" (assets/Logos) embebido base64 —
  *  va en encabezado Y pie por ahora; cuando exista el "logo de etiquetas" por
@@ -91,10 +91,10 @@ function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: stri
     html, body { margin: 0; padding: 0; width: ${LABEL_PT}pt; height: ${LABEL_PT}pt; overflow: hidden; }
     body { font-family: 'Century Gothic', 'FlowGothic', sans-serif; color: #000; -webkit-print-color-adjust: exact; position: relative; }
     .frame { box-sizing: border-box; position: absolute; top: 3pt; left: 3pt; right: 3pt; bottom: 3pt;
-             border: 1.4pt solid #000; border-radius: 7pt; padding: 4pt 6pt 3pt; display: flex; flex-direction: column; overflow: hidden; }
+             border: 1.4pt solid #000; padding: 4pt 6pt 3pt; display: flex; flex-direction: column; overflow: hidden; }
     .hdr { display: flex; align-items: center; gap: 4pt; padding-bottom: 2.5pt; flex-shrink: 0;
            border-bottom: 1.5pt solid #000; }
-    .hlogo { height: 11pt; width: auto; display: block; }
+    .hlogo { height: 10pt; width: auto; display: block; }
     .kind { margin-left: auto; font-size: 5.4pt; letter-spacing: 1.1pt; border: 0.8pt solid #000;
             border-radius: 2.5pt; padding: 1pt 3pt; font-weight: bold; flex-shrink: 0; }
     .mainrow { display: flex; gap: 5pt; padding-top: 3.5pt; flex-shrink: 0; }
@@ -108,9 +108,8 @@ function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: stri
     .flds { flex: 1; min-height: 0; margin-top: 2.5pt; overflow: hidden; }
     .fld { font-size: 6.4pt; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fld .k { font-weight: bold; letter-spacing: 0.3pt; }
-    .foot { flex-shrink: 0; border-top: 0.9pt solid #000; margin-top: 2pt; padding-top: 2pt;
-            display: flex; justify-content: center; }
-    .flogo { height: 7.5pt; width: auto; display: block; }
+    .foot { flex-shrink: 0; margin-top: 2pt; display: flex; justify-content: flex-end; }
+    .flogo { height: 6.5pt; width: auto; display: block; }
   </style></head><body><div class="frame">
     <div class="hdr">
       <img class="hlogo" src="${FLOW_LOGO_WIDE_B64}" />
