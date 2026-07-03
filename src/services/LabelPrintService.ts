@@ -25,7 +25,7 @@ import { escapeHtml } from '@utils/htmlEscape';
 import {
   buildProtocolDeepLink, buildQrIdentifier, buildSampleDeepLink, renderQrSvgRaw,
 } from '@utils/qrCode';
-import { FLOW_LOGO_SVG } from '../assets/flowLogoSvg';
+import { FLOW_LOGO_WIDE_B64 } from '../assets/flowLogoWideB64';
 import { DIDACT_GOTHIC_B64 } from '../assets/didactGothicFont';
 
 /** Lado de la etiqueta en mm (rollo actual: 50×50). Parametrizado para ajustar
@@ -67,19 +67,19 @@ interface LabelField { k: string; v: string }
 
 /** HTML de la etiqueta 50×50 con diseño de marca:
  *  ┌ marco redondeado ───────────────────────────┐
- *  │ [mark] FLOW · QA · QC           ‹MUESTRA›   │  lockup del logo (sin texto aparte)
+ *  │ [logo Flow QA/QC alargado]      ‹MUESTRA›   │  imagen LITERAL del usuario
  *  │ Nombre completo del                [ QR ]   │  QR SIN marco
  *  │ ensayo (izquierda)                 [ 18mm ] │
  *  │                                    CÓDIGO   │  código DEBAJO del QR
  *  │ campos a TODO lo ancho (fecha, responsables,│
  *  │ proyecto…)                                  │
- *  │ ── FLOW · QA · QC al pie ──                 │
+ *  │ ── [logo alargado, chico] al pie ──         │
  *  └─────────────────────────────────────────────┘
  *  Todo negro puro (térmica monocroma); tipografía embebida.
- *  NOTA: el logo SVG de marca viene con fill BLANCO (versión para fondos oscuros)
- *  → se fuerza a negro vía CSS. Cuando exista el "logo de etiquetas" por empresa
- *  (subible, formato alargado), el lockup del encabezado se reemplaza por esa
- *  imagen; el pie de marca FLOW · QA · QC se queda siempre.
+ *  El logo es el PNG "Flow - QA - QC Alargado" (assets/Logos) embebido base64 —
+ *  va en encabezado Y pie por ahora; cuando exista el "logo de etiquetas" por
+ *  empresa (subible, formato alargado), el ENCABEZADO usará el logo subido y el
+ *  pie seguirá siendo la marca Flow.
  *  El frame va POSICIONADO (inset fijo) + overflow hidden en html/body para que
  *  el contenido JAMÁS desborde a una 2ª página del PDF. */
 function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: string; title?: string | null; fields: LabelField[]; projectName: string }): string {
@@ -94,10 +94,7 @@ function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: stri
              border: 1.4pt solid #000; border-radius: 7pt; padding: 4pt 6pt 3pt; display: flex; flex-direction: column; overflow: hidden; }
     .hdr { display: flex; align-items: center; gap: 4pt; padding-bottom: 2.5pt; flex-shrink: 0;
            border-bottom: 1.5pt solid #000; }
-    .mark { width: 12pt; height: 12pt; flex-shrink: 0; }
-    .mark svg { width: 12pt; height: 12pt; }
-    .mark svg path, .mark svg g { fill: #000 !important; }
-    .word { font-size: 6.4pt; font-weight: bold; letter-spacing: 1.6pt; white-space: nowrap; }
+    .hlogo { height: 11pt; width: auto; display: block; }
     .kind { margin-left: auto; font-size: 5.4pt; letter-spacing: 1.1pt; border: 0.8pt solid #000;
             border-radius: 2.5pt; padding: 1pt 3pt; font-weight: bold; flex-shrink: 0; }
     .mainrow { display: flex; gap: 5pt; padding-top: 3.5pt; flex-shrink: 0; }
@@ -111,12 +108,12 @@ function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: stri
     .flds { flex: 1; min-height: 0; margin-top: 2.5pt; overflow: hidden; }
     .fld { font-size: 6.4pt; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fld .k { font-weight: bold; letter-spacing: 0.3pt; }
-    .foot { flex-shrink: 0; border-top: 0.9pt solid #000; margin-top: 2pt; padding-top: 2pt; text-align: center;
-            font-size: 5.6pt; font-weight: bold; letter-spacing: 1.5pt; white-space: nowrap; overflow: hidden; }
+    .foot { flex-shrink: 0; border-top: 0.9pt solid #000; margin-top: 2pt; padding-top: 2pt;
+            display: flex; justify-content: center; }
+    .flogo { height: 7.5pt; width: auto; display: block; }
   </style></head><body><div class="frame">
     <div class="hdr">
-      <div class="mark">${FLOW_LOGO_SVG}</div>
-      <div class="word">FLOW &middot; QA &middot; QC</div>
+      <img class="hlogo" src="${FLOW_LOGO_WIDE_B64}" />
       <div class="kind">${args.kind}</div>
     </div>
     <div class="mainrow">
@@ -129,7 +126,7 @@ function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: stri
       </div>
     </div>
     <div class="flds">${rows}</div>
-    <div class="foot">FLOW &middot; QA &middot; QC</div>
+    <div class="foot"><img class="flogo" src="${FLOW_LOGO_WIDE_B64}" /></div>
   </div></body></html>`;
 }
 
