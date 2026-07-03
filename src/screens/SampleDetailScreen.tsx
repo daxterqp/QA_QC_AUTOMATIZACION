@@ -30,6 +30,7 @@ import { todayEnsayoDate } from '@utils/protocolCode';
 import { escapeHtml } from '@utils/htmlEscape';
 import QrCodeView from '@components/QrCodeView';
 import { buildSampleDeepLink, generateSampleQr } from '@utils/qrCode';
+import { printSampleLabel } from '@services/LabelPrintService';
 import { useTour } from '@context/TourContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { useI18n, tx } from '@i18n/index';
@@ -132,6 +133,27 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
     else navigation.navigate('ProtocolAudit', { protocolId: p.id });
   };
 
+  // v74 — Imprimir etiqueta de la muestra (QR + código; 50×50 mm → app de la impresora).
+  const [printingLabel, setPrintingLabel] = useState(false);
+  const printLabel = async () => {
+    if (!sample || printingLabel) return;
+    setPrintingLabel(true);
+    try {
+      await printSampleLabel({
+        sampleCode: sample.sampleCode,
+        sampleDate: sample.sampleDate ?? null,
+        materialType: sample.materialType ?? null,
+        condition: sample.condition ?? null,
+        placeName,
+        projectName,
+      });
+    } catch (e: any) {
+      Alert.alert('Etiqueta', e?.message ?? 'No se pudo generar la etiqueta.');
+    } finally {
+      setPrintingLabel(false);
+    }
+  };
+
   const exportPdf = async () => {
     if (!sample || exporting) return;
     setExporting(true);
@@ -185,6 +207,10 @@ export default function SampleDetailScreen({ route, navigation }: Props) {
       <AppHeader title={sample.sampleCode} subtitle={projectName} onBack={() => navigation.goBack()}
         rightContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            {/* v74 — Imprimir etiqueta 50×50 de la muestra */}
+            <TouchableOpacity onPress={printLabel} disabled={printingLabel} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name={printingLabel ? 'hourglass-outline' : 'print-outline'} size={20} color={Colors.white} />
+            </TouchableOpacity>
             <View ref={detailExportRef} collapsable={false}>
               <TouchableOpacity onPress={exportPdf} disabled={exporting} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name={exporting ? 'hourglass-outline' : 'share-outline'} size={20} color={Colors.white} />

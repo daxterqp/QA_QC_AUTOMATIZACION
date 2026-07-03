@@ -47,6 +47,7 @@ import { isNumericProtocol } from '@utils/numericProtocol';
 import { isProtocolConforming } from '@utils/protocolConformance';
 import { checkProtocolXrefStale, refreshProtocolXrefs } from '@services/XrefRefresh';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
+import { printProtocolLabel } from '@services/LabelPrintService';
 import { useI18n, tx } from '@i18n/index';
 
 function sanitizeS3Seg(s: string): string {
@@ -134,6 +135,29 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const isJefe = currentUser?.role === 'RESIDENT' || currentUser?.role === 'CREATOR';
 
   const zoom = useEnsayoZoom(); // v42d — zoom de la ficha (paneo total / re-encuadrar)
+  // v74 — Imprimir etiqueta del ensayo (QR + código; 50×50 mm → app de la impresora).
+  const [printingLabel, setPrintingLabel] = useState(false);
+  const printLabel = useCallback(async () => {
+    const pr = protocol as any;
+    if (!pr || printingLabel) return;
+    setPrintingLabel(true);
+    try {
+      await printProtocolLabel({
+        protocolCode: pr.protocolCode ?? null,
+        protocolNumber: pr.protocolNumber ?? null,
+        idProtocolo: idProtocolo || null,
+        externalId: pr.externalId ?? null,
+        protocolUuid: pr.id,
+        ensayoDate: pr.ensayoDate ?? null,
+        ensayoTime: pr.ensayoTime ?? null,
+        projectName,
+      });
+    } catch (e: any) {
+      Alert.alert('Etiqueta', e?.message ?? 'No se pudo generar la etiqueta.');
+    } finally {
+      setPrintingLabel(false);
+    }
+  }, [protocol, printingLabel, idProtocolo, projectName]);
 
   // v42 — Frescura de los llamados entre ensayos (@código): badge "desactualizado".
   const [xrefStale, setXrefStale] = useState(false);
@@ -455,7 +479,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
                 <Text style={styles.editBtnText}>{t('protoAudit.edit')}</Text>
               </TouchableOpacity>
             )}
-            <ZoomHeaderButtons z={zoom} />
+            <ZoomHeaderButtons z={zoom} onPrint={printLabel} printing={printingLabel} />
             {idProtocolo && projectName ? (
               <>
                 <Text style={styles.headerSep}>|</Text>
@@ -482,9 +506,12 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
                 <Text style={styles.planBtnText}>{t('protoAudit.plans')}</Text>
               </TouchableOpacity>
             )}
-            <View style={[styles.statusBadge, { backgroundColor: statusColor(p.status) }]}>
-              <Text style={styles.statusText}>{statusLabel(p.status)}</Text>
-            </View>
+            {/* v74 — Antes aquí iba la píldora de estado (redundante: el estado ya
+                se muestra dentro de la ficha). Su lugar lo ocupa IMPRIMIR ETIQUETA. */}
+            <TouchableOpacity style={styles.planBtn} onPress={printLabel} disabled={printingLabel}>
+              <Ionicons name={printingLabel ? 'hourglass-outline' : 'print-outline'} size={14} color={Colors.white} />
+              <Text style={styles.planBtnText}>Etiqueta</Text>
+            </TouchableOpacity>
           </View>
         )}
       />

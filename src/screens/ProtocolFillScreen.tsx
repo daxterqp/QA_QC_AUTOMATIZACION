@@ -38,6 +38,7 @@ import { buildFrozenComments } from '@utils/freezeSnapshot';
 import { resolveXrefs } from '@services/XrefResolver';
 import { buildMarkerExpander, bakeMarkersInComments } from '@services/ProtocolGroupingService';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
+import { printProtocolLabel } from '@services/LabelPrintService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { SyncWorker } from '@services/SyncWorker';
 import { GPSCaptureBar } from '@components/GPSCaptureBar';
@@ -86,6 +87,29 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   const [idProtocolo, setIdProtocolo] = useState<string | null>(null);   // v45.3 — tipo de ficha (para agrupamientos)
   const [projectName, setProjectName] = useState('');   // v32 — "Datos generales"
   const zoom = useEnsayoZoom(); // v42d — zoom de la ficha (paneo total / re-encuadrar)
+  // v74 — Imprimir etiqueta del ensayo (QR + código; 50×50 mm → app de la impresora).
+  const [printingLabel, setPrintingLabel] = useState(false);
+  const printLabel = useCallback(async () => {
+    const p = protocol as any;
+    if (!p || printingLabel) return;
+    setPrintingLabel(true);
+    try {
+      await printProtocolLabel({
+        protocolCode: p.protocolCode ?? null,
+        protocolNumber: p.protocolNumber ?? null,
+        idProtocolo,
+        externalId: p.externalId ?? null,
+        protocolUuid: p.id,
+        ensayoDate: p.ensayoDate ?? null,
+        ensayoTime: p.ensayoTime ?? null,
+        projectName,
+      });
+    } catch (e: any) {
+      Alert.alert('Etiqueta', e?.message ?? 'No se pudo generar la etiqueta.');
+    } finally {
+      setPrintingLabel(false);
+    }
+  }, [protocol, printingLabel, idProtocolo, projectName]);
   const [items, setItems] = useState<ProtocolItem[]>([]);
   // v41 — Tablas auxiliares del proyecto (taras, moldes…) para BUSCAR() en fórmulas.
   const [auxTables, setAuxTables] = useState<import('@utils/formulaEval').AuxTables>({});
@@ -818,8 +842,9 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
           <Text style={[styles.miniHeaderTitle, { flex: 1 }]} numberOfLines={1}>
             {(protocol as any).protocolCode ? `${(protocol as any).protocolCode} · ` : ''}{(protocol as any).protocolNumber}
           </Text>
-          {/* v42d — zoom (paneo total / re-encuadrar) también en el llenado. */}
-          <ZoomHeaderButtons z={zoom} />
+          {/* v42d — zoom (paneo total / re-encuadrar) también en el llenado.
+              v74 — el candado dio paso al botón de imprimir etiqueta. */}
+          <ZoomHeaderButtons z={zoom} onPrint={printLabel} printing={printingLabel} />
         </View>
       )}
 
