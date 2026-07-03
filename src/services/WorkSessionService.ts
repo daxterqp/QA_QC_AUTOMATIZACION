@@ -27,7 +27,7 @@ import {
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
-import { startGpsTracking, type TrackingHandle, type GpsResult } from '@hooks/useGpsCapture';
+import { startGpsTracking, ensureLocationPermission, type TrackingHandle, type GpsResult } from '@hooks/useGpsCapture';
 import { shouldKeepGpsPoint, type GpsPointLite } from '@utils/gpsDedup';
 import {
   startBackgroundTracking, stopBackgroundTracking,
@@ -205,6 +205,15 @@ export async function startSession(input: SessionInput): Promise<WorkSession> {
 /** Inicia el watcher GPS para una sesión y registra el handle. */
 async function startTrackerForSession(sessionId: string, projectId: string, intervalSeconds: number): Promise<void> {
   if (activeTrackers.has(sessionId)) return; // ya activo
+  // v73 — startGpsTracking() (useGpsCapture.ts) documenta que "el caller debe
+  // asegurar permisos previamente" pero ningún caller lo hacía: watchPositionAsync
+  // fallaba silencioso sin permiso y el diálogo NATIVO nunca aparecía para
+  // Trazabilidad. Pedimos el permiso ANTES de reservar el slot del tracker.
+  const granted = await ensureLocationPermission();
+  if (!granted) {
+    console.warn('[WorkSession] permiso de ubicación no concedido; GPS de trazabilidad no inicia.');
+    return;
+  }
   // Fix A6: reservar el slot ANTES del await para que un stop()/pause() que
   // llegue mientras startGpsTracking todavía resuelve no cree un tracker
   // huérfano. Si el slot cambió cuando volvemos, abortamos.
