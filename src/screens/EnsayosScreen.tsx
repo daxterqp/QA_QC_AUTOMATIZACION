@@ -62,6 +62,7 @@ import { useI18n } from '@i18n/index';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { pullProjectFromCloud } from '@services/SupabaseSyncService';
 import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Ensayos'>;
 
@@ -113,6 +114,45 @@ function fmtFecha(ymd: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : ymd;
 }
 
+// ── v73 — Agrupamiento configurable del modo "por fecha" ────────────────────
+// Unidades: día (como siempre), semana (con DÍA DE CORTE configurable: la semana
+// va del corte a la última hora del día previo al siguiente corte), mes y año.
+type DateUnit = 'day' | 'week' | 'month' | 'year';
+const MONTHS_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const DATE_UNIT_LABELS: Record<DateUnit, string> = { day: 'Día', week: 'Semana', month: 'Mes', year: 'Año' };
+
+/** Clave de periodo de una fecha YYYY-MM-DD según la unidad. Para 'week' es la
+ *  fecha del día de corte más reciente (≤ fecha). Ordena bien lexicográficamente. */
+function periodKeyOf(ymd: string, unit: DateUnit, weekStart: number): string {
+  if (unit === 'day') return ymd;
+  if (unit === 'month') return ymd.slice(0, 7);
+  if (unit === 'year') return ymd.slice(0, 4);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  d.setDate(d.getDate() - ((d.getDay() - weekStart + 7) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Etiqueta legible del periodo (la de 'day' la maneja el caller con "Hoy"). */
+function periodLabel(key: string, unit: DateUnit): string {
+  if (unit === 'day') return fmtFecha(key);
+  if (unit === 'month') { const [y, mo] = key.split('-'); return `${MONTHS_ES[+mo - 1] ?? mo} ${y}`; }
+  if (unit === 'year') return key;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!m) return key;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  const e = new Date(d); e.setDate(e.getDate() + 6);
+  const f = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
+  return `Semana del ${f(d)} al ${f(e)}`;
+}
+
+// v73 — Paginación incremental: se muestran 20 y se cargan 20 más al llegar al
+// final del scroll (sobre el resultado YA filtrado). Evita renderizar todo el
+// histórico de golpe (escalabilidad con cientos de ensayos).
+const PAGE_SIZE = 20;
+
 export default function EnsayosScreen({ navigation, route }: Props) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -138,11 +178,22 @@ export default function EnsayosScreen({ navigation, route }: Props) {
 
   // ── v32: buscador + filtros cruzados (default: todos) ────────────────────
   const [search, setSearch] = useState('');
-  // v62 — Orden de la lista. Por defecto: CREACIÓN ascendente (antiguos arriba, nuevos abajo →
-  // el "+ Añadir" queda al final). El usuario lo cambia con el modal de orden.
+  // v62 — Orden de la lista. v73: por defecto CREACIÓN descendente (NUEVOS arriba,
+  // antiguos abajo). El usuario lo cambia con el modal de orden.
   const [sortBy, setSortBy] = useState<'creation' | 'ensayo' | 'code'>('creation');
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc, setSortAsc] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  // v73 — Selector de GRUPO (modos tipo/sector): recuadro propio arriba (fuera de
+  // los filtros). Se elige UN tipo/sector en un modal y recién ahí se ven sus
+  // ensayos (la vista con todas las tarjetas desplegables confundía).
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+  // v73 — Agrupamiento del modo fecha (día/semana/mes/año + día de corte semanal).
+  const [dateUnit, setDateUnit] = useState<DateUnit>('day');
+  const [weekStartDay, setWeekStartDay] = useState(1); // 1 = Lunes
+  const [showGroupCfg, setShowGroupCfg] = useState(false);
+  // v73 — Paginación incremental (20 en 20 sobre lo filtrado).
+  const [pageCount, setPageCount] = useState(1);
   // Fecha: RANGO desde/hasta (mismo día = filtra solo ese día).
   const [filterFromMs, setFilterFromMs] = useState<number | null>(null);
   const [filterToMs, setFilterToMs] = useState<number | null>(null);
@@ -168,6 +219,23 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const [horaText, setHoraText] = useState(nowHHMM());
   const [horaTouched, setHoraTouched] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  // v73 — La config de agrupamiento por fecha se persiste POR PROYECTO en el
+  // dispositivo (preferencia de visualización, no dato del proyecto).
+  useEffect(() => {
+    if (mode !== 'date') return;
+    AsyncStorage.getItem(`ensayos_date_grouping:${projectId}`).then(raw => {
+      if (!raw) return;
+      try {
+        const v = JSON.parse(raw);
+        if (v?.unit === 'day' || v?.unit === 'week' || v?.unit === 'month' || v?.unit === 'year') setDateUnit(v.unit);
+        if (Number.isInteger(v?.weekStart) && v.weekStart >= 0 && v.weekStart <= 6) setWeekStartDay(v.weekStart);
+      } catch { /* ignore */ }
+    }).catch(() => {});
+  }, [projectId, mode]);
+  const saveGrouping = useCallback((unit: DateUnit, weekStart: number) => {
+    AsyncStorage.setItem(`ensayos_date_grouping:${projectId}`, JSON.stringify({ unit, weekStart })).catch(() => {});
+  }, [projectId]);
 
   // v32b — Modal de GESTIÓN del ensayo (long-press): editar fecha/hora + eliminar.
   const [manageProto, setManageProto] = useState<any | null>(null);
@@ -212,23 +280,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
           hidden: t.isHidden,
         })));
       } else {
-        // date: fechas distintas (desc) + "Sin fecha" si hay filas pre-v31
-        const dates = new Set<string>();
-        let hasNull = false;
-        for (const p of allProtos as any[]) {
-          if (p.ensayoDate) dates.add(p.ensayoDate);
-          else hasNull = true;
-        }
-        const todayKey = todayEnsayoDate();
-        dates.add(todayKey);   // hoy siempre visible (para adicionar)
-        const ordered = Array.from(dates).sort((a, b) => b.localeCompare(a));
-        const gs: Group[] = ordered.map(d => ({
-          key: `date:${d}`,
-          label: d === todayKey ? t('ensayos.dateToday', { date: fmtFecha(d) }) : fmtFecha(d),
-          ensayoDate: d,
-        }));
-        if (hasNull) gs.push({ key: `date:${SIN_FECHA}`, label: t('ensayos.noDate'), ensayoDate: null });
-        setGroups(gs);
+        // v73 — modo date: los grupos se derivan por PERIODO (día/semana/mes/año)
+        // en el useMemo `dateGroups` (dependen de la config de agrupamiento).
+        setGroups([]);
       }
     } finally {
       setLoading(false);
@@ -300,7 +354,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       if (g.sectorId != null) { if (p.sectorId !== g.sectorId) return false; }
       else if (g.templateId != null) { if (p.templateId !== g.templateId) return false; }
       else if (g.ensayoDate !== undefined) {
-        if (g.ensayoDate === null ? !!p.ensayoDate : p.ensayoDate !== g.ensayoDate) return false;
+        // v73 — el grupo guarda la CLAVE DE PERIODO (día/semana/mes/año).
+        if (g.ensayoDate === null) { if (p.ensayoDate) return false; }
+        else if (!p.ensayoDate || periodKeyOf(p.ensayoDate, dateUnit, weekStartDay) !== g.ensayoDate) return false;
       } else return false;
       // Filtros cruzados (los que NO son el agrupador del modo)
       if (filterFromMs != null || filterToMs != null) {
@@ -331,7 +387,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       if (cmp === 0) cmp = createdMs(a) - createdMs(b);
       return sortAsc ? cmp : -cmp;
     }) as Protocol[];
-  }, [protos, search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds, sortBy, sortAsc]);
+  }, [protos, search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds, sortBy, sortAsc, dateUnit, weekStartDay]);
 
   // v62 — Info de codificación de un ensayo (group_key del correlativo + su seq), espejo de la
   // creación. Para gatear "eliminar último creado" y liberar el contador al borrar el tope.
@@ -611,11 +667,71 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     );
   };
 
-  const sections = useMemo(() => groups.map((g, idx) => {
+  // v73 — Grupos del modo FECHA por periodo (día/semana/mes/año), derivados en vivo
+  // de los ensayos + la config. El periodo de HOY siempre existe (para adicionar).
+  const dateGroups = useMemo<Group[]>(() => {
+    if (mode !== 'date') return [];
+    const keys = new Set<string>();
+    let hasNull = false;
+    for (const p of protos as any[]) {
+      if (p.ensayoDate) keys.add(periodKeyOf(p.ensayoDate, dateUnit, weekStartDay));
+      else hasNull = true;
+    }
+    const todayYmd = todayEnsayoDate();
+    const todayKey = periodKeyOf(todayYmd, dateUnit, weekStartDay);
+    keys.add(todayKey);
+    const ordered = Array.from(keys).sort((a, b) => b.localeCompare(a)); // nuevos arriba
+    const gs: Group[] = ordered.map(k => ({
+      key: `date:${k}`,
+      label: dateUnit === 'day'
+        ? (k === todayYmd ? t('ensayos.dateToday', { date: fmtFecha(k) }) : fmtFecha(k))
+        : periodLabel(k, dateUnit) + (k === todayKey ? ' · actual' : ''),
+      ensayoDate: k,
+    }));
+    if (hasNull) gs.push({ key: `date:${SIN_FECHA}`, label: t('ensayos.noDate'), ensayoDate: null });
+    return gs;
+  }, [mode, protos, dateUnit, weekStartDay, t]);
+
+  // v73 — Grupos visibles: en fecha, todos los periodos; en tipo/sector, SOLO el
+  // seleccionado en el recuadro de arriba (sin selección no se lista nada).
+  const visibleGroups = useMemo<Group[]>(() => {
+    if (mode === 'date') return dateGroups;
+    if (selectedGroupKey == null) return [];
+    return groups.filter(g => g.key === selectedGroupKey);
+  }, [mode, dateGroups, groups, selectedGroupKey]);
+
+  const selectedGroup = useMemo(
+    () => (mode === 'date' ? null : groups.find(g => g.key === selectedGroupKey) ?? null),
+    [mode, groups, selectedGroupKey],
+  );
+
+  const sections = useMemo(() => visibleGroups.map((g, idx) => {
     const items = protosOf(g);
-    const isOpen = expanded.has(g.key) || (filtersActive && items.length > 0);
+    // v73 — tipo/sector: el grupo elegido va SIEMPRE abierto (es la vista).
+    const isOpen = mode !== 'date' || expanded.has(g.key) || (filtersActive && items.length > 0);
     return { group: g, items, isOpen, groupIdx: idx, data: isOpen ? items : [] };
-  }), [groups, protosOf, expanded, filtersActive]);
+  }), [visibleGroups, protosOf, expanded, filtersActive, mode]);
+
+  // v73 — Paginación incremental: presupuesto de PAGE_SIZE·páginas repartido en
+  // orden sobre las secciones abiertas; al llegar al final se suma otra página.
+  const { pagedSections, totalShown, totalItems } = useMemo(() => {
+    let budget = pageCount * PAGE_SIZE;
+    let shown = 0, total = 0;
+    const out = sections.map(s => {
+      if (!s.isOpen || s.data.length === 0) return s;
+      total += s.data.length;
+      const take = Math.min(s.data.length, Math.max(0, budget));
+      budget -= take;
+      shown += take;
+      return take === s.data.length ? s : { ...s, data: s.data.slice(0, take) };
+    });
+    return { pagedSections: out, totalShown: shown, totalItems: total };
+  }, [sections, pageCount]);
+  const hasMore = totalShown < totalItems;
+
+  // Reset de paginación cuando cambia lo que define el listado.
+  useEffect(() => { setPageCount(1); },
+    [search, filterFromMs, filterToMs, filterTemplateIds, filterSectorIds, allowedSampleIds, selectedGroupKey, dateUnit, weekStartDay, sortBy, sortAsc]);
 
   // ── Filtros: qué chips mostrar según el modo ──────────────────────────────
   const showFechaFilter = mode !== 'date';
@@ -638,6 +754,55 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   };
+
+  // v73 — Recuadro selector de tipo/sector (fuera de los filtros, arriba de todo).
+  const renderGroupSelector = () => (
+    <TouchableOpacity style={styles.groupSelector} onPress={() => setShowGroupPicker(true)} activeOpacity={0.8}>
+      <Ionicons name={mode === 'type' ? 'flask' : 'grid'} size={16} color={Colors.primary} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.groupSelectorLabel}>{mode === 'type' ? 'Tipo de ensayo' : 'Sector'}</Text>
+        <Text
+          style={[styles.groupSelectorValue, !selectedGroup && { color: Colors.textMuted, fontWeight: '600' }]}
+          numberOfLines={1}
+        >
+          {selectedGroup ? selectedGroup.label : (mode === 'type' ? 'Selecciona un tipo de ensayo…' : 'Selecciona un sector…')}
+        </Text>
+      </View>
+      <Ionicons name="chevron-down" size={18} color={Colors.textSecondary} />
+    </TouchableOpacity>
+  );
+
+  // v73 — Recuadro de agrupamiento del modo fecha (día/semana/mes/año).
+  const renderDateGroupingBox = () => (
+    <TouchableOpacity style={styles.groupSelector} onPress={() => setShowGroupCfg(true)} activeOpacity={0.8}>
+      <Ionicons name="layers-outline" size={16} color={Colors.primary} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.groupSelectorLabel}>Agrupar por</Text>
+        <Text style={styles.groupSelectorValue} numberOfLines={1}>
+          {DATE_UNIT_LABELS[dateUnit]}{dateUnit === 'week' ? ` · corte: ${DAYS_ES[weekStartDay]}` : ''}
+        </Text>
+      </View>
+      <Ionicons name="chevron-down" size={18} color={Colors.textSecondary} />
+    </TouchableOpacity>
+  );
+
+  const renderListHeader = () => (
+    <View>
+      {(mode === 'type' || mode === 'sector') && renderGroupSelector()}
+      {mode === 'date' && renderDateGroupingBox()}
+      {renderFilters()}
+      {(mode === 'type' || mode === 'sector') && !selectedGroup && (
+        <View style={styles.selectHintWrap}>
+          <Ionicons name="arrow-up-circle-outline" size={30} color={Colors.textMuted} />
+          <Text style={styles.selectHintText}>
+            {mode === 'type'
+              ? 'Elige arriba un tipo de ensayo para ver sus ensayos.'
+              : 'Elige arriba un sector para ver sus ensayos.'}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
 
   const renderFilters = () => (
     <View style={styles.filtersWrap}>
@@ -871,7 +1036,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       />
       {loading ? (
         <View style={styles.loadingWrap}><ActivityIndicator color={Colors.primary} /></View>
-      ) : groups.length === 0 ? (
+      ) : (mode !== 'date' && groups.length === 0) ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="albums-outline" size={36} color={Colors.textMuted} />
           <Text style={styles.emptyText}>
@@ -882,9 +1047,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
         </View>
       ) : (
         <SectionList
-          sections={sections as any}
+          sections={pagedSections as any}
           keyExtractor={(item: any) => item.id}
-          ListHeaderComponent={renderFilters()}
+          ListHeaderComponent={renderListHeader()}
           renderSectionHeader={({ section }: any) => renderGroupHeader(section.group, section.items, section.isOpen, section.groupIdx)}
           renderItem={({ item }: any) => renderProto(item)}
           renderSectionFooter={({ section }: any) => (
@@ -898,12 +1063,93 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               </View>
             ) : null
           )}
+          // v73 — paginación incremental: 20 más al acercarse al final.
+          onEndReached={() => { if (hasMore) setPageCount(c => c + 1); }}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={hasMore ? (
+            <View style={styles.loadMoreWrap}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadMoreText}>Mostrando {totalShown} de {totalItems} · desliza para cargar más</Text>
+            </View>
+          ) : null}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 24 }]}
           stickySectionHeadersEnabled={false}
           refreshing={refreshing}
           onRefresh={onRefresh}
         />
       )}
+
+      {/* ── v73 — Modal: SELECTOR de tipo/sector (selección única) ── */}
+      <Modal visible={showGroupPicker} transparent animationType="fade" onRequestClose={() => setShowGroupPicker(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowGroupPicker(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.pickerCard} onPress={() => { /* swallow */ }}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>{mode === 'type' ? 'Elegir tipo de ensayo' : 'Elegir sector'}</Text>
+              <TouchableOpacity onPress={() => setShowGroupPicker(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={20} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 420 }}>
+              {groups.map(g => {
+                const sel = selectedGroupKey === g.key;
+                const count = (protos as any[]).filter(p =>
+                  g.templateId != null ? p.templateId === g.templateId : p.sectorId === g.sectorId).length;
+                return (
+                  <TouchableOpacity
+                    key={g.key}
+                    style={[styles.pickerItem, sel && styles.pickerItemActive]}
+                    onPress={() => { setSelectedGroupKey(g.key); setShowGroupPicker(false); }}
+                  >
+                    <View style={[styles.radio, sel && styles.radioActive]}>{sel && <View style={styles.radioInner} />}</View>
+                    <Text style={[styles.pickerItemText, sel && { color: Colors.primary, fontWeight: '700' }]} numberOfLines={2}>
+                      {g.label}
+                    </Text>
+                    <Text style={styles.pickerItemCount}>{count}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── v73 — Modal: CONFIG de agrupamiento por fecha ── */}
+      <Modal visible={showGroupCfg} transparent animationType="fade" onRequestClose={() => setShowGroupCfg(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowGroupCfg(false)} style={styles.sortBackdrop}>
+          <TouchableOpacity activeOpacity={1} style={styles.sortSheet} onPress={() => { /* swallow */ }}>
+            <Text style={styles.sortTitle}>Agrupar ensayos por</Text>
+            {(['day', 'week', 'month', 'year'] as DateUnit[]).map(u => {
+              const active = dateUnit === u;
+              return (
+                <TouchableOpacity key={u} onPress={() => { setDateUnit(u); saveGrouping(u, weekStartDay); }} style={[styles.optionRow, active && styles.optionRowActive]}>
+                  <View style={[styles.radio, active && styles.radioActive]}>{active && <View style={styles.radioInner} />}</View>
+                  <Text style={[styles.optionText, active && { color: Colors.primary, fontWeight: '700' }]}>{DATE_UNIT_LABELS[u]}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            {dateUnit === 'week' && (
+              <>
+                <View style={styles.sortDivider} />
+                <Text style={styles.weekCutLabel}>Día de corte de la semana</Text>
+                <Text style={styles.weekCutHint}>La semana va del día de corte hasta la última hora del día previo al siguiente corte.</Text>
+                <View style={styles.dayChipsWrap}>
+                  {DAYS_ES.map((d, i) => {
+                    const active = weekStartDay === i;
+                    return (
+                      <TouchableOpacity key={d} onPress={() => { setWeekStartDay(i); saveGrouping(dateUnit, i); }} style={[styles.dayChip, active && styles.dayChipActive]}>
+                        <Text style={[styles.dayChipText, active && { color: Colors.white, fontWeight: '800' }]}>{d.slice(0, 3)}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+            <TouchableOpacity onPress={() => setShowGroupCfg(false)} style={styles.sortDone}>
+              <Text style={styles.sortDoneText}>Listo</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ── Modal: filtro MULTISELECT de tipo / sector ── */}
       <Modal visible={showFilterPicker != null} transparent animationType="fade" onRequestClose={() => setShowFilterPicker(null)}>
@@ -1237,6 +1483,29 @@ const styles = StyleSheet.create({
   sortDirText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   sortDone: { marginTop: 12, backgroundColor: Colors.primary, borderRadius: Radius.sm, paddingVertical: 11, alignItems: 'center' },
   sortDoneText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
+  // v73 — recuadro selector (tipo/sector) y de agrupamiento por fecha
+  groupSelector: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.white, borderRadius: Radius.md,
+    borderWidth: 1.5, borderColor: Colors.primary + '55',
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10,
+    ...Shadow.subtle,
+  },
+  groupSelectorLabel: { fontSize: 10, fontWeight: '800', color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  groupSelectorValue: { fontSize: 14, fontWeight: '800', color: Colors.navy, marginTop: 1 },
+  selectHintWrap: { alignItems: 'center', gap: 8, paddingVertical: 34, paddingHorizontal: 24 },
+  selectHintText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 19 },
+  // v73 — paginación incremental
+  loadMoreWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  loadMoreText: { fontSize: 11.5, color: Colors.textMuted, fontWeight: '600' },
+  pickerItemCount: { fontSize: 11.5, fontWeight: '800', color: Colors.textSecondary, backgroundColor: Colors.surface, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
+  // v73 — config de agrupamiento por fecha (semana: día de corte)
+  weekCutLabel: { fontSize: 12, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  weekCutHint: { fontSize: 11, color: Colors.textMuted, marginTop: 2, marginBottom: 8, lineHeight: 15 },
+  dayChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  dayChip: { borderRadius: 14, borderWidth: 1.2, borderColor: Colors.border, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: Colors.white },
+  dayChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dayChipText: { fontSize: 11.5, fontWeight: '700', color: Colors.textSecondary },
   renumberBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, paddingVertical: 9, borderRadius: Radius.sm, borderWidth: 1.5, borderColor: Colors.primary, backgroundColor: '#eef2fa' },
   renumberBtnText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
   modalRow: { flexDirection: 'row', gap: 10 },
