@@ -39,11 +39,21 @@ probado en los PDF) y ya usa `expo-print` + `expo-sharing`.
    - `LabelPrintService` conserva la MISMA API pública (`printSampleLabel` /
      `printProtocolLabel`); solo cambia el transporte interno (share → BT).
 
-## Fase 1 — Implementación (hecha)
-- **`src/services/LabelPrintService.ts`** (nuevo): `LABEL_MM=50` parametrizado;
-  `printSampleLabel()` / `printProtocolLabel()` → HTML 142×142 pt (QR 62 pt arriba-izq,
-  código en negrita, líneas de datos, proyecto al pie) → `printToFileAsync({width,height})`
-  → `shareAsync(pdf)`.
+## Fase 1 — Implementación (hecha; iterada tras 1ª prueba del usuario)
+- **Flujo GUARDAR (no share):** el share falló en el equipo del usuario → ahora el PDF se
+  GUARDA vía SAF en una carpeta que el usuario elige UNA vez (se recuerda en AsyncStorage;
+  si revocan el permiso se re-pide). Fallback share solo si cancela/iOS. El usuario abre la
+  app de la impresora y carga el PDF.
+- **Diseño de marca (pedido explícito):** marco redondeado + cabecera con **logo Flow QA/QC**
+  (`src/assets/flowLogoSvg.ts`, generado de `assets/Logos/Flow - QC.svg`) + chip MUESTRA/ENSAYO
+  + código grande + **nombre completo del ensayo** + campos + proyecto al pie. Tipografía:
+  pidió Century Gothic → no existe en Android → se embebe **Didact Gothic** (OFL, gemela
+  geométrica; subset Latín 36 KB, `src/assets/didactGothicFont.ts`) vía @font-face base64, con
+  `font-family: 'Century Gothic', 'FlowGothic'` para usar la real si existiera. Todo negro puro
+  (térmica monocroma).
+- **`src/services/LabelPrintService.ts`**: `LABEL_MM=50` parametrizado;
+  `printSampleLabel()` / `printProtocolLabel()` → HTML 142×142 pt → `printToFileAsync`
+  (base64) → guardado SAF.
 - `ZoomControls.tsx`: candado eliminado (`locked`/`toggleLock` fuera del hook);
   `ZoomHeaderButtons` acepta `onPrint`/`printing`.
 - `ProtocolFillScreen` (miniHeader numérico), `ProtocolAuditScreen` (header numérico y
