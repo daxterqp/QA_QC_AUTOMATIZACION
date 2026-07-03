@@ -53,6 +53,10 @@ export interface ProtocolLabelInput {
   protocolUuid: string;
   ensayoDate?: string | null;      // YYYY-MM-DD
   ensayoTime?: string | null;      // HH:MM
+  /** Responsable de la realización del ensayo (quien llenó). */
+  filledByName?: string | null;
+  /** Responsable de la aprobación (quien firmó). */
+  approvedByName?: string | null;
   projectName: string;
 }
 
@@ -63,57 +67,69 @@ interface LabelField { k: string; v: string }
 
 /** HTML de la etiqueta 50×50 con diseño de marca:
  *  ┌ marco redondeado ───────────────────────────┐
- *  │ [logo]  FLOW QA/QC              ‹MUESTRA›   │  cabecera con doble filete
- *  │ CÓDIGO (grande, tracking)          [ QR ]   │
- *  │ Nombre completo (2 líneas máx)     [ 19mm ] │
- *  │ campo: valor · campo: valor                 │
- *  │ ── proyecto centrado al pie ──              │
+ *  │ [mark] FLOW · QA · QC           ‹MUESTRA›   │  lockup del logo (sin texto aparte)
+ *  │ Nombre completo del                [ QR ]   │  QR SIN marco
+ *  │ ensayo (izquierda)                 [ 18mm ] │
+ *  │                                    CÓDIGO   │  código DEBAJO del QR
+ *  │ campos a TODO lo ancho (fecha, responsables,│
+ *  │ proyecto…)                                  │
+ *  │ ── FLOW · QA · QC al pie ──                 │
  *  └─────────────────────────────────────────────┘
- *  Todo negro puro (térmica monocroma); tipografía embebida. */
+ *  Todo negro puro (térmica monocroma); tipografía embebida.
+ *  NOTA: el logo SVG de marca viene con fill BLANCO (versión para fondos oscuros)
+ *  → se fuerza a negro vía CSS. Cuando exista el "logo de etiquetas" por empresa
+ *  (subible, formato alargado), el lockup del encabezado se reemplaza por esa
+ *  imagen; el pie de marca FLOW · QA · QC se queda siempre.
+ *  El frame va POSICIONADO (inset fijo) + overflow hidden en html/body para que
+ *  el contenido JAMÁS desborde a una 2ª página del PDF. */
 function labelHtml(args: { kind: 'MUESTRA' | 'ENSAYO'; qrSvg: string; code: string; title?: string | null; fields: LabelField[]; projectName: string }): string {
   const rows = args.fields.filter(f => f.v && f.v !== '—').map(f =>
     `<div class="fld"><span class="k">${escapeHtml(f.k)}</span> ${escapeHtml(f.v)}</div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     @font-face { font-family: 'FlowGothic'; src: url(data:font/ttf;base64,${DIDACT_GOTHIC_B64}) format('truetype'); }
-    @page { margin: 0; }
-    html, body { margin: 0; padding: 0; width: ${LABEL_PT}pt; height: ${LABEL_PT}pt; }
-    body { font-family: 'Century Gothic', 'FlowGothic', sans-serif; color: #000; -webkit-print-color-adjust: exact; }
-    .frame { box-sizing: border-box; width: ${LABEL_PT - 6}pt; height: ${LABEL_PT - 6}pt; margin: 3pt;
-             border: 1.4pt solid #000; border-radius: 7pt; padding: 5pt 7pt 4pt; display: flex; flex-direction: column; overflow: hidden; }
-    .hdr { display: flex; align-items: center; gap: 4pt; padding-bottom: 3pt;
-           border-bottom: 1.6pt solid #000; }
-    .hdr .logo { width: 13pt; height: 13pt; flex-shrink: 0; }
-    .hdr .logo svg { width: 13pt; height: 13pt; }
-    .brand { font-size: 7.5pt; font-weight: bold; letter-spacing: 1.4pt; }
-    .kind { margin-left: auto; font-size: 5.6pt; letter-spacing: 1.2pt; border: 0.8pt solid #000;
-            border-radius: 2.5pt; padding: 1pt 3.5pt; font-weight: bold; }
-    .mainrow { display: flex; gap: 5pt; flex: 1; min-height: 0; padding-top: 4pt; }
-    .left { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .code { font-size: 12.5pt; font-weight: bold; letter-spacing: 0.6pt; line-height: 1.08; word-break: break-word; }
-    .title { font-size: 7pt; line-height: 1.25; margin-top: 2.5pt; font-weight: bold;
-             display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .flds { margin-top: 3pt; }
-    .fld { font-size: 6.6pt; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @page { size: ${LABEL_PT}pt ${LABEL_PT}pt; margin: 0; }
+    html, body { margin: 0; padding: 0; width: ${LABEL_PT}pt; height: ${LABEL_PT}pt; overflow: hidden; }
+    body { font-family: 'Century Gothic', 'FlowGothic', sans-serif; color: #000; -webkit-print-color-adjust: exact; position: relative; }
+    .frame { box-sizing: border-box; position: absolute; top: 3pt; left: 3pt; right: 3pt; bottom: 3pt;
+             border: 1.4pt solid #000; border-radius: 7pt; padding: 4pt 6pt 3pt; display: flex; flex-direction: column; overflow: hidden; }
+    .hdr { display: flex; align-items: center; gap: 4pt; padding-bottom: 2.5pt; flex-shrink: 0;
+           border-bottom: 1.5pt solid #000; }
+    .mark { width: 12pt; height: 12pt; flex-shrink: 0; }
+    .mark svg { width: 12pt; height: 12pt; }
+    .mark svg path, .mark svg g { fill: #000 !important; }
+    .word { font-size: 6.4pt; font-weight: bold; letter-spacing: 1.6pt; white-space: nowrap; }
+    .kind { margin-left: auto; font-size: 5.4pt; letter-spacing: 1.1pt; border: 0.8pt solid #000;
+            border-radius: 2.5pt; padding: 1pt 3pt; font-weight: bold; flex-shrink: 0; }
+    .mainrow { display: flex; gap: 5pt; padding-top: 3.5pt; flex-shrink: 0; }
+    .left { flex: 1; min-width: 0; }
+    .title { font-size: 7.4pt; line-height: 1.25; font-weight: bold;
+             display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+    .right { flex-shrink: 0; width: 50pt; display: flex; flex-direction: column; align-items: center; }
+    .right svg { width: 50pt; height: 50pt; display: block; }
+    .qrcode { font-size: 6.4pt; font-weight: bold; letter-spacing: 0.3pt; text-align: center;
+              margin-top: 1pt; word-break: break-all; line-height: 1.1; }
+    .flds { flex: 1; min-height: 0; margin-top: 2.5pt; overflow: hidden; }
+    .fld { font-size: 6.4pt; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .fld .k { font-weight: bold; letter-spacing: 0.3pt; }
-    .qrbox { flex-shrink: 0; align-self: flex-start; border: 0.9pt solid #000; border-radius: 4pt; padding: 2pt; }
-    .qrbox svg { width: 52pt; height: 52pt; display: block; }
-    .foot { border-top: 0.9pt solid #000; margin-top: 3pt; padding-top: 2.5pt; text-align: center;
-            font-size: 6pt; letter-spacing: 0.4pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .foot { flex-shrink: 0; border-top: 0.9pt solid #000; margin-top: 2pt; padding-top: 2pt; text-align: center;
+            font-size: 5.6pt; font-weight: bold; letter-spacing: 1.5pt; white-space: nowrap; overflow: hidden; }
   </style></head><body><div class="frame">
     <div class="hdr">
-      <div class="logo">${FLOW_LOGO_SVG}</div>
-      <div class="brand">FLOW QA/QC</div>
+      <div class="mark">${FLOW_LOGO_SVG}</div>
+      <div class="word">FLOW &middot; QA &middot; QC</div>
       <div class="kind">${args.kind}</div>
     </div>
     <div class="mainrow">
       <div class="left">
-        <div class="code">${escapeHtml(args.code)}</div>
         ${args.title ? `<div class="title">${escapeHtml(args.title)}</div>` : ''}
-        <div class="flds">${rows}</div>
       </div>
-      <div class="qrbox">${args.qrSvg}</div>
+      <div class="right">
+        ${args.qrSvg}
+        <div class="qrcode">${escapeHtml(args.code)}</div>
+      </div>
     </div>
-    <div class="foot">${escapeHtml(args.projectName)}</div>
+    <div class="flds">${rows}</div>
+    <div class="foot">FLOW &middot; QA &middot; QC</div>
   </div></body></html>`;
 }
 
@@ -169,11 +185,14 @@ export async function printSampleLabel(input: SampleLabelInput): Promise<void> {
     : input.condition === 'INALTERADA' ? 'Inalterada' : null;
   const fields: LabelField[] = [
     { k: 'Fecha:', v: fmtYmd(input.sampleDate) },
-    { k: 'Material:', v: [input.materialType, cond].filter(Boolean).join(' · ') || '—' },
     { k: 'Lugar:', v: input.placeName && input.placeName !== '—' ? input.placeName : '—' },
+    { k: 'Proyecto:', v: input.projectName },
   ];
   const html = labelHtml({
-    kind: 'MUESTRA', qrSvg, code: input.sampleCode, title: null, fields,
+    kind: 'MUESTRA', qrSvg, code: input.sampleCode,
+    // El material (+condición) hace de "título" a la izquierda del QR.
+    title: [input.materialType, cond].filter(Boolean).join(' · ') || null,
+    fields,
     projectName: input.projectName,
   });
   await produceLabel(html, `Etiqueta_${input.sampleCode}`);
@@ -189,6 +208,9 @@ export async function printProtocolLabel(input: ProtocolLabelInput): Promise<voi
   const code = input.protocolCode ?? identifier;
   const fields: LabelField[] = [
     { k: 'Fecha:', v: `${fmtYmd(input.ensayoDate)}${input.ensayoTime ? ` · ${input.ensayoTime}` : ''}` },
+    { k: 'Realizó:', v: input.filledByName ?? '—' },
+    { k: 'Aprobó:', v: input.approvedByName ?? '—' },
+    { k: 'Proyecto:', v: input.projectName },
   ];
   const html = labelHtml({
     kind: 'ENSAYO', qrSvg, code,

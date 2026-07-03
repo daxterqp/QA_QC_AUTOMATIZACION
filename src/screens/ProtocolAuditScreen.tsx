@@ -150,6 +150,8 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         protocolUuid: pr.id,
         ensayoDate: pr.ensayoDate ?? null,
         ensayoTime: pr.ensayoTime ?? null,
+        filledByName: filledByName !== '—' ? filledByName : null,
+        approvedByName: signedByName !== '—' ? signedByName : null,
         projectName,
       });
     } catch (e: any) {
@@ -157,7 +159,7 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
     } finally {
       setPrintingLabel(false);
     }
-  }, [protocol, printingLabel, idProtocolo, projectName]);
+  }, [protocol, printingLabel, idProtocolo, projectName, filledByName, signedByName]);
 
   // v42 — Frescura de los llamados entre ensayos (@código): badge "desactualizado".
   const [xrefStale, setXrefStale] = useState(false);

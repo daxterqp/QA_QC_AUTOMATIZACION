@@ -17,7 +17,7 @@ import type { RootStackParamList } from '@navigation/types';
 import {
   database, protocolsCollection, protocolItemsCollection,
   locationsCollection, plansCollection, evidencesCollection, projectsCollection,
-  labAuxTablesCollection, protocolTemplatesCollection,
+  labAuxTablesCollection, protocolTemplatesCollection, usersCollection,
 } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
@@ -94,6 +94,17 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
     if (!p || printingLabel) return;
     setPrintingLabel(true);
     try {
+      // Responsables: quien llenó (o el usuario actual si aún no se envía) y
+      // quien aprobó (si ya está firmado) — resueltos de la tabla users.
+      const nameOf = async (id: string | null | undefined): Promise<string | null> => {
+        if (!id) return null;
+        try {
+          const u: any = await usersCollection.find(id);
+          return [u?.name, u?.apellido].filter(Boolean).join(' ').trim() || u?.name || null;
+        } catch { return null; }
+      };
+      const filledByName = (await nameOf(p.filledById)) ?? currentUser?.name ?? null;
+      const approvedByName = await nameOf(p.signedById);
       await printProtocolLabel({
         protocolCode: p.protocolCode ?? null,
         protocolNumber: p.protocolNumber ?? null,
@@ -102,6 +113,8 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
         protocolUuid: p.id,
         ensayoDate: p.ensayoDate ?? null,
         ensayoTime: p.ensayoTime ?? null,
+        filledByName,
+        approvedByName,
         projectName,
       });
     } catch (e: any) {
@@ -109,7 +122,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
     } finally {
       setPrintingLabel(false);
     }
-  }, [protocol, printingLabel, idProtocolo, projectName]);
+  }, [protocol, printingLabel, idProtocolo, projectName, currentUser]);
   const [items, setItems] = useState<ProtocolItem[]>([]);
   // v41 — Tablas auxiliares del proyecto (taras, moldes…) para BUSCAR() en fórmulas.
   const [auxTables, setAuxTables] = useState<import('@utils/formulaEval').AuxTables>({});
