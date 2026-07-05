@@ -24,8 +24,9 @@ import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { projectSectorsCollection } from '@db/index';
 import {
-  type AIChatMessage, type AIChatSession, deleteSession, loadSessions,
-  newSessionId, requestNarration, saveSession, sendChatMessage, sessionTitleFrom,
+  type AIChatMessage, type AIChatSession, deleteNarrationFile, deleteSession,
+  loadSessions, newSessionId, requestNarration, saveSession, sendChatMessage,
+  sessionTitleFrom,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
@@ -98,45 +99,60 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [loadingSpeechId, setLoadingSpeechId] = useState<string | null>(null); // generando
   const playerRef = useRef<AudioPlayerLite | null>(null);
   const playerSubRef = useRef<{ remove: () => void } | null>(null);
+  const audioUriRef = useRef<string | null>(null);
+  // Token de vuelo: stop/unmount lo incrementa → una narración que resuelva
+  // DESPUÉS queda invalidada (no crea reproductor fantasma). También hace de
+  // guard síncrono contra doble tap (el estado React llega tarde).
+  const speechReqRef = useRef(0);
+  const speechBusyRef = useRef(false);
 
   const stopSpeech = useCallback(() => {
+    speechReqRef.current++;
     playerSubRef.current?.remove();
     playerSubRef.current = null;
     try { playerRef.current?.remove(); } catch { /* ya liberado */ }
     playerRef.current = null;
+    if (audioUriRef.current) { deleteNarrationFile(audioUriRef.current); audioUriRef.current = null; }
     setSpeakingId(null);
   }, []);
 
-  // Liberar el reproductor al salir de la pantalla.
+  // Liberar el reproductor (e invalidar narraciones en vuelo) al salir.
   useEffect(() => stopSpeech, [stopSpeech]);
 
   const toggleSpeech = useCallback(async (item: AIChatMessage) => {
     if (speakingId === item.id) { stopSpeech(); return; }
-    if (loadingSpeechId) return; // ya hay una narración generándose
+    if (speechBusyRef.current) return; // ya hay una narración generándose
     const audio = loadExpoAudio();
     if (!audio) {
       Alert.alert('Función no disponible', 'La voz requiere reinstalar la aplicación (nuevo módulo de audio).');
       return;
     }
     stopSpeech();
+    speechBusyRef.current = true;
+    const reqId = speechReqRef.current;
     setLoadingSpeechId(item.id);
     try {
       const uri = await requestNarration(projectId, item.text);
+      if (speechReqRef.current !== reqId) { deleteNarrationFile(uri); return; } // stop/back durante la espera
       await audio.setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
       const player = audio.createAudioPlayer({ uri });
       playerRef.current = player;
+      audioUriRef.current = uri;
       playerSubRef.current = player.addListener('playbackStatusUpdate', s => {
         if (s?.didJustFinish) stopSpeech();
       });
       setSpeakingId(item.id);
       player.play();
     } catch (e) {
-      stopSpeech();
-      Alert.alert('Voz', e instanceof Error ? e.message : 'No se pudo generar la narración.');
+      if (speechReqRef.current === reqId) {
+        stopSpeech();
+        Alert.alert('Voz', e instanceof Error ? e.message : 'No se pudo generar la narración.');
+      }
     } finally {
-      setLoadingSpeechId(null);
+      speechBusyRef.current = false;
+      setLoadingSpeechId(prev => (prev === item.id ? null : prev));
     }
-  }, [speakingId, loadingSpeechId, projectId, stopSpeech]);
+  }, [speakingId, projectId, stopSpeech]);
 
   // Chips dinámicos: la pregunta de ejemplo usa el PRIMER sector real del
   // proyecto (base local) para que la consulta siempre tenga sentido.
@@ -153,12 +169,16 @@ export default function AIChatScreen({ navigation, route }: Props) {
   }, [projectId]);
 
   const messages = session?.messages ?? [];
+  // Las burbujas de error ("⚠ …") NO son respuestas reales del asistente:
+  // no cuentan para el saludo ni viajan al modelo como historial.
+  const isErrorMsg = (m: AIChatMessage) => m.role === 'assistant' && m.text.startsWith('⚠');
   // Saludo formal SOLO en el primer intercambio de la sesión.
-  const isFirstTurn = useMemo(() => !messages.some(m => m.role === 'assistant'), [messages]);
+  const isFirstTurn = useMemo(() => !messages.some(m => m.role === 'assistant' && !isErrorMsg(m)), [messages]);
 
   const startNewSession = useCallback(() => {
+    stopSpeech();
     setSession({ id: newSessionId(), titulo: 'Nueva conversación', createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
-  }, []);
+  }, [stopSpeech]);
 
   useEffect(() => { startNewSession(); }, [startNewSession]);
 
@@ -168,9 +188,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
   }, [projectId]);
 
   const resumeSession = useCallback((s: AIChatSession) => {
+    stopSpeech();
     setSession(s);
     setShowHistory(false);
-  }, []);
+  }, [stopSpeech]);
 
   const removeSession = useCallback((s: AIChatSession) => {
     Alert.alert('Eliminar conversación', `¿Eliminar "${s.titulo}" del historial?`, [
@@ -186,13 +207,22 @@ export default function AIChatScreen({ navigation, route }: Props) {
     ]);
   }, [projectId, session?.id, startNewSession]);
 
+  // Guard SÍNCRONO contra doble envío (dos taps en el mismo frame ven el
+  // estado `sending` todavía en false) + id de la sesión con envío en vuelo
+  // (los TypingDots solo se muestran en ESA sesión).
+  const sendingRef = useRef(false);
+  const [sendingSessionId, setSendingSessionId] = useState<string | null>(null);
+
   const send = useCallback(async (text: string) => {
     const msg = text.trim();
-    if (!msg || sending || !session) return;
+    if (!msg || sendingRef.current || !session) return;
+    sendingRef.current = true;
     setInput('');
     setSending(true);
+    setSendingSessionId(session.id);
 
-    const userMsg: AIChatMessage = { id: `u-${Date.now()}`, role: 'user', text: msg, at: Date.now() };
+    const stamp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const userMsg: AIChatMessage = { id: `u-${stamp()}`, role: 'user', text: msg, at: Date.now() };
     const base: AIChatSession = {
       ...session,
       titulo: session.messages.length === 0 ? sessionTitleFrom(msg) : session.titulo,
@@ -201,37 +231,45 @@ export default function AIChatScreen({ navigation, route }: Props) {
     };
     setSession(base);
 
+    // Si el usuario cambió de sesión mientras la respuesta estaba en vuelo, NO
+    // pisar la sesión visible: la respuesta se persiste igual en el historial.
+    const applyResult = (next: AIChatSession) => {
+      setSession(prev => (prev && prev.id === base.id ? next : prev));
+      saveSession(projectId, next).catch(() => {});
+    };
+
     try {
-      const history = base.messages.slice(0, -1).map(m => ({ role: m.role, content: m.text }));
+      const history = base.messages.slice(0, -1)
+        .filter(m => !isErrorMsg(m))
+        .map(m => ({ role: m.role, content: m.text }));
       const res = await sendChatMessage({ projectId, message: msg, history, isFirstTurn });
       const aiMsg: AIChatMessage = {
-        id: `a-${Date.now()}`, role: 'assistant', text: res.reply,
+        id: `a-${stamp()}`, role: 'assistant', text: res.reply,
         ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
         at: Date.now(),
       };
-      const next = { ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() };
-      setSession(next);
-      saveSession(projectId, next).catch(() => {});
+      applyResult({ ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() });
     } catch (e) {
       const errMsg: AIChatMessage = {
-        id: `e-${Date.now()}`, role: 'assistant',
+        id: `e-${stamp()}`, role: 'assistant',
         text: `⚠ ${e instanceof Error ? e.message : 'No pude responder. Intente de nuevo.'}`,
         at: Date.now(),
       };
-      const next = { ...base, messages: [...base.messages, errMsg], updatedAt: Date.now() };
-      setSession(next);
-      saveSession(projectId, next).catch(() => {});
+      applyResult({ ...base, messages: [...base.messages, errMsg], updatedAt: Date.now() });
     } finally {
+      sendingRef.current = false;
       setSending(false);
+      setSendingSessionId(null);
     }
-  }, [projectId, session, sending, isFirstTurn]);
+  }, [projectId, session, isFirstTurn]);
 
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
     const hasChart = !isUser && !!item.chartSvg;
-    // El gráfico necesita ancho: burbuja casi a todo lo ancho, 16:9 (viewBox 640×360).
-    const chartW = Math.min(winWidth * 0.92 - 26 - 24, 640); // - avatar/gaps - padding burbuja
+    // Ancho del gráfico (viewBox 640×360): ancho de pantalla menos padding de la
+    // lista (14×2), avatar+gap (33) y padding de la burbuja (12×2) — sin desborde.
+    const chartW = Math.min(winWidth - 28 - 33 - 24 - 2, 640);
     return (
       <View style={[styles.msgRow, isUser ? styles.msgRowUser : styles.msgRowAI]}>
         {!isUser && (
@@ -319,7 +357,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
             renderItem={renderMessage}
             contentContainerStyle={styles.listContent}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-            ListFooterComponent={sending ? (
+            ListFooterComponent={sending && sendingSessionId === session?.id ? (
               <View style={[styles.msgRow, styles.msgRowAI]}>
                 <View style={styles.avatar}><Ionicons name="sparkles" size={13} color={Colors.white} /></View>
                 <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>

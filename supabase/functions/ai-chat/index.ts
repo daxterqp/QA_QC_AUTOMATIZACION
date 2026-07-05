@@ -80,6 +80,9 @@ Deno.serve(async (req: Request) => {
         .slice(-MAX_HISTORY_TURNS)
         .map(m => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_CHARS) }))
       : [];
+    // La Messages API exige que el PRIMER mensaje sea del usuario: el recorte
+    // de arriba puede dejar un assistant huérfano al inicio (400 de Anthropic).
+    while (history.length > 0 && history[0].role === "assistant") history.shift();
 
     // ── Acceso al proyecto + tier del modelo (RLS: si no tiene acceso, viene vacío) ──
     const { data: proj } = await supabase.from("projects")

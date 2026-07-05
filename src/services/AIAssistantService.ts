@@ -42,21 +42,23 @@ export async function sendChatMessage(args: {
     },
   });
   if (error) {
-    // FunctionsHttpError trae el Response: extraer el mensaje del backend si existe.
-    // deno/edge devuelve { error: '...' } con status != 2xx.
-    try {
-      const ctx = (error as { context?: Response }).context;
-      if (ctx) {
-        const body = await ctx.json();
-        if (body?.error) throw new Error(String(body.error));
-      }
-    } catch (inner) {
-      if (inner instanceof Error && inner.message) throw inner;
-    }
-    throw new Error('No se pudo contactar al asistente. Revise su conexión.');
+    throw new Error(await extractServerError(error, 'No se pudo contactar al asistente. Revise su conexión.'));
   }
   if (!data?.reply) throw new Error(String(data?.error ?? 'Respuesta vacía del asistente.'));
   return data as AIChatReply;
+}
+
+/** FunctionsHttpError trae el Response del backend ({ error: '...' }): extraer
+ *  el mensaje si existe; si el cuerpo no es JSON, caer al mensaje genérico. */
+async function extractServerError(error: unknown, fallback: string): Promise<string> {
+  try {
+    const ctx = (error as { context?: Response }).context;
+    if (ctx) {
+      const body = await ctx.json();
+      if (body?.error) return String(body.error);
+    }
+  } catch { /* cuerpo no-JSON: usar fallback */ }
+  return fallback;
 }
 
 // ── Narración por voz (Fase 3: Edge Function `ai-tts` → ElevenLabs) ─────────
@@ -70,22 +72,18 @@ export async function requestNarration(projectId: string, text: string): Promise
     body: { projectId, text },
   });
   if (error) {
-    try {
-      const ctx = (error as { context?: Response }).context;
-      if (ctx) {
-        const body = await ctx.json();
-        if (body?.error) throw new Error(String(body.error));
-      }
-    } catch (inner) {
-      if (inner instanceof Error && inner.message) throw inner;
-    }
-    throw new Error('No se pudo generar la voz. Revise su conexión.');
+    throw new Error(await extractServerError(error, 'No se pudo generar la voz. Revise su conexión.'));
   }
   const b64 = data?.audioBase64;
   if (typeof b64 !== 'string' || !b64) throw new Error(String(data?.error ?? 'Audio vacío.'));
   const uri = `${FileSystem.cacheDirectory}ai-tts-${Date.now()}.mp3`;
   await FileSystem.writeAsStringAsync(uri, b64, { encoding: FileSystem.EncodingType.Base64 });
   return uri;
+}
+
+/** Borra el MP3 temporal de una narración ya reproducida (best-effort). */
+export async function deleteNarrationFile(uri: string): Promise<void> {
+  try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* cache: el SO purga */ }
 }
 
 // ── Historial de sesiones (LOCAL, por proyecto) ──────────────────────────────
@@ -109,7 +107,18 @@ export interface AIChatSession {
 }
 
 const MAX_SESSIONS = 20;
+/** Tope de mensajes persistidos por sesión (en memoria no se limita). */
+const MAX_MSGS_PER_SESSION = 200;
+/** Presupuesto de bytes de la clave completa: Android revienta AsyncStorage
+ *  (CursorWindow ~2 MB por fila) y el catch de load devolvería [] — un
+ *  siguiente save consolidaría el borrado de TODO el historial. */
+const MAX_STORE_BYTES = 1_500_000;
 const keyFor = (projectId: string) => `ai_chat_sessions:${projectId}`;
+
+const slimSession = (s: AIChatSession): AIChatSession =>
+  s.messages.length > MAX_MSGS_PER_SESSION
+    ? { ...s, messages: s.messages.slice(-MAX_MSGS_PER_SESSION) }
+    : s;
 
 export async function loadSessions(projectId: string): Promise<AIChatSession[]> {
   try {
@@ -127,9 +136,26 @@ export async function saveSession(projectId: string, session: AIChatSession): Pr
   try {
     const all = await loadSessions(projectId);
     const rest = all.filter(s => s.id !== session.id);
-    // Poda: las más recientes primero, tope MAX_SESSIONS.
-    const next = [session, ...rest].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_SESSIONS);
-    await AsyncStorage.setItem(keyFor(projectId), JSON.stringify(next));
+    // Poda: las más recientes primero, tope MAX_SESSIONS y tope de mensajes.
+    let next = [session, ...rest]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_SESSIONS)
+      .map(slimSession);
+    let payload = JSON.stringify(next);
+    // Presupuesto de bytes: podar sesiones antiguas hasta caber.
+    while (payload.length > MAX_STORE_BYTES && next.length > 1) {
+      next = next.slice(0, next.length - 1);
+      payload = JSON.stringify(next);
+    }
+    if (payload.length > MAX_STORE_BYTES && next.length === 1) {
+      // Sesión única gigante: despojar los gráficos salvo los 5 más recientes.
+      const only = next[0];
+      const msgs = only.messages.map((m, i, arr) =>
+        m.chartSvg && i < arr.length - 5 ? { ...m, chartSvg: undefined } : m);
+      next = [{ ...only, messages: msgs }];
+      payload = JSON.stringify(next);
+    }
+    await AsyncStorage.setItem(keyFor(projectId), payload);
   } catch {
     /* best-effort: el chat sigue funcionando aunque no persista */
   }

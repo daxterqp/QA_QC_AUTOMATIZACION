@@ -35,8 +35,11 @@ const dmy = (ymd: string) => {
   return m ? `${m[3]}/${m[2]}` : ymd;
 };
 
-/** SVG de línea con tendencia. Devuelve '' si hay <2 puntos. */
-export function renderTrendChartSvg(title: string, points: ChartPoint[]): string {
+/** SVG de línea con tendencia. Devuelve '' si hay <2 puntos válidos. */
+export function renderTrendChartSvg(title: string, rawPoints: ChartPoint[]): string {
+  // Defensa: una fecha no parseable produciría cx="NaN" y el SVG no renderiza.
+  const points = rawPoints.filter(p =>
+    Number.isFinite(new Date(p.x + 'T00:00:00Z').getTime()) && Number.isFinite(p.y));
   if (points.length < 2) return '';
   const xs = points.map(p => new Date(p.x + 'T00:00:00Z').getTime());
   const ys = points.map(p => p.y);

@@ -55,7 +55,13 @@ function resolveByName<T extends { nombre: string }>(items: T[], query: string):
   const prefix = items.filter(i => norm(i.nombre).startsWith(q));
   if (prefix.length === 1) return { match: prefix[0] };
   if (prefix.length > 1) return { candidatos: prefix };
-  const contains = items.filter(i => norm(i.nombre).includes(q) || q.includes(norm(i.nombre)));
+  const contains = items.filter(i => {
+    const n = norm(i.nombre);
+    if (!n) return false; // nombre vacío: jamás matchea (q.includes('') es true)
+    // La dirección q ⊇ nombre solo con nombres de ≥3 chars — un sector "A"
+    // matchearía cualquier consulta que contenga esa letra.
+    return n.includes(q) || (n.length >= 3 && q.includes(n));
+  });
   if (contains.length === 1) return { match: contains[0] };
   return { candidatos: contains };
 }
@@ -161,19 +167,35 @@ async function resolveFilters(supabase: SupabaseClient, projectId: string, f: Co
   return { ok: true, templateId, sectorId };
 }
 
-async function fetchRows(supabase: SupabaseClient, projectId: string, f: CommonFilters, resolved: { templateId?: string; sectorId?: string }, limit = 2000): Promise<SummaryRowLite[]> {
+interface FetchResult {
+  /** Filas en orden ASCENDENTE por fecha (tope `limit`; si se trunca, se descarta lo más ANTIGUO). */
+  rows: SummaryRowLite[];
+  /** Total EXACTO del filtro en la base (puede ser > rows.length). */
+  total: number;
+}
+
+async function fetchRows(supabase: SupabaseClient, projectId: string, f: CommonFilters, resolved: { templateId?: string; sectorId?: string }, limit = 2000): Promise<FetchResult> {
   let q = supabase.from('protocol_summary_rows')
-    .select('ensayo_date, template_id, sector_id, sector_name, location_name, protocol_code, status, values_json')
+    .select('ensayo_date, template_id, sector_id, sector_name, location_name, protocol_code, status, values_json', { count: 'exact' })
     .eq('project_id', projectId);
   if (isYmd(f.desde)) q = q.gte('ensayo_date', f.desde);
   if (isYmd(f.hasta)) q = q.lte('ensayo_date', f.hasta);
   if (resolved.templateId) q = q.eq('template_id', resolved.templateId);
   if (resolved.sectorId) q = q.eq('sector_id', resolved.sectorId);
   if (f.estado) q = q.eq('status', f.estado);
-  const { data, error } = await q.order('ensayo_date', { ascending: true }).limit(limit);
+  // Descendente + reverse: si el filtro excede `limit`, se pierde lo más
+  // ANTIGUO (no lo más reciente, que es lo que el usuario suele preguntar).
+  const { data, error, count } = await q
+    .order('ensayo_date', { ascending: false, nullsFirst: false })
+    .limit(limit);
   if (error) throw new Error(error.message);
-  return (data ?? []) as SummaryRowLite[];
+  const rows = ((data ?? []) as SummaryRowLite[]).reverse();
+  return { rows, total: count ?? rows.length };
 }
+
+/** Mensaje estándar cuando el detalle se calculó sobre una página truncada. */
+const truncNote = (shown: number, total: number) =>
+  shown < total ? `Detalle calculado sobre los ${shown} ensayos más recientes de ${total} — acota el rango de fechas para exactitud.` : undefined;
 
 /** Valor numérico de una columna del values_json (acepta número o string numérica). */
 function numValue(vj: Record<string, unknown> | null, key: string): number | null {
@@ -235,11 +257,13 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters & { agrupar?: DateUnit }) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const rows = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const unit: DateUnit = input.agrupar && ['dia', 'semana', 'mes'].includes(input.agrupar) ? input.agrupar : 'total';
         const porTipo = new Map<string, number>();
         for (const r of rows) porTipo.set(r.template_id ?? '?', (porTipo.get(r.template_id ?? '?') ?? 0) + 1);
-        const out: Record<string, unknown> = { total: rows.length, por_tipo: Array.from(porTipo, ([template_id, cantidad]) => ({ template_id, cantidad })) };
+        const out: Record<string, unknown> = { total, por_tipo: Array.from(porTipo, ([template_id, cantidad]) => ({ template_id, cantidad })) };
+        const nota = truncNote(rows.length, total);
+        if (nota) out.advertencia = nota;
         if (unit !== 'total') {
           const buckets = new Map<string, number>();
           for (const r of rows) {
@@ -267,12 +291,12 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters & { limite?: number }) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const rows = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const limite = Math.min(Math.max(input.limite ?? 10, 1), 20);
         const recent = rows.slice(-limite).reverse();
         return {
           mostrando: recent.length,
-          total_filtrado: rows.length,
+          total_filtrado: total,
           ensayos: recent.map(r => ({
             codigo: r.protocol_code, fecha: r.ensayo_date, template_id: r.template_id,
             sector: r.sector_name, ubicacion: r.location_name, estado: r.status,
@@ -300,10 +324,10 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         if (!res.templateId && !input.tipo_nombre) {
           return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre para la serie (una columna pertenece a un tipo de ensayo).' };
         }
-        const rows = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const points: { fecha: string; valor: number }[] = [];
         for (const r of rows) {
-          if (!r.ensayo_date) continue;
+          if (!isYmd(r.ensayo_date)) continue; // fecha malformada → NaN en la tendencia
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ fecha: r.ensayo_date, valor: v });
         }
@@ -313,6 +337,7 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         const slope = linearSlopePerDay(points.map(p => ({ x: ymdToDays(p.fecha) - xs0, y: p.valor })));
         const capped = points.length > 200 ? points.filter((_, i) => i % Math.ceil(points.length / 200) === 0) : points;
         return {
+          ...(truncNote(rows.length, total) ? { advertencia: truncNote(rows.length, total) } : {}),
           n: points.length,
           puntos: capped,
           promedio: ys.reduce((a, b) => a + b, 0) / ys.length,
@@ -343,6 +368,13 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         additionalProperties: false,
       },
       execute: async (input: CommonFilters & { column_key: string; periodo_a: { desde: string; hasta: string }; periodo_b: { desde: string; hasta: string }; operacion?: string }) => {
+        // Fechas malformadas NO deben ignorarse en silencio (el rango pasaría a
+        // ser toda la historia y el delta sería falso).
+        for (const [nombre, p] of [['periodo_a', input.periodo_a], ['periodo_b', input.periodo_b]] as const) {
+          if (!p || !isYmd(p.desde) || !isYmd(p.hasta)) {
+            return { error: 'fecha_invalida', periodo: nombre, mensaje: 'desde/hasta deben ser fechas YYYY-MM-DD válidas.' };
+          }
+        }
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
         const agg = (vals: number[]): number | null => {
@@ -355,7 +387,7 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           }
         };
         const grab = async (p: { desde: string; hasta: string }) => {
-          const rows = await fetchRows(supabase, projectId, { ...input, desde: p.desde, hasta: p.hasta }, res);
+          const { rows } = await fetchRows(supabase, projectId, { ...input, desde: p.desde, hasta: p.hasta }, res);
           return rows.map(r => numValue(r.values_json, input.column_key)).filter((v): v is number => v != null);
         };
         const [va, vb] = await Promise.all([grab(input.periodo_a), grab(input.periodo_b)]);
@@ -390,10 +422,10 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         if (!res.templateId && !input.tipo_nombre) {
           return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: una columna pertenece a un tipo de ensayo (sin él se mezclarían valores de tipos distintos).' };
         }
-        const rows = await fetchRows(supabase, projectId, input, res);
+        const { rows } = await fetchRows(supabase, projectId, input, res);
         const points: { x: string; y: number }[] = [];
         for (const r of rows) {
-          if (!r.ensayo_date) continue;
+          if (!isYmd(r.ensayo_date)) continue; // fecha malformada → NaN en el SVG
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ x: r.ensayo_date, y: v });
         }
@@ -434,22 +466,27 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
         let q = supabase.from('samples')
-          .select('sample_code, sample_date, material_type, condition, sector_id')
+          .select('sample_code, sample_date, material_type, condition, sector_id', { count: 'exact' })
           .eq('project_id', projectId);
         if (isYmd(input.desde)) q = q.gte('sample_date', input.desde);
         if (isYmd(input.hasta)) q = q.lte('sample_date', input.hasta);
         if (res.sectorId) q = q.eq('sector_id', res.sectorId);
-        const { data, error } = await q.order('sample_date', { ascending: false }).limit(1000);
+        const { data, error, count } = await q
+          .order('sample_date', { ascending: false, nullsFirst: false })
+          .limit(1000);
         if (error) throw new Error(error.message);
         const rows = data ?? [];
+        const total = count ?? rows.length;
         const by = (key: 'material_type' | 'condition') => {
           const m = new Map<string, number>();
           for (const r of rows) m.set(String(r[key] ?? 'sin dato'), (m.get(String(r[key] ?? 'sin dato')) ?? 0) + 1);
           return Array.from(m, ([valor, cantidad]) => ({ valor, cantidad }));
         };
         const limite = Math.min(Math.max(input.limite ?? 5, 1), 20);
+        const nota = rows.length < total ? `Desglose calculado sobre las ${rows.length} muestras más recientes de ${total}.` : undefined;
         return {
-          total: rows.length,
+          ...(nota ? { advertencia: nota } : {}),
+          total,
           por_material: by('material_type'),
           por_condicion: by('condition'),
           recientes: rows.slice(0, limite).map(r => ({ codigo: r.sample_code, fecha: r.sample_date, material: r.material_type, condicion: r.condition })),
@@ -474,20 +511,32 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const rows = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const counts = { SUBMITTED: 0, APPROVED: 0, REJECTED: 0 } as Record<string, number>;
         for (const r of rows) counts[r.status ?? '?'] = (counts[r.status ?? '?'] ?? 0) + 1;
-        // Motivos de rechazo recientes (tabla protocols, RLS aplica).
-        const { data: rej } = await supabase.from('protocols')
-          .select('protocol_code, rejection_reason, ensayo_date')
-          .eq('project_id', projectId).eq('status', 'REJECTED')
-          .not('rejection_reason', 'is', null)
-          .order('updated_at', { ascending: false }).limit(5);
+        // Motivos de rechazo: SOLO de los ensayos que pasaron el filtro (fecha/
+        // tipo/sector) — no los últimos 5 de todo el proyecto.
+        const rejCodes = rows
+          .filter(r => r.status === 'REJECTED' && r.protocol_code)
+          .map(r => r.protocol_code as string)
+          .slice(-30);
+        let rechazos: { codigo: string | null; fecha: string | null; motivo: string | null }[] = [];
+        if (rejCodes.length > 0) {
+          const { data: rej } = await supabase.from('protocols')
+            .select('protocol_code, rejection_reason, ensayo_date')
+            .eq('project_id', projectId)
+            .in('protocol_code', rejCodes)
+            .not('rejection_reason', 'is', null)
+            .order('updated_at', { ascending: false }).limit(5);
+          rechazos = (rej ?? []).map(r => ({ codigo: r.protocol_code, fecha: r.ensayo_date, motivo: r.rejection_reason }));
+        }
+        const nota = truncNote(rows.length, total);
         return {
+          ...(nota ? { advertencia: nota } : {}),
           en_revision: counts.SUBMITTED ?? 0,
           aprobados: counts.APPROVED ?? 0,
           rechazados: counts.REJECTED ?? 0,
-          rechazos_recientes: (rej ?? []).map(r => ({ codigo: r.protocol_code, fecha: r.ensayo_date, motivo: r.rejection_reason })),
+          rechazos_recientes: rechazos,
         };
       },
     },
@@ -503,19 +552,24 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         additionalProperties: false,
       },
       execute: async (input: { estado?: 'OPEN' | 'RESOLVED'; limite?: number }) => {
-        let q = supabase.from('non_conformities')
-          .select('description, status, resolution_notes, created_at')
-          .eq('project_id', projectId);
-        if (input.estado) q = q.eq('status', input.estado);
-        const { data, error } = await q.order('created_at', { ascending: false }).limit(500);
-        if (error) throw new Error(error.message);
-        const rows = data ?? [];
-        const abiertas = rows.filter(r => r.status === 'OPEN').length;
-        const resueltas = rows.filter(r => r.status === 'RESOLVED').length;
         const limite = Math.min(Math.max(input.limite ?? 5, 1), 20);
+        // Conteos EXACTOS del total (head+count) — nunca sobre una página.
+        const [totQ, openQ, listQ] = await Promise.all([
+          supabase.from('non_conformities').select('id', { count: 'exact', head: true }).eq('project_id', projectId),
+          supabase.from('non_conformities').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'OPEN'),
+          (input.estado
+            ? supabase.from('non_conformities').select('description, status, resolution_notes, created_at').eq('project_id', projectId).eq('status', input.estado)
+            : supabase.from('non_conformities').select('description, status, resolution_notes, created_at').eq('project_id', projectId)
+          ).order('created_at', { ascending: false }).limit(limite),
+        ]);
+        if (listQ.error) throw new Error(listQ.error.message);
+        const total = totQ.count ?? 0;
+        const abiertas = openQ.count ?? 0;
         return {
-          abiertas, resueltas, total: rows.length,
-          recientes: rows.slice(0, limite).map(r => ({
+          abiertas,
+          resueltas: Math.max(0, total - abiertas),
+          total,
+          recientes: (listQ.data ?? []).map(r => ({
             descripcion: String(r.description ?? '').slice(0, 200),
             estado: r.status === 'OPEN' ? 'abierta' : 'resuelta',
             resolucion: r.resolution_notes ? String(r.resolution_notes).slice(0, 200) : null,
@@ -536,20 +590,27 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       },
       execute: async (input: { desde?: string; hasta?: string }) => {
         let q = supabase.from('work_sessions')
-          .select('started_at, ended_at, status')
+          .select('started_at, ended_at, status', { count: 'exact' })
           .eq('project_id', projectId);
         if (isYmd(input.desde)) q = q.gte('started_at', new Date(input.desde + 'T00:00:00-05:00').getTime());
         if (isYmd(input.hasta)) q = q.lte('started_at', new Date(input.hasta + 'T23:59:59-05:00').getTime());
-        const { data, error } = await q.order('started_at', { ascending: false }).limit(2000);
-        if (error) throw new Error(error.message);
-        const rows = data ?? [];
-        const activas = rows.filter(r => !r.ended_at && r.status !== 'CLOSED').length;
+        // "Activas AHORA" es un estado del presente: se cuenta SIN el filtro de
+        // rango (una jornada iniciada ayer y aún abierta sigue activa hoy).
+        const [rangeQ, activeQ, pausedQ] = await Promise.all([
+          q.order('started_at', { ascending: false }).limit(2000),
+          supabase.from('work_sessions').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'ACTIVE'),
+          supabase.from('work_sessions').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'PAUSED'),
+        ]);
+        if (rangeQ.error) throw new Error(rangeQ.error.message);
+        const rows = rangeQ.data ?? [];
         let horasMs = 0;
         for (const r of rows) if (r.started_at && r.ended_at) horasMs += Math.max(0, Number(r.ended_at) - Number(r.started_at));
         return {
-          sesiones: rows.length,
-          activas_ahora: activas,
+          sesiones: rangeQ.count ?? rows.length,
+          activas_ahora: activeQ.count ?? 0,
+          pausadas_ahora: pausedQ.count ?? 0,
           horas_trabajadas: +(horasMs / 3600000).toFixed(1),
+          nota: 'horas_trabajadas solo suma jornadas ya cerradas del rango.',
         };
       },
     },
