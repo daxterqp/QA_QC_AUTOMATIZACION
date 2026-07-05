@@ -14,6 +14,8 @@ export type RootStackParamList = {
   SampleDetail: { projectId: string; projectName: string; sampleId: string };
   /** v44 — Carga de datos topográficos: lista de cargas por fecha. */
   TopoCargas: { projectId: string; projectName: string };
+  /** v75 — Asistente de IA del proyecto (chat + gráficos + voz). */
+  AIChat: { projectId: string; projectName: string };
   /** v44 — Configuración del módulo topográfico (columnas, GPS, procesamiento, Excel). */
   TopoConfig: { projectId: string; projectName: string };
   /** v44 — Detalle de cobertura de coordenadas (lista filtrable topo/GPS/sin coords). */

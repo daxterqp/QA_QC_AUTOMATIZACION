@@ -36,6 +36,7 @@ import RecycleBinScreen from '@screens/RecycleBinScreen';
 import SamplesScreen from '@screens/SamplesScreen';
 import SampleDetailScreen from '@screens/SampleDetailScreen';
 import TopoCargasScreen from '@screens/TopoCargasScreen';
+import AIChatScreen from '@screens/AIChatScreen';
 import TopoConfigScreen from '@screens/TopoConfigScreen';
 import TopoCoverageScreen from '@screens/TopoCoverageScreen';
 import ProtocolListScreen from '@screens/ProtocolListScreen';
@@ -273,6 +274,7 @@ export default function AppNavigator() {
               <Stack.Screen name="Samples" component={SamplesScreen} />
               <Stack.Screen name="SampleDetail" component={SampleDetailScreen} />
               <Stack.Screen name="TopoCargas" component={TopoCargasScreen} />
+              <Stack.Screen name="AIChat" component={AIChatScreen} />
               <Stack.Screen name="TopoConfig" component={TopoConfigScreen} />
               <Stack.Screen name="TopoCoverage" component={TopoCoverageScreen} />
               <Stack.Screen name="RecycleBin" component={RecycleBinScreen} />

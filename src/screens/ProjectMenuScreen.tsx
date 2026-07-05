@@ -181,6 +181,16 @@ export default function ProjectMenuScreen({ route, navigation }: Props) {
       onPress: () => navigation.navigate('TopoCargas', { projectId, projectName }),
       flagKey: 'module_topo',
     } as MenuOption] : []),
+    // v75 — Asistente de IA (todos los roles con acceso al proyecto; gateado por flag).
+    {
+      key: 'ai-chat',
+      title: 'Asistente IA',
+      subtitle: 'Consulte los ensayos y el avance de la obra en lenguaje natural',
+      icon: 'sparkles-outline',
+      tone: Colors.primary,
+      onPress: () => navigation.navigate('AIChat', { projectId, projectName }),
+      flagKey: 'module_ai_assistant',
+    },
     ...(canUploadFiles ? [{
       key: 'file-upload',
       title: t('projectMenu.fileUploadTitle'),

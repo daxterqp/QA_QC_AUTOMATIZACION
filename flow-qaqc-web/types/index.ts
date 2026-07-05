@@ -98,6 +98,10 @@ export interface ProjectFeatureFlags {
   module_summary_tables: boolean;
   /** v67 — Módulo de Reportes por Correo (panel web de plantillas de reporte programado). Default OFF. */
   module_email_reports?: boolean;
+  /** v75 — Módulo Asistente de IA (chat del proyecto, solo móvil por ahora). Default OFF. */
+  module_ai_assistant?: boolean;
+  /** v75 — Nivel de modelo del Asistente IA (mapeo a modelo real es server-side). Default 'economico'. */
+  ai_model_tier?: 'economico' | 'potente' | 'maximo';
   /** v44 — Módulo "Carga de datos topográficos" (web + móvil). Default OFF. */
   module_topo?: boolean;
   /** v44 — Reemplazar coords GPS en fichas (solo topográficas). */
@@ -159,6 +163,8 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_contacts: false,
   module_summary_tables: false,
   module_email_reports: false,
+  module_ai_assistant: false,
+  ai_model_tier: 'economico',
   module_topo: false,
   topo_replace_gps: false,
   topo_keep_gps_fallback: false,

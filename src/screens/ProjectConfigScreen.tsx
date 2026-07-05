@@ -280,6 +280,21 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               procesamiento, fórmulas) vive en el engranaje DENTRO del módulo. */}
           <CheckRow label="Carga de datos topográficos" description="Carga masiva de coordenadas topográficas (manual o CSV) por código de ensayo. La configuración detallada está en el engranaje dentro del módulo."
             value={!!flags.module_topo} onToggle={() => toggleFlag('module_topo')} />
+          {/* v75 — Asistente de IA. El nivel del modelo se mapea a un modelo real
+              SOLO en el servidor (Edge Function) — el celular nunca decide el modelo. */}
+          <CheckRow label="Asistente de IA" description="Chat inteligente del proyecto: consultas en lenguaje natural sobre ensayos, sectores y avance, con gráficos y resumen narrado por voz. Solo en el celular por ahora."
+            value={!!flags.module_ai_assistant} onToggle={() => toggleFlag('module_ai_assistant')} />
+          {flags.module_ai_assistant && (
+            <View style={styles.subRow}>
+              <Text style={styles.subRowLabel}>Nivel del modelo</Text>
+              {([['economico', 'Económico'], ['potente', 'Potente'], ['maximo', 'Máximo']] as const).map(([val, label]) => (
+                <TouchableOpacity key={val} onPress={() => setFlag('ai_model_tier', val)}
+                  style={[styles.levelBtn, (flags.ai_model_tier ?? 'economico') === val && styles.levelBtnActive]}>
+                  <Text style={[styles.levelBtnText, (flags.ai_model_tier ?? 'economico') === val && { color: Colors.white }]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}
           <Text style={styles.fieldLabel}>{t('projectConfig.fillModeLabel')}</Text>
