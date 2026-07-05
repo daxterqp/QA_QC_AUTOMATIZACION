@@ -10,6 +10,7 @@
  * de la más antigua.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from '@config/supabase';
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
@@ -56,6 +57,35 @@ export async function sendChatMessage(args: {
   }
   if (!data?.reply) throw new Error(String(data?.error ?? 'Respuesta vacía del asistente.'));
   return data as AIChatReply;
+}
+
+// ── Narración por voz (Fase 3: Edge Function `ai-tts` → ElevenLabs) ─────────
+
+/**
+ * Pide la narración de un texto y devuelve un file:// URI local (MP3 en cache)
+ * listo para expo-audio. El audio NO se persiste entre sesiones: es cache.
+ */
+export async function requestNarration(projectId: string, text: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('ai-tts', {
+    body: { projectId, text },
+  });
+  if (error) {
+    try {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx) {
+        const body = await ctx.json();
+        if (body?.error) throw new Error(String(body.error));
+      }
+    } catch (inner) {
+      if (inner instanceof Error && inner.message) throw inner;
+    }
+    throw new Error('No se pudo generar la voz. Revise su conexión.');
+  }
+  const b64 = data?.audioBase64;
+  if (typeof b64 !== 'string' || !b64) throw new Error(String(data?.error ?? 'Audio vacío.'));
+  const uri = `${FileSystem.cacheDirectory}ai-tts-${Date.now()}.mp3`;
+  await FileSystem.writeAsStringAsync(uri, b64, { encoding: FileSystem.EncodingType.Base64 });
+  return uri;
 }
 
 // ── Historial de sesiones (LOCAL, por proyecto) ──────────────────────────────

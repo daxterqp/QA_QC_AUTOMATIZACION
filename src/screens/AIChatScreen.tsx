@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal,
   KeyboardAvoidingView, Platform, Animated, ScrollView, Alert, useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,9 +25,30 @@ import { Colors, Radius, Shadow } from '../theme/colors';
 import { projectSectorsCollection } from '@db/index';
 import {
   type AIChatMessage, type AIChatSession, deleteSession, loadSessions,
-  newSessionId, saveSession, sendChatMessage, sessionTitleFrom,
+  newSessionId, requestNarration, saveSession, sendChatMessage, sessionTitleFrom,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
+
+// ── expo-audio con require DIFERIDO ──────────────────────────────────────────
+// El módulo es NATIVO: un dev client construido antes de agregarlo no lo tiene.
+// Cargarlo recién al tocar "escuchar" evita que la pantalla entera reviente en
+// builds viejas (ahí se muestra un error amable pidiendo reinstalar).
+interface AudioPlayerLite {
+  play: () => void;
+  remove: () => void;
+  addListener: (event: 'playbackStatusUpdate', cb: (status: { didJustFinish?: boolean }) => void) => { remove: () => void };
+}
+function loadExpoAudio(): {
+  createAudioPlayer: (source: { uri: string }) => AudioPlayerLite;
+  setAudioModeAsync: (mode: { playsInSilentMode: boolean }) => Promise<void>;
+} | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('expo-audio');
+  } catch {
+    return null;
+  }
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AIChat'>;
 
@@ -70,6 +92,51 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [pastSessions, setPastSessions] = useState<AIChatSession[]>([]);
   const [suggested, setSuggested] = useState<string[]>(AI_SUGGESTED_QUESTIONS);
   const listRef = useRef<FlatList<AIChatMessage>>(null);
+
+  // ── Narración por voz (Fase 3) ──
+  const [speakingId, setSpeakingId] = useState<string | null>(null);   // reproduciendo
+  const [loadingSpeechId, setLoadingSpeechId] = useState<string | null>(null); // generando
+  const playerRef = useRef<AudioPlayerLite | null>(null);
+  const playerSubRef = useRef<{ remove: () => void } | null>(null);
+
+  const stopSpeech = useCallback(() => {
+    playerSubRef.current?.remove();
+    playerSubRef.current = null;
+    try { playerRef.current?.remove(); } catch { /* ya liberado */ }
+    playerRef.current = null;
+    setSpeakingId(null);
+  }, []);
+
+  // Liberar el reproductor al salir de la pantalla.
+  useEffect(() => stopSpeech, [stopSpeech]);
+
+  const toggleSpeech = useCallback(async (item: AIChatMessage) => {
+    if (speakingId === item.id) { stopSpeech(); return; }
+    if (loadingSpeechId) return; // ya hay una narración generándose
+    const audio = loadExpoAudio();
+    if (!audio) {
+      Alert.alert('Función no disponible', 'La voz requiere reinstalar la aplicación (nuevo módulo de audio).');
+      return;
+    }
+    stopSpeech();
+    setLoadingSpeechId(item.id);
+    try {
+      const uri = await requestNarration(projectId, item.text);
+      await audio.setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+      const player = audio.createAudioPlayer({ uri });
+      playerRef.current = player;
+      playerSubRef.current = player.addListener('playbackStatusUpdate', s => {
+        if (s?.didJustFinish) stopSpeech();
+      });
+      setSpeakingId(item.id);
+      player.play();
+    } catch (e) {
+      stopSpeech();
+      Alert.alert('Voz', e instanceof Error ? e.message : 'No se pudo generar la narración.');
+    } finally {
+      setLoadingSpeechId(null);
+    }
+  }, [speakingId, loadingSpeechId, projectId, stopSpeech]);
 
   // Chips dinámicos: la pregunta de ejemplo usa el PRIMER sector real del
   // proyecto (base local) para que la consulta siempre tenga sentido.
@@ -181,11 +248,26 @@ export default function AIChatScreen({ navigation, route }: Props) {
           <Text style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}>
             {isError ? item.text.slice(1).trim() : item.text}
           </Text>
-          <Text style={[styles.msgTime, isUser ? styles.msgTimeUser : styles.msgTimeAI]}>{fmtTime(item.at)}</Text>
+          <View style={styles.msgFooter}>
+            {!isUser && !isError && (
+              loadingSpeechId === item.id ? (
+                <ActivityIndicator size={13} color={Colors.primary} />
+              ) : (
+                <TouchableOpacity onPress={() => toggleSpeech(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons
+                    name={speakingId === item.id ? 'stop-circle' : 'volume-medium-outline'}
+                    size={16}
+                    color={speakingId === item.id ? Colors.primary : Colors.textMuted}
+                  />
+                </TouchableOpacity>
+              )
+            )}
+            <Text style={[styles.msgTime, isUser ? styles.msgTimeUser : styles.msgTimeAI]}>{fmtTime(item.at)}</Text>
+          </View>
         </View>
       </View>
     );
-  }, [winWidth]);
+  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech]);
 
   return (
     <View style={styles.container}>
@@ -351,7 +433,8 @@ const styles = StyleSheet.create({
   msgTextUser: { color: Colors.white },
   msgTextAI: { color: Colors.textPrimary },
   msgTextError: { color: Colors.danger },
-  msgTime: { fontSize: 9.5, marginTop: 4, alignSelf: 'flex-end' },
+  msgFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  msgTime: { fontSize: 9.5 },
   msgTimeUser: { color: Colors.white + '99' },
   msgTimeAI: { color: Colors.textMuted },
 

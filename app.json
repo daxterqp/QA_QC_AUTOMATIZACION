@@ -4,7 +4,10 @@
     "slug": "scua-qaqc",
     "version": "2.1.0",
     "newArchEnabled": false,
-    "scheme": ["flow", "com.vxp.scua"],
+    "scheme": [
+      "flow",
+      "com.vxp.scua"
+    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -63,7 +66,8 @@
           "enableMicrophonePermission": false
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-audio"
     ]
   }
 }
