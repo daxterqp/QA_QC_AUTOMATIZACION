@@ -11,19 +11,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal,
-  KeyboardAvoidingView, Platform, Animated, ScrollView, Alert,
+  KeyboardAvoidingView, Platform, Animated, ScrollView, Alert, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SvgXml } from 'react-native-svg';
+import { Q } from '@nozbe/watermelondb';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
+import { projectSectorsCollection } from '@db/index';
 import {
   type AIChatMessage, type AIChatSession, deleteSession, loadSessions,
   newSessionId, saveSession, sendChatMessage, sessionTitleFrom,
 } from '@services/AIAssistantService';
-import { AI_SUGGESTED_QUESTIONS } from '@utils/aiSuggestedQuestions';
+import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AIChat'>;
 
@@ -58,13 +61,29 @@ function TypingDots() {
 export default function AIChatScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const insets = useSafeAreaInsets();
+  const { width: winWidth } = useWindowDimensions();
 
   const [session, setSession] = useState<AIChatSession | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [pastSessions, setPastSessions] = useState<AIChatSession[]>([]);
+  const [suggested, setSuggested] = useState<string[]>(AI_SUGGESTED_QUESTIONS);
   const listRef = useRef<FlatList<AIChatMessage>>(null);
+
+  // Chips dinámicos: la pregunta de ejemplo usa el PRIMER sector real del
+  // proyecto (base local) para que la consulta siempre tenga sentido.
+  useEffect(() => {
+    let alive = true;
+    projectSectorsCollection.query(Q.where('project_id', projectId)).fetch()
+      .then(sectors => {
+        if (!alive || sectors.length === 0) return;
+        const first = [...sectors].sort((a, b) => (a.sortOrder ?? 1e9) - (b.sortOrder ?? 1e9))[0];
+        setSuggested(buildSuggestedQuestions(first?.name));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [projectId]);
 
   const messages = session?.messages ?? [];
   // Saludo formal SOLO en el primer intercambio de la sesión.
@@ -118,7 +137,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
     try {
       const history = base.messages.slice(0, -1).map(m => ({ role: m.role, content: m.text }));
       const res = await sendChatMessage({ projectId, message: msg, history, isFirstTurn });
-      const aiMsg: AIChatMessage = { id: `a-${Date.now()}`, role: 'assistant', text: res.reply, at: Date.now() };
+      const aiMsg: AIChatMessage = {
+        id: `a-${Date.now()}`, role: 'assistant', text: res.reply,
+        ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
+        at: Date.now(),
+      };
       const next = { ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() };
       setSession(next);
       saveSession(projectId, next).catch(() => {});
@@ -139,6 +162,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
+    const hasChart = !isUser && !!item.chartSvg;
+    // El gráfico necesita ancho: burbuja casi a todo lo ancho, 16:9 (viewBox 640×360).
+    const chartW = Math.min(winWidth * 0.92 - 26 - 24, 640); // - avatar/gaps - padding burbuja
     return (
       <View style={[styles.msgRow, isUser ? styles.msgRowUser : styles.msgRowAI]}>
         {!isUser && (
@@ -146,7 +172,12 @@ export default function AIChatScreen({ navigation, route }: Props) {
             <Ionicons name="sparkles" size={13} color={Colors.white} />
           </View>
         )}
-        <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAI, isError && styles.bubbleError]}>
+        <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAI, isError && styles.bubbleError, hasChart && styles.bubbleChart]}>
+          {hasChart && (
+            <View style={styles.chartBox}>
+              <SvgXml xml={item.chartSvg!} width={chartW} height={chartW * (360 / 640)} />
+            </View>
+          )}
           <Text style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}>
             {isError ? item.text.slice(1).trim() : item.text}
           </Text>
@@ -154,7 +185,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         </View>
       </View>
     );
-  }, []);
+  }, [winWidth]);
 
   return (
     <View style={styles.container}>
@@ -190,7 +221,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
               <Text style={{ fontWeight: '800' }}>{projectName}</Text>. Las respuestas salen de los datos reales del proyecto.
             </Text>
             <View style={styles.chipsWrap}>
-              {AI_SUGGESTED_QUESTIONS.map(q => (
+              {suggested.map(q => (
                 <TouchableOpacity key={q} style={styles.chip} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
                   <Ionicons name="chatbubble-ellipses-outline" size={13} color={Colors.primary} />
                   <Text style={styles.chipText}>{q}</Text>
@@ -311,6 +342,11 @@ const styles = StyleSheet.create({
   bubbleUser: { backgroundColor: Colors.navy, borderBottomRightRadius: 4 },
   bubbleAI: { backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderBottomLeftRadius: 4, ...Shadow.subtle },
   bubbleError: { borderColor: Colors.danger + '66', backgroundColor: Colors.danger + '0D' },
+  bubbleChart: { maxWidth: '92%' },
+  chartBox: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm,
+    overflow: 'hidden', marginBottom: 8, backgroundColor: Colors.white,
+  },
   msgText: { fontSize: 14, lineHeight: 20 },
   msgTextUser: { color: Colors.white },
   msgTextAI: { color: Colors.textPrimary },

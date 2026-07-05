@@ -11,6 +11,12 @@
  */
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { type DateUnit, isYmd, periodKeyOf, periodLabel } from './dates.ts';
+import { renderTrendChartSvg } from './chart.ts';
+
+/** Nombre de la tool cuyo SVG intercepta index.ts (no vuelve al modelo). */
+export const CHART_TOOL_NAME = 'generar_grafico';
+/** Clave interna del SVG dentro del resultado de la tool de gráfico. */
+export const CHART_SVG_KEY = '__chart_svg';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -360,6 +366,190 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           periodo_b: { ...input.periodo_b, valor: b, n: vb.length },
           delta: a != null && b != null ? b - a : null,
           delta_pct: a != null && b != null && a !== 0 ? ((b - a) / Math.abs(a)) * 100 : null,
+        };
+      },
+    },
+
+    // ── Fase 2: "toda la app conversable" ────────────────────────────────────
+    {
+      name: CHART_TOOL_NAME,
+      description: 'Genera un GRÁFICO de tendencia (línea + recta de tendencia) de una columna numérica de un tipo de ensayo en el tiempo. El gráfico se muestra automáticamente en el chat — tú solo comenta las cifras del resumen que te devuelve. Úsala cuando pidan "grafica", "muéstrame la curva/tendencia/evolución".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          ...COMMON_FILTER_PROPS,
+          column_key: { type: 'string', description: 'Key exacta de la columna (de catalogo_proyecto)' },
+          titulo: { type: 'string', description: 'Título corto del gráfico en español (ej. "Grado de compactación — última semana")' },
+        },
+        required: ['column_key', 'titulo'],
+        additionalProperties: false,
+      },
+      execute: async (input: CommonFilters & { column_key: string; titulo: string }) => {
+        const res = await resolveFilters(supabase, projectId, input);
+        if (!res.ok) return res.error;
+        if (!res.templateId && !input.tipo_nombre) {
+          return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: una columna pertenece a un tipo de ensayo (sin él se mezclarían valores de tipos distintos).' };
+        }
+        const rows = await fetchRows(supabase, projectId, input, res);
+        const points: { x: string; y: number }[] = [];
+        for (const r of rows) {
+          if (!r.ensayo_date) continue;
+          const v = numValue(r.values_json, input.column_key);
+          if (v != null) points.push({ x: r.ensayo_date, y: v });
+        }
+        if (points.length < 2) {
+          return { grafico_generado: false, mensaje: `Solo hay ${points.length} dato(s) numérico(s) para esa columna en el rango — no alcanza para una tendencia.` };
+        }
+        const ys = points.map(p => p.y);
+        const svg = renderTrendChartSvg(input.titulo.slice(0, 80), points);
+        return {
+          grafico_generado: true,
+          [CHART_SVG_KEY]: svg,   // index.ts lo extrae; NO viaja al modelo
+          resumen: {
+            n: points.length,
+            promedio: ys.reduce((a, b) => a + b, 0) / ys.length,
+            minimo: Math.min(...ys),
+            maximo: Math.max(...ys),
+            primera_fecha: points[0].x,
+            ultima_fecha: points[points.length - 1].x,
+          },
+        };
+      },
+    },
+    {
+      name: 'resumen_muestras',
+      description: 'Resumen de MUESTRAS físicas del proyecto: conteos por tipo de material y condición (alterada/inalterada), con filtros de fecha y sector, más las muestras más recientes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          desde: COMMON_FILTER_PROPS.desde,
+          hasta: COMMON_FILTER_PROPS.hasta,
+          sector_id: COMMON_FILTER_PROPS.sector_id,
+          sector_nombre: COMMON_FILTER_PROPS.sector_nombre,
+          limite: { type: 'integer', minimum: 1, maximum: 20, description: 'Muestras recientes a listar (default 5)' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: { desde?: string; hasta?: string; sector_id?: string; sector_nombre?: string; limite?: number }) => {
+        const res = await resolveFilters(supabase, projectId, input);
+        if (!res.ok) return res.error;
+        let q = supabase.from('samples')
+          .select('sample_code, sample_date, material_type, condition, sector_id')
+          .eq('project_id', projectId);
+        if (isYmd(input.desde)) q = q.gte('sample_date', input.desde);
+        if (isYmd(input.hasta)) q = q.lte('sample_date', input.hasta);
+        if (res.sectorId) q = q.eq('sector_id', res.sectorId);
+        const { data, error } = await q.order('sample_date', { ascending: false }).limit(1000);
+        if (error) throw new Error(error.message);
+        const rows = data ?? [];
+        const by = (key: 'material_type' | 'condition') => {
+          const m = new Map<string, number>();
+          for (const r of rows) m.set(String(r[key] ?? 'sin dato'), (m.get(String(r[key] ?? 'sin dato')) ?? 0) + 1);
+          return Array.from(m, ([valor, cantidad]) => ({ valor, cantidad }));
+        };
+        const limite = Math.min(Math.max(input.limite ?? 5, 1), 20);
+        return {
+          total: rows.length,
+          por_material: by('material_type'),
+          por_condicion: by('condition'),
+          recientes: rows.slice(0, limite).map(r => ({ codigo: r.sample_code, fecha: r.sample_date, material: r.material_type, condicion: r.condition })),
+        };
+      },
+    },
+    {
+      name: 'estado_aprobaciones',
+      description: 'Estado del flujo de aprobación: cuántos ensayos están EN REVISIÓN (pendientes de aprobar), aprobados y rechazados en un rango, y los rechazos recientes con su motivo.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          desde: COMMON_FILTER_PROPS.desde,
+          hasta: COMMON_FILTER_PROPS.hasta,
+          template_id: COMMON_FILTER_PROPS.template_id,
+          tipo_nombre: COMMON_FILTER_PROPS.tipo_nombre,
+          sector_id: COMMON_FILTER_PROPS.sector_id,
+          sector_nombre: COMMON_FILTER_PROPS.sector_nombre,
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: CommonFilters) => {
+        const res = await resolveFilters(supabase, projectId, input);
+        if (!res.ok) return res.error;
+        const rows = await fetchRows(supabase, projectId, input, res);
+        const counts = { SUBMITTED: 0, APPROVED: 0, REJECTED: 0 } as Record<string, number>;
+        for (const r of rows) counts[r.status ?? '?'] = (counts[r.status ?? '?'] ?? 0) + 1;
+        // Motivos de rechazo recientes (tabla protocols, RLS aplica).
+        const { data: rej } = await supabase.from('protocols')
+          .select('protocol_code, rejection_reason, ensayo_date')
+          .eq('project_id', projectId).eq('status', 'REJECTED')
+          .not('rejection_reason', 'is', null)
+          .order('updated_at', { ascending: false }).limit(5);
+        return {
+          en_revision: counts.SUBMITTED ?? 0,
+          aprobados: counts.APPROVED ?? 0,
+          rechazados: counts.REJECTED ?? 0,
+          rechazos_recientes: (rej ?? []).map(r => ({ codigo: r.protocol_code, fecha: r.ensayo_date, motivo: r.rejection_reason })),
+        };
+      },
+    },
+    {
+      name: 'no_conformidades',
+      description: 'No conformidades del proyecto: cuántas están ABIERTAS y cuántas RESUELTAS, con las más recientes (descripción y estado).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          estado: { type: 'string', enum: ['OPEN', 'RESOLVED'], description: 'Filtrar por estado (abierta/resuelta)' },
+          limite: { type: 'integer', minimum: 1, maximum: 20, description: 'Recientes a listar (default 5)' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: { estado?: 'OPEN' | 'RESOLVED'; limite?: number }) => {
+        let q = supabase.from('non_conformities')
+          .select('description, status, resolution_notes, created_at')
+          .eq('project_id', projectId);
+        if (input.estado) q = q.eq('status', input.estado);
+        const { data, error } = await q.order('created_at', { ascending: false }).limit(500);
+        if (error) throw new Error(error.message);
+        const rows = data ?? [];
+        const abiertas = rows.filter(r => r.status === 'OPEN').length;
+        const resueltas = rows.filter(r => r.status === 'RESOLVED').length;
+        const limite = Math.min(Math.max(input.limite ?? 5, 1), 20);
+        return {
+          abiertas, resueltas, total: rows.length,
+          recientes: rows.slice(0, limite).map(r => ({
+            descripcion: String(r.description ?? '').slice(0, 200),
+            estado: r.status === 'OPEN' ? 'abierta' : 'resuelta',
+            resolucion: r.resolution_notes ? String(r.resolution_notes).slice(0, 200) : null,
+          })),
+        };
+      },
+    },
+    {
+      name: 'resumen_trazabilidad',
+      description: 'Jornadas de trabajo (módulo Trazabilidad): sesiones activas ahora, sesiones y horas trabajadas en un rango de fechas.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          desde: { type: 'string', description: 'Fecha inicial YYYY-MM-DD (sobre el inicio de la jornada)' },
+          hasta: { type: 'string', description: 'Fecha final YYYY-MM-DD' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: { desde?: string; hasta?: string }) => {
+        let q = supabase.from('work_sessions')
+          .select('started_at, ended_at, status')
+          .eq('project_id', projectId);
+        if (isYmd(input.desde)) q = q.gte('started_at', new Date(input.desde + 'T00:00:00-05:00').getTime());
+        if (isYmd(input.hasta)) q = q.lte('started_at', new Date(input.hasta + 'T23:59:59-05:00').getTime());
+        const { data, error } = await q.order('started_at', { ascending: false }).limit(2000);
+        if (error) throw new Error(error.message);
+        const rows = data ?? [];
+        const activas = rows.filter(r => !r.ended_at && r.status !== 'CLOSED').length;
+        let horasMs = 0;
+        for (const r of rows) if (r.started_at && r.ended_at) horasMs += Math.max(0, Number(r.ended_at) - Number(r.started_at));
+        return {
+          sesiones: rows.length,
+          activas_ahora: activas,
+          horas_trabajadas: +(horasMs / 3600000).toFixed(1),
         };
       },
     },

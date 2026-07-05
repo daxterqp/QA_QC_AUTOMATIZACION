@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk@0.110.0";
-import { buildTools } from "./tools.ts";
+import { buildTools, CHART_TOOL_NAME, CHART_SVG_KEY } from "./tools.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 
 // Asistente de IA del proyecto (chat) — Fase 1: consultas sobre ensayos.
@@ -112,6 +112,9 @@ Deno.serve(async (req: Request) => {
 
     // ── Loop de tool-use (sin temperature/thinking: compatible con los 3 tiers) ──
     let totalIn = 0, totalOut = 0;
+    // El SVG del gráfico NO viaja al modelo (ahorra tokens): se intercepta aquí
+    // y se adjunta a la respuesta final como chartSvg. Si hay varios, gana el último.
+    let chartSvg: string | null = null;
     // deno-lint-ignore no-explicit-any
     let response: any = null;
     for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
@@ -140,7 +143,15 @@ Deno.serve(async (req: Request) => {
           isError = true;
         } else {
           try {
-            const out = await def.execute(block.input ?? {});
+            let out = await def.execute(block.input ?? {});
+            // Intercepción del gráfico: el SVG se guarda para la respuesta y al
+            // modelo solo le llega el resumen numérico + confirmación.
+            if (def.name === CHART_TOOL_NAME && out && typeof out === "object" && CHART_SVG_KEY in out) {
+              // deno-lint-ignore no-explicit-any
+              const { [CHART_SVG_KEY]: svg, ...rest } = out as any;
+              if (typeof svg === "string" && svg) chartSvg = svg;
+              out = { ...rest, nota: "El gráfico ya se muestra en el chat: NO lo describas visualmente, solo comenta las cifras del resumen." };
+            }
             resultStr = JSON.stringify(out ?? null);
           } catch (e) {
             resultStr = JSON.stringify({ error: String((e as Error)?.message ?? e) });
@@ -165,6 +176,7 @@ Deno.serve(async (req: Request) => {
 
     return json({
       reply: reply || "No pude generar una respuesta. Intente reformular la pregunta.",
+      ...(chartSvg ? { chartSvg } : {}),
       usage: { input_tokens: totalIn, output_tokens: totalOut, model },
     });
   } catch (e) {

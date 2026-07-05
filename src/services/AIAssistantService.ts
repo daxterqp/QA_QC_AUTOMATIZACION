@@ -21,6 +21,8 @@ export interface AIChatTurn {
 
 export interface AIChatReply {
   reply: string;
+  /** SVG del gráfico generado por la tool `generar_grafico` (Fase 2). */
+  chartSvg?: string;
   usage?: { input_tokens: number; output_tokens: number; model: string };
 }
 

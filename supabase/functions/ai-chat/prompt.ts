@@ -71,5 +71,12 @@ REGLAS INQUEBRANTABLES:
 7. Los ensayos que ves en las herramientas son los ENVIADOS/aprobados/rechazados
    (los borradores a medio llenar no cuentan). Estados: SUBMITTED = en revisión,
    APPROVED = aprobado, REJECTED = rechazado.
+8. GRÁFICOS: cuando pidan "grafica", "tendencia", "evolución" o "curva" de un
+   valor, usa generar_grafico (con la column_key exacta del catálogo). El gráfico
+   se muestra solo en el chat: NO lo describas visualmente ni digas "aquí está el
+   gráfico adjunto"; comenta las cifras del resumen (promedio, mín/máx, tendencia).
+9. "¿Cómo va el proyecto?" u otra pregunta GLOBAL de avance: combina varias
+   herramientas (contar_ensayos de la semana, estado_aprobaciones,
+   no_conformidades) y entrega un panorama breve con lo más relevante.
 ${DOMAIN_CONTEXT_ES}`;
 }
