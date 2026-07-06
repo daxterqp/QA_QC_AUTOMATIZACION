@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import { GLView } from 'expo-gl';
 
@@ -138,6 +138,13 @@ function program(gl: any, vs: string, fs: string) {
 const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>(({ onUnsupported }, ref) => {
   const queue = useRef<number[]>([]);              // cola de impactos en triplets (x, y, intensidad)
   const lastUv = useRef({ x: 0.5, y: 0.5 });
+  // Corta el loop de requestAnimationFrame al DESMONTAR: sin esto cada montaje
+  // (login, bienvenida del chat) filtraba un loop JS a 60fps para siempre.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
   // "Dedos virtuales" sostenidos: cada uno se re-emite en CADA frame (como un dedo apoyado).
   const emittersRef = useRef<{ x: number; y: number; vx: number; vy: number; life: number; str: number }[]>([]);
   // Arco que sube (entrada): cada punto lleva su propia y (ys) y fase de velocidad (vph) → entrópico.
@@ -270,6 +277,7 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
       };
 
       const loop = () => {
+        if (!aliveRef.current) return; // componente desmontado → cortar el loop
         const em = emittersRef.current;
         if (barridoRef.current.active) {
           // BARRIDO: frente en ARCO a lo ancho, pero cada punto sube con su PROPIA velocidad

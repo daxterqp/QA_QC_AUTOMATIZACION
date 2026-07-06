@@ -341,15 +341,17 @@ export default function AppNavigator() {
             </>
           )}
         </Stack.Navigator>
-        <TourOverlay />
         {/* v76 — Burbuja flotante de Flo: acceso rápido al asistente desde
-            cualquier pantalla del proyecto (gateada por flags del proyecto). */}
+            cualquier pantalla del proyecto (gateada por flags del proyecto).
+            Va ANTES de TourOverlay para que el tour guiado quede ENCIMA
+            (la burbuja no debe flotar sobre el overlay ni robarle taps). */}
         {currentUser && (
           <AIQuickBubble
             route={activeRoute}
             navigate={(screen, params) => navigationRef.current?.navigate(screen as any, params)}
           />
         )}
+        <TourOverlay />
         {/* v27 — Detección de sesión activa al login (modal de continuar/pausar/cerrar) */}
         {currentUser && (
           <ActiveSessionPrompt

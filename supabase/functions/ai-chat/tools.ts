@@ -16,7 +16,7 @@
  * Nunca se cuentan borradores (status DRAFT).
  */
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { type DateUnit, isYmd, periodKeyOf, periodLabel } from './dates.ts';
+import { type DateUnit, isRealYmd, isYmd, periodKeyOf, periodLabel } from './dates.ts';
 import { type ChartKind, renderChartSvg } from './chart.ts';
 
 /** Nombre de la tool cuyo SVG intercepta index.ts (no vuelve al modelo). */
@@ -580,21 +580,41 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
             ...(cobertura ? { advertencia: cobertura } : {}),
           };
         }
-        const ys = points.map(p => p.y);
-        const svg = renderChartSvg(estilo, input.titulo.slice(0, 80), points);
+        // Barras: recorte a los últimos 48 ANTES de svg Y resumen (siempre
+        // consistentes entre sí) con advertencia explícita al modelo.
+        // Línea: downsample SOLO del dibujo (máx 200 puntos — un SVG de 2000
+        // círculos pesa ~200KB y se persiste en cada sesión); el resumen usa
+        // todos los puntos (mismo rango de fechas → estadísticos coherentes).
+        let plotPoints = points;
+        let recorteNota: string | undefined;
+        if (estilo === 'barras' && points.length > 48) {
+          plotPoints = points.slice(-48);
+          recorteNota = `El gráfico de barras y su resumen corresponden a los ÚLTIMOS 48 de ${points.length} datos — acota el rango de fechas para ver otros.`;
+        } else if (estilo === 'linea' && points.length > 200) {
+          plotPoints = points.filter((_, i) => i % Math.ceil(points.length / 200) === 0);
+        }
+        const statsPoints = estilo === 'barras' ? plotPoints : points;
+        const ys = statsPoints.map(p => p.y);
+        const xs0 = ymdToDays(statsPoints[0].x);
+        const slope = estilo === 'linea'
+          ? linearSlopePerDay(statsPoints.map(p => ({ x: ymdToDays(p.x) - xs0, y: p.y })))
+          : null;
+        const svg = renderChartSvg(estilo, input.titulo.slice(0, 80), plotPoints);
         // Total exacto (no la página truncada) — ver nota en serie_temporal.
         const cobertura = truncNote(rows.length, total) ?? await valueCoverageNote(supabase, projectId, input, res, total);
+        const advertencia = recorteNota ?? cobertura;
         return {
           grafico_generado: true,
           [CHART_SVG_KEY]: svg,   // index.ts lo extrae; NO viaja al modelo
-          ...(cobertura ? { advertencia: cobertura } : {}),
+          ...(advertencia ? { advertencia } : {}),
           resumen: {
-            n: points.length,
+            n: statsPoints.length,
             promedio: ys.reduce((a, b) => a + b, 0) / ys.length,
             minimo: Math.min(...ys),
             maximo: Math.max(...ys),
-            primera_fecha: points[0].x,
-            ultima_fecha: points[points.length - 1].x,
+            ...(estilo === 'linea' ? { tendencia_por_dia: slope } : {}),
+            primera_fecha: statsPoints[0].x,
+            ultima_fecha: statsPoints[statsPoints.length - 1].x,
           },
         };
       },
@@ -756,8 +776,9 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           };
         }
         if (input.tipo === 'crear_ensayo') {
-          if (input.fecha != null && !isYmd(input.fecha)) {
-            return { error: 'fecha_invalida', mensaje: 'La fecha debe ser YYYY-MM-DD.' };
+          // Path de ESCRITURA: la fecha debe existir de verdad ('2026-02-31' no).
+          if (input.fecha != null && !isRealYmd(input.fecha)) {
+            return { error: 'fecha_invalida', mensaje: 'La fecha debe ser YYYY-MM-DD y existir en el calendario.' };
           }
           // Resolver tipo (OBLIGATORIO) y sector (opcional) contra el catálogo.
           const cat = await loadCatalog(supabase, projectId);
@@ -768,14 +789,18 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
             else return { error: 'tipo_ambiguo_o_inexistente', consulta: input.tipo_nombre, candidatos: (r.candidatos ?? cat.tipos).map(t => ({ template_id: t.template_id, codigo: t.codigo, nombre: t.nombre })) };
           }
           if (!tpl) return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre del ensayo a crear (pregunta al usuario si no lo dijo).' };
-          let sectorId: string | null = input.sector_id ?? null;
+          let sectorId: string | null = null;
           let sectorNombre: string | null = null;
-          if (!sectorId && input.sector_nombre) {
+          if (input.sector_id) {
+            // Igual de estricto que el tipo: un sector_id inventado o de otro
+            // proyecto NO pasa al payload de la tarjeta.
+            const s = cat.sectores.find(x => x.id === input.sector_id);
+            if (!s) return { error: 'sector_inexistente', consulta: input.sector_id, candidatos: cat.sectores.map(x => ({ id: x.id, nombre: x.nombre })) };
+            sectorId = s.id; sectorNombre = s.nombre;
+          } else if (input.sector_nombre) {
             const r = resolveByName(cat.sectores, input.sector_nombre);
             if (r.match) { sectorId = r.match.id; sectorNombre = r.match.nombre; }
             else return { error: 'sector_ambiguo_o_inexistente', consulta: input.sector_nombre, candidatos: (r.candidatos ?? cat.sectores).map(s => ({ id: s.id, nombre: s.nombre })) };
-          } else if (sectorId) {
-            sectorNombre = cat.sectores.find(s => s.id === sectorId)?.nombre ?? null;
           }
           const etiqueta = `Crear ensayo ${tpl.codigo ? tpl.codigo + ' · ' : ''}${tpl.nombre}${sectorNombre ? ` — ${sectorNombre}` : ''}`;
           return {

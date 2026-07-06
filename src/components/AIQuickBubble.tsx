@@ -84,33 +84,54 @@ export function AIQuickBubble({ route, navigate }: Props) {
     return () => { alive = false; };
   }, [route]);
 
+  // Suelta el gesto en su posición actual: clamp + snap al borde + persistir.
+  const settle = (dx: number, dy: number) => {
+    const next = clampPos(posRaw.current.x + dx, posRaw.current.y + dy);
+    const w = Dimensions.get('window').width;
+    next.x = next.x + SIZE / 2 < w / 2 ? MARGIN : w - SIZE - MARGIN;
+    posRaw.current = next;
+    Animated.spring(pos, { toValue: next, useNativeDriver: false, friction: 6 }).start();
+    AsyncStorage.setItem(POS_KEY, JSON.stringify(next)).catch(() => {});
+  };
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+
   const panResponder = useRef(
     PanResponder.create({
-      // Capturar solo cuando hay movimiento real: un tap limpio pasa por onPress.
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) + Math.abs(g.dy) > 6,
       onPanResponderGrant: () => { dragTotal.current = 0; },
       onPanResponderMove: (_e, g) => {
-        dragTotal.current = Math.abs(g.dx) + Math.abs(g.dy);
+        // MÁXIMO recorrido (no el neto): arrastrar y volver al origen NO es un tap.
+        dragTotal.current = Math.max(dragTotal.current, Math.abs(g.dx) + Math.abs(g.dy));
         pos.setValue({ x: posRaw.current.x + g.dx, y: posRaw.current.y + g.dy });
       },
       onPanResponderRelease: (_e, g) => {
-        const moved = Math.abs(g.dx) + Math.abs(g.dy);
-        const next = clampPos(posRaw.current.x + g.dx, posRaw.current.y + g.dy);
-        // Snap al borde horizontal más cercano (queda "pegada" y no estorba).
-        const w = Dimensions.get('window').width;
-        next.x = next.x + SIZE / 2 < w / 2 ? MARGIN : w - SIZE - MARGIN;
-        posRaw.current = next;
-        Animated.spring(pos, { toValue: next, useNativeDriver: false, friction: 6 }).start();
-        AsyncStorage.setItem(POS_KEY, JSON.stringify(next)).catch(() => {});
+        const moved = Math.max(dragTotal.current, Math.abs(g.dx) + Math.abs(g.dy));
+        settleRef.current(g.dx, g.dy);
         if (moved <= 6) {
           // Tap: abrir a Flo.
           const target = targetRef.current;
           if (target) navigate('AIChat', { projectId: target.projectId, projectName: target.projectName });
         }
       },
+      // Si el sistema u otro responder roba el gesto a mitad de arrastre, la
+      // burbuja igual se asienta (sin esto quedaba flotando sin clamp/persistir).
+      onPanResponderTerminate: (_e, g) => { settleRef.current(g.dx, g.dy); },
     }),
   ).current;
+
+  // Cambio de tamaño de ventana (split-screen / plegables): re-clamp para que
+  // la burbuja nunca quede fuera de la pantalla.
+  useEffect(() => {
+    const sub = Dimensions.addEventListener('change', () => {
+      const next = clampPos(posRaw.current.x, posRaw.current.y);
+      posRaw.current = next;
+      pos.setValue(next);
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // El PanResponder se crea una vez: el destino vive en un ref siempre fresco.
   const targetRef = useRef(visibleFor);

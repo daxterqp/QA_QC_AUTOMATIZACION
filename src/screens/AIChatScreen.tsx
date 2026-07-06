@@ -22,7 +22,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { projectSectorsCollection, protocolsCollection } from '@db/index';
+import {
+  projectSectorsCollection, protocolsCollection,
+  protocolTemplatesCollection, protocolTemplateItemsCollection,
+} from '@db/index';
 import { repairCloudSummaryOnce } from '@services/SummaryRowService';
 import { createInstances } from '@services/ProtocolInstanceService';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
@@ -160,6 +163,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // ── Flo visual: agua GL en la bienvenida (se desmonta al conversar) ──
   const glRef = useRef<WaterGLHandle>(null);
   const [glOk, setGlOk] = useState(true);
+  // true mientras se decide si hay sesión que retomar (evita el flash de
+  // bienvenida). Se declara AQUÍ porque el efecto del bigWave la lee.
+  const [booting, setBooting] = useState(true);
   // Insight local del día (cero tokens: sale de la base local del celular).
   const [insight, setInsight] = useState<string | null>(null);
   useEffect(() => {
@@ -185,11 +191,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // Arco de agua al mostrar la bienvenida (transición marca de la casa).
   const isEmptyChat = (session?.messages.length ?? 0) === 0;
   useEffect(() => {
-    if (isEmptyChat && glOk) {
+    if (!booting && isEmptyChat && glOk) {
       const t = setTimeout(() => glRef.current?.bigWave(), 450);
       return () => clearTimeout(t);
     }
-  }, [isEmptyChat, glOk]);
+  }, [booting, isEmptyChat, glOk]);
 
   // ── Narración por voz (Fase 3) ──
   const [speakingId, setSpeakingId] = useState<string | null>(null);   // reproduciendo
@@ -303,6 +309,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   // Al entrar: RETOMAR la última conversación guardada (abrir siempre en blanco
   // hacía sentir que "se perdía todo"). "Nueva conversación" sigue en el header.
+  // `booting` (declarada arriba) evita el FLASH de bienvenida mientras se decide.
   useEffect(() => {
     let alive = true;
     loadSessions(projectId)
@@ -312,7 +319,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
         if (latest) setSession(latest);
         else startNewSession();
       })
-      .catch(() => { if (alive) startNewSession(); });
+      .catch(() => { if (alive) startNewSession(); })
+      .finally(() => { if (alive) setBooting(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -366,11 +374,22 @@ export default function AIChatScreen({ navigation, route }: Props) {
     };
     setSession(base);
 
-    // Si el usuario cambió de sesión mientras la respuesta estaba en vuelo, NO
-    // pisar la sesión visible: la respuesta se persiste igual en el historial.
-    const applyResult = (next: AIChatSession) => {
-      setSession(prev => (prev && prev.id === base.id ? next : prev));
-      saveSession(projectId, next).catch(() => {});
+    // Anexar la respuesta SOBRE la sesión VIVA (prev), no sobre el `base`
+    // congelado: entre el envío y la respuesta pudo cambiar el estado de un
+    // mensaje (p.ej. actionDone de una tarjeta ejecutada) y pisarlo con base lo
+    // revertiría — reabriendo una acción ya ejecutada (ensayo duplicado).
+    // Si el usuario cambió de sesión, se persiste igual al historial.
+    const applyResult = (aiMsg: AIChatMessage) => {
+      setSession(prev => {
+        if (prev && prev.id === base.id) {
+          const next = { ...prev, messages: [...prev.messages, aiMsg], updatedAt: Date.now() };
+          saveSession(projectId, next).catch(() => {});
+          return next;
+        }
+        const stored = { ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() };
+        saveSession(projectId, stored).catch(() => {});
+        return prev;
+      });
     };
 
     try {
@@ -378,20 +397,18 @@ export default function AIChatScreen({ navigation, route }: Props) {
         .filter(m => !isErrorMsg(m))
         .map(m => ({ role: m.role, content: m.text }));
       const res = await sendChatMessage({ projectId, message: msg, history, isFirstTurn });
-      const aiMsg: AIChatMessage = {
+      applyResult({
         id: `a-${stamp()}`, role: 'assistant', text: res.reply,
         ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
         ...(res.action ? { action: res.action } : {}),
         at: Date.now(),
-      };
-      applyResult({ ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() });
+      });
     } catch (e) {
-      const errMsg: AIChatMessage = {
+      applyResult({
         id: `e-${stamp()}`, role: 'assistant',
         text: `⚠ ${e instanceof Error ? e.message : 'No pude responder. Intente de nuevo.'}`,
         at: Date.now(),
-      };
-      applyResult({ ...base, messages: [...base.messages, errMsg], updatedAt: Date.now() });
+      });
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -401,10 +418,24 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  // Id de la sesión visible, siempre fresco (para el guard de markActionDone).
+  const sessionIdRef = useRef<string | null>(null);
+  sessionIdRef.current = session?.id ?? null;
 
-  const markActionDone = useCallback((msgId: string) => {
+  /** Marca la tarjeta como ejecutada EN SU SESIÓN: si la sesión visible cambió
+   *  durante la espera, actualiza el historial persistido directamente (sin
+   *  tocar la sesión actual ni bumpear su updatedAt — no reordena nada). */
+  const markActionDone = useCallback((sessionId: string, msgId: string) => {
     setSession(prev => {
-      if (!prev) return prev;
+      if (!prev || prev.id !== sessionId) {
+        loadSessions(projectId).then(all => {
+          const s = all.find(x => x.id === sessionId);
+          if (!s) return;
+          const stored = { ...s, messages: s.messages.map(m => (m.id === msgId ? { ...m, actionDone: true } : m)) };
+          saveSession(projectId, stored).catch(() => {});
+        }).catch(() => {});
+        return prev;
+      }
       const next = {
         ...prev,
         messages: prev.messages.map(m => (m.id === msgId ? { ...m, actionDone: true } : m)),
@@ -417,23 +448,38 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   const executeAction = useCallback(async (item: AIChatMessage) => {
     const action = item.action;
-    if (!action || item.actionDone || runningActionId) return;
+    const sessionId = sessionIdRef.current;
+    if (!action || item.actionDone || runningActionId || !sessionId) return;
     try {
       if (action.kind === 'abrir_pantalla') {
         const dest = DESTINO_SCREEN[action.destino];
         if (!dest) { Alert.alert('Acción', 'Ese destino no está disponible en esta versión de la app.'); return; }
-        markActionDone(item.id);
+        markActionDone(sessionId, item.id);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         navigation.navigate(dest.screen as any, { projectId, projectName, ...(dest.params ?? {}) } as any);
         return;
       }
       if (action.kind === 'crear_muestra') {
-        markActionDone(item.id);
+        markActionDone(sessionId, item.id);
         navigation.navigate('Samples', { projectId, projectName });
         return;
       }
       if (action.kind === 'crear_ensayo') {
         setRunningActionId(item.id);
+        // El templateId viene del catálogo de la NUBE: verificar que la plantilla
+        // (y sus ítems) existan LOCALMENTE — si no, createInstances crearía en
+        // silencio una ficha VACÍA y consumiría un correlativo.
+        const tplLocal = await protocolTemplatesCollection.find(action.templateId).catch(() => null);
+        const itemCount = tplLocal
+          ? await protocolTemplateItemsCollection.query(Q.where('template_id', action.templateId)).fetchCount().catch(() => 0)
+          : 0;
+        if (!tplLocal || itemCount === 0) {
+          Alert.alert(
+            'Plantilla sin sincronizar',
+            `El tipo "${action.templateNombre}" aún no está sincronizado en este teléfono. Entre a Ensayos o sincronice el proyecto e intente de nuevo.`,
+          );
+          return; // NO marcar hecho: la tarjeta queda disponible para reintentar
+        }
         // MISMO motor que la UI (numeración correlativa, reserva atómica online,
         // push + cola). createInstances es dueño del database.write.
         const res = await createInstances({
@@ -443,7 +489,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
           sectorName: action.sectorNombre ?? null,
           ensayoDate: action.fecha ?? null,
         });
-        markActionDone(item.id);
+        markActionDone(sessionId, item.id);
         const newId = res.ids[0];
         if (newId) navigation.navigate('ProtocolFill', { protocolId: newId });
         else Alert.alert('Acción', 'No se pudo crear el ensayo. Intente desde la pantalla de Ensayos.');
@@ -551,7 +597,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {messages.length === 0 ? (
+        {booting ? (
+          /* Cargando la última sesión: nada de bienvenida hasta decidir. */
+          <View style={{ flex: 1 }} />
+        ) : messages.length === 0 ? (
           /* ── Bienvenida de Flo: agua viva (motor GL del login) + chips.
                 El agua SOLO vive aquí — al conversar se desmonta (batería). ── */
           <View style={{ flex: 1 }}>
