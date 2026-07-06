@@ -46,6 +46,7 @@ import NumericTable from '@components/NumericTable';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { isProtocolConforming } from '@utils/protocolConformance';
 import { checkProtocolXrefStale, refreshProtocolXrefs } from '@services/XrefRefresh';
+import { upsertSummaryRow } from '@services/SummaryRowService';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
 import { printProtocolLabel } from '@services/LabelPrintService';
 import { useI18n, tx } from '@i18n/index';
@@ -355,6 +356,10 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
           .catch(() => {});
       }
     }
+    // v76 — Refrescar la fila resumen (estado/aprobado_por) local + nube. Sin esto
+    // la aprobación desde Auditoría dejaba protocol_summary_rows desactualizada
+    // (Tablas Resumen, Reportes por Correo y el Asistente IA la leen).
+    upsertSummaryRow(protocol!.id).catch(() => {});
     const locOnly = (location as any)?.locationOnly ?? null;
     const spec = (location as any)?.specialty ?? null;
     const protName = ((protocol as any).protocolCode ? `${(protocol as any).protocolCode} · ` : '') + ((protocol as any).protocolNumber ?? '');
@@ -397,6 +402,8 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
       }
     }
     pushProjectToSupabase((protocol as any).projectId).catch(() => {});
+    // v76 — Mismo refresco de fila resumen que en la aprobación (ver doApprove).
+    upsertSummaryRow(protocol!.id).catch(() => {});
     setSaving(false);
     setRejectReason('');
     navigation.goBack();

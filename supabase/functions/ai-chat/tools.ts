@@ -1,13 +1,19 @@
 /**
- * tools.ts — Herramientas del Asistente IA (Fase 1: núcleo de ensayos).
+ * tools.ts — Herramientas del Asistente IA.
  *
  * Cada tool consulta Supabase con el cliente AUTENTICADO CON EL JWT DEL USUARIO
  * (RLS aplica solo: can_access_project + org). El `projectId` va CERRADO en el
  * closure — el modelo no puede cambiar de proyecto. Toda cifra que el asistente
  * diga sale de aquí; el system prompt le prohíbe estimar por su cuenta.
  *
- * Fuente principal: `protocol_summary_rows` (una fila por ensayo ENVIADO/aprobado/
- * rechazado, con values_json ya calculado — nunca borradores a medio llenar).
+ * FUENTES DE DATOS (decisión clave):
+ *  - Conteos / listas / estados → tabla `protocols` (SIEMPRE fresca: push
+ *    inmediato + cola con retry en cada guardado/envío/aprobación — la misma
+ *    fuente que usa la web en useEnsayos/useDossier/useProjectMetrics).
+ *  - Valores numéricos (series/comparaciones/gráficos) → `protocol_summary_rows`
+ *    (values_json derivado). Es best-effort: cada tool de valores verifica la
+ *    COBERTURA contra `protocols` y avisa si hay ensayos sin valores sincronizados.
+ * Nunca se cuentan borradores (status DRAFT).
  */
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { type DateUnit, isYmd, periodKeyOf, periodLabel } from './dates.ts';
@@ -197,6 +203,77 @@ async function fetchRows(supabase: SupabaseClient, projectId: string, f: CommonF
 const truncNote = (shown: number, total: number) =>
   shown < total ? `Detalle calculado sobre los ${shown} ensayos más recientes de ${total} — acota el rango de fechas para exactitud.` : undefined;
 
+// ── Fuente FRESCA: tabla `protocols` (conteos / listas / estados) ────────────
+
+const NON_DRAFT = ['SUBMITTED', 'APPROVED', 'REJECTED'];
+
+interface ProtocolLite {
+  id: string;
+  protocol_code: string | null;
+  ensayo_date: string | null;
+  status: string | null;
+  template_id: string | null;
+  sector_id: string | null;
+  location_id: string | null;
+  filled_by_id: string | null;
+  signed_by_id: string | null;
+  rejection_reason: string | null;
+}
+
+function protocolsQuery(supabase: SupabaseClient, projectId: string, f: CommonFilters, resolved: { templateId?: string; sectorId?: string }, select: string, withCount: boolean) {
+  let q = supabase.from('protocols')
+    .select(select, withCount ? { count: 'exact' as const } : undefined)
+    .eq('project_id', projectId)
+    .in('status', NON_DRAFT);
+  if (isYmd(f.desde)) q = q.gte('ensayo_date', f.desde);
+  if (isYmd(f.hasta)) q = q.lte('ensayo_date', f.hasta);
+  if (resolved.templateId) q = q.eq('template_id', resolved.templateId);
+  if (resolved.sectorId) q = q.eq('sector_id', resolved.sectorId);
+  if (f.estado) q = q.eq('status', f.estado);
+  return q;
+}
+
+/** Ensayos desde `protocols` con count exacto; truncado descarta lo más antiguo. */
+async function fetchProtocols(supabase: SupabaseClient, projectId: string, f: CommonFilters, resolved: { templateId?: string; sectorId?: string }, limit = 2000): Promise<{ rows: ProtocolLite[]; total: number }> {
+  const { data, error, count } = await protocolsQuery(
+    supabase, projectId, f, resolved,
+    'id, protocol_code, ensayo_date, status, template_id, sector_id, location_id, filled_by_id, signed_by_id, rejection_reason',
+    true,
+  )
+    .order('ensayo_date', { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  const rows = ((data ?? []) as unknown as ProtocolLite[]).reverse();
+  return { rows, total: count ?? rows.length };
+}
+
+/** Cobertura de VALORES: cuántos ensayos reales del filtro tienen fila resumen
+ *  sincronizada. Si faltan, las tools de valores lo advierten (cifras parciales). */
+async function valueCoverageNote(supabase: SupabaseClient, projectId: string, f: CommonFilters, resolved: { templateId?: string; sectorId?: string }, valuesFound: number): Promise<string | undefined> {
+  try {
+    const { count } = await protocolsQuery(supabase, projectId, f, resolved, 'id', true).limit(1);
+    const realTotal = count ?? 0;
+    if (realTotal > valuesFound) {
+      return `Hay ${realTotal} ensayos en el filtro pero solo ${valuesFound} tienen resultados numéricos sincronizados — las cifras pueden ser parciales. Sugiere al usuario abrir Tablas Resumen o re-sincronizar para completar.`;
+    }
+  } catch { /* la advertencia es best-effort */ }
+  return undefined;
+}
+
+/** Nombres de usuarios (realizó/aprobó) por id — best-effort bajo RLS de org. */
+async function userNames(supabase: SupabaseClient, ids: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const uniq = Array.from(new Set(ids.filter(Boolean)));
+  if (uniq.length === 0) return map;
+  try {
+    const { data } = await supabase.from('users').select('id, name, apellido').in('id', uniq.slice(0, 100));
+    for (const u of data ?? []) {
+      map.set(u.id as string, [u.name, u.apellido].filter(Boolean).join(' ').trim());
+    }
+  } catch { /* sin nombres: se devuelven ids nulos */ }
+  return map;
+}
+
 /** Valor numérico de una columna del values_json (acepta número o string numérica). */
 function numValue(vj: Record<string, unknown> | null, key: string): number | null {
   const v = vj?.[key];
@@ -227,19 +304,27 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       description: 'Devuelve los catálogos reales del proyecto: sectores (id+nombre), tipos de ensayo (template_id, código, nombre y sus columnas de resultados con su key exacta), ubicaciones, rango de fechas con datos y total de ensayos registrados. Úsala PRIMERO cuando el usuario mencione un sector, tipo de ensayo o resultado por su nombre, para resolverlo a IDs/keys reales.',
       input_schema: { type: 'object', properties: {}, additionalProperties: false },
       execute: async () => {
-        const cat = await loadCatalog(supabase, projectId);
-        const { data: range } = await supabase.from('protocol_summary_rows')
-          .select('ensayo_date').eq('project_id', projectId)
-          .not('ensayo_date', 'is', null).order('ensayo_date', { ascending: true }).limit(1);
-        const { data: rangeMax } = await supabase.from('protocol_summary_rows')
-          .select('ensayo_date').eq('project_id', projectId)
-          .not('ensayo_date', 'is', null).order('ensayo_date', { ascending: false }).limit(1);
-        const { count } = await supabase.from('protocol_summary_rows')
-          .select('id', { count: 'exact', head: true }).eq('project_id', projectId);
+        const [cat, minQ, maxQ, totQ, sumQ] = await Promise.all([
+          loadCatalog(supabase, projectId),
+          supabase.from('protocols').select('ensayo_date').eq('project_id', projectId)
+            .in('status', NON_DRAFT).not('ensayo_date', 'is', null)
+            .order('ensayo_date', { ascending: true }).limit(1),
+          supabase.from('protocols').select('ensayo_date').eq('project_id', projectId)
+            .in('status', NON_DRAFT).not('ensayo_date', 'is', null)
+            .order('ensayo_date', { ascending: false }).limit(1),
+          supabase.from('protocols').select('id', { count: 'exact', head: true })
+            .eq('project_id', projectId).in('status', NON_DRAFT),
+          supabase.from('protocol_summary_rows').select('id', { count: 'exact', head: true })
+            .eq('project_id', projectId),
+        ]);
+        const total = totQ.count ?? 0;
+        const conValores = sumQ.count ?? 0;
         return {
           ...cat,
-          rango_fechas: { primera: range?.[0]?.ensayo_date ?? null, ultima: rangeMax?.[0]?.ensayo_date ?? null },
-          total_ensayos: count ?? 0,
+          rango_fechas: { primera: minQ.data?.[0]?.ensayo_date ?? null, ultima: maxQ.data?.[0]?.ensayo_date ?? null },
+          total_ensayos: total,
+          ensayos_con_valores_numericos: conValores,
+          ...(conValores < total ? { advertencia: `${total - conValores} ensayos aún no tienen sus resultados numéricos sincronizados (los conteos y estados SÍ están completos; las series/gráficos pueden ser parciales).` } : {}),
         };
       },
     },
@@ -257,22 +342,31 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters & { agrupar?: DateUnit }) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const { rows, total } = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchProtocols(supabase, projectId, input, res);
         const unit: DateUnit = input.agrupar && ['dia', 'semana', 'mes'].includes(input.agrupar) ? input.agrupar : 'total';
         const porTipo = new Map<string, number>();
         for (const r of rows) porTipo.set(r.template_id ?? '?', (porTipo.get(r.template_id ?? '?') ?? 0) + 1);
-        const out: Record<string, unknown> = { total, por_tipo: Array.from(porTipo, ([template_id, cantidad]) => ({ template_id, cantidad })) };
+        const porEstado = { SUBMITTED: 0, APPROVED: 0, REJECTED: 0 } as Record<string, number>;
+        for (const r of rows) porEstado[r.status ?? '?'] = (porEstado[r.status ?? '?'] ?? 0) + 1;
+        const out: Record<string, unknown> = {
+          total,
+          por_estado: { en_revision: porEstado.SUBMITTED ?? 0, aprobados: porEstado.APPROVED ?? 0, rechazados: porEstado.REJECTED ?? 0 },
+          por_tipo: Array.from(porTipo, ([template_id, cantidad]) => ({ template_id, cantidad })),
+        };
         const nota = truncNote(rows.length, total);
         if (nota) out.advertencia = nota;
         if (unit !== 'total') {
           const buckets = new Map<string, number>();
+          let sinFecha = 0;
           for (const r of rows) {
-            if (!r.ensayo_date) continue;
+            if (!r.ensayo_date) { sinFecha++; continue; }
             const k = periodKeyOf(r.ensayo_date, unit);
             buckets.set(k, (buckets.get(k) ?? 0) + 1);
           }
           out.grupos = Array.from(buckets.entries()).sort((a, b) => a[0].localeCompare(b[0]))
             .map(([k, cantidad]) => ({ periodo: k, etiqueta: periodLabel(k, unit), cantidad }));
+          // Sin esto, total != suma de grupos y el modelo no sabría por qué.
+          if (sinFecha > 0) out.sin_fecha = sinFecha;
         }
         return out;
       },
@@ -291,17 +385,30 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters & { limite?: number }) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const { rows, total } = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchProtocols(supabase, projectId, input, res);
         const limite = Math.min(Math.max(input.limite ?? 10, 1), 20);
         const recent = rows.slice(-limite).reverse();
+        // Nombres legibles (tipo/sector/ubicación/personas) solo para los listados.
+        const [tplQ, secQ, locQ, names] = await Promise.all([
+          supabase.from('protocol_templates').select('id, id_protocolo, name').eq('project_id', projectId),
+          supabase.from('project_sectors').select('id, name').eq('project_id', projectId),
+          supabase.from('locations').select('id, name').eq('project_id', projectId).limit(500),
+          userNames(supabase, recent.flatMap(r => [r.filled_by_id ?? '', r.signed_by_id ?? ''])),
+        ]);
+        const tplName = new Map((tplQ.data ?? []).map(t => [t.id as string, `${t.id_protocolo ? t.id_protocolo + ' · ' : ''}${t.name ?? ''}`]));
+        const secName = new Map((secQ.data ?? []).map(s => [s.id as string, s.name as string]));
+        const locName = new Map((locQ.data ?? []).map(l => [l.id as string, l.name as string]));
         return {
           mostrando: recent.length,
           total_filtrado: total,
           ensayos: recent.map(r => ({
-            codigo: r.protocol_code, fecha: r.ensayo_date, template_id: r.template_id,
-            sector: r.sector_name, ubicacion: r.location_name, estado: r.status,
-            realizo: (r.values_json?.realizado_por as string) ?? null,
-            aprobo: (r.values_json?.aprobado_por as string) ?? null,
+            codigo: r.protocol_code, fecha: r.ensayo_date,
+            tipo: r.template_id ? (tplName.get(r.template_id) ?? null) : null,
+            sector: r.sector_id ? (secName.get(r.sector_id) ?? null) : null,
+            ubicacion: r.location_id ? (locName.get(r.location_id) ?? null) : null,
+            estado: r.status,
+            realizo: r.filled_by_id ? (names.get(r.filled_by_id) ?? null) : null,
+            aprobo: r.signed_by_id ? (names.get(r.signed_by_id) ?? null) : null,
           })),
         };
       },
@@ -331,13 +438,20 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ fecha: r.ensayo_date, valor: v });
         }
-        if (points.length === 0) return { puntos: [], n: 0, mensaje: 'Sin datos numéricos para esa columna en el rango.' };
+        // Cobertura con el TOTAL EXACTO de filas resumen (no la página truncada a
+        // 2000): con >2000 filas sincronizadas la nota acusaría un falso "faltan
+        // por sincronizar" y taparía la explicación correcta (truncación).
+        const cobertura = await valueCoverageNote(supabase, projectId, input, res, total);
+        if (points.length === 0) {
+          return { puntos: [], n: 0, mensaje: 'Sin datos numéricos para esa columna en el rango.', ...(cobertura ? { advertencia: cobertura } : {}) };
+        }
         const ys = points.map(p => p.valor);
         const xs0 = ymdToDays(points[0].fecha);
         const slope = linearSlopePerDay(points.map(p => ({ x: ymdToDays(p.fecha) - xs0, y: p.valor })));
         const capped = points.length > 200 ? points.filter((_, i) => i % Math.ceil(points.length / 200) === 0) : points;
+        const advertencia = truncNote(rows.length, total) ?? cobertura;
         return {
-          ...(truncNote(rows.length, total) ? { advertencia: truncNote(rows.length, total) } : {}),
+          ...(advertencia ? { advertencia } : {}),
           n: points.length,
           puntos: capped,
           promedio: ys.reduce((a, b) => a + b, 0) / ys.length,
@@ -387,12 +501,24 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           }
         };
         const grab = async (p: { desde: string; hasta: string }) => {
-          const { rows } = await fetchRows(supabase, projectId, { ...input, desde: p.desde, hasta: p.hasta }, res);
-          return rows.map(r => numValue(r.values_json, input.column_key)).filter((v): v is number => v != null);
+          const { rows, total } = await fetchRows(supabase, projectId, { ...input, desde: p.desde, hasta: p.hasta }, res);
+          return {
+            vals: rows.map(r => numValue(r.values_json, input.column_key)).filter((v): v is number => v != null),
+            // Total EXACTO de filas resumen del periodo (para cobertura): contar
+            // valores no-nulos confundiría "columna no aplica" con "sin sincronizar".
+            total,
+          };
         };
-        const [va, vb] = await Promise.all([grab(input.periodo_a), grab(input.periodo_b)]);
+        const [ga, gb] = await Promise.all([grab(input.periodo_a), grab(input.periodo_b)]);
+        const va = ga.vals, vb = gb.vals;
         const a = agg(va), b = agg(vb);
+        const [covA, covB] = await Promise.all([
+          valueCoverageNote(supabase, projectId, { ...input, desde: input.periodo_a.desde, hasta: input.periodo_a.hasta }, res, ga.total),
+          valueCoverageNote(supabase, projectId, { ...input, desde: input.periodo_b.desde, hasta: input.periodo_b.hasta }, res, gb.total),
+        ]);
+        const advertencia = covB ?? covA;
         return {
+          ...(advertencia ? { advertencia } : {}),
           operacion: input.operacion ?? 'promedio',
           periodo_a: { ...input.periodo_a, valor: a, n: va.length },
           periodo_b: { ...input.periodo_b, valor: b, n: vb.length },
@@ -422,7 +548,7 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         if (!res.templateId && !input.tipo_nombre) {
           return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: una columna pertenece a un tipo de ensayo (sin él se mezclarían valores de tipos distintos).' };
         }
-        const { rows } = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const points: { x: string; y: number }[] = [];
         for (const r of rows) {
           if (!isYmd(r.ensayo_date)) continue; // fecha malformada → NaN en el SVG
@@ -430,13 +556,21 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           if (v != null) points.push({ x: r.ensayo_date, y: v });
         }
         if (points.length < 2) {
-          return { grafico_generado: false, mensaje: `Solo hay ${points.length} dato(s) numérico(s) para esa columna en el rango — no alcanza para una tendencia.` };
+          const cobertura = await valueCoverageNote(supabase, projectId, input, res, total);
+          return {
+            grafico_generado: false,
+            mensaje: `Solo hay ${points.length} dato(s) numérico(s) para esa columna en el rango — no alcanza para una tendencia.`,
+            ...(cobertura ? { advertencia: cobertura } : {}),
+          };
         }
         const ys = points.map(p => p.y);
         const svg = renderTrendChartSvg(input.titulo.slice(0, 80), points);
+        // Total exacto (no la página truncada) — ver nota en serie_temporal.
+        const cobertura = truncNote(rows.length, total) ?? await valueCoverageNote(supabase, projectId, input, res, total);
         return {
           grafico_generado: true,
           [CHART_SVG_KEY]: svg,   // index.ts lo extrae; NO viaja al modelo
+          ...(cobertura ? { advertencia: cobertura } : {}),
           resumen: {
             n: points.length,
             promedio: ys.reduce((a, b) => a + b, 0) / ys.length,
@@ -511,25 +645,16 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       execute: async (input: CommonFilters) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
-        const { rows, total } = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchProtocols(supabase, projectId, input, res);
         const counts = { SUBMITTED: 0, APPROVED: 0, REJECTED: 0 } as Record<string, number>;
         for (const r of rows) counts[r.status ?? '?'] = (counts[r.status ?? '?'] ?? 0) + 1;
         // Motivos de rechazo: SOLO de los ensayos que pasaron el filtro (fecha/
-        // tipo/sector) — no los últimos 5 de todo el proyecto.
-        const rejCodes = rows
-          .filter(r => r.status === 'REJECTED' && r.protocol_code)
-          .map(r => r.protocol_code as string)
-          .slice(-30);
-        let rechazos: { codigo: string | null; fecha: string | null; motivo: string | null }[] = [];
-        if (rejCodes.length > 0) {
-          const { data: rej } = await supabase.from('protocols')
-            .select('protocol_code, rejection_reason, ensayo_date')
-            .eq('project_id', projectId)
-            .in('protocol_code', rejCodes)
-            .not('rejection_reason', 'is', null)
-            .order('updated_at', { ascending: false }).limit(5);
-          rechazos = (rej ?? []).map(r => ({ codigo: r.protocol_code, fecha: r.ensayo_date, motivo: r.rejection_reason }));
-        }
+        // tipo/sector) — `protocols.rejection_reason` viene en la misma query.
+        const rechazos = rows
+          .filter(r => r.status === 'REJECTED')
+          .slice(-5)
+          .reverse()
+          .map(r => ({ codigo: r.protocol_code, fecha: r.ensayo_date, motivo: r.rejection_reason }));
         const nota = truncNote(rows.length, total);
         return {
           ...(nota ? { advertencia: nota } : {}),

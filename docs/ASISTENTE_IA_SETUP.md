@@ -30,6 +30,24 @@ supabase secrets set ELEVENLABS_API_KEY=...       --project-ref <TU_PROJECT_REF>
 - Opcional `ELEVENLABS_VOICE_ID`: cambia la voz sin redesplegar (default: voz
   femenina multilingüe "Sarah", `EXAVITQu4vr4xnSDxMaL`).
 
+### Proveedor Gemini (opcional, con free tier)
+
+El Creador puede cambiar el proveedor de IA del proyecto a **Gemini** en la
+configuración (Proveedor de IA: Claude / Gemini). Para que funcione:
+
+```bash
+supabase secrets set GEMINI_API_KEY=...   # aistudio.google.com → "Get API key" (gratis, sin tarjeta)
+```
+
+Modelos por nivel (sobreescribibles por secreto sin redesplegar):
+- Económico → `gemini-2.5-flash` (free tier) — `GEMINI_MODEL_ECONOMICO`
+- Potente → `gemini-3.5-flash` — `GEMINI_MODEL_POTENTE`
+- Máximo → `gemini-3.1-pro-preview` — `GEMINI_MODEL_MAXIMO`
+
+El mapeo proveedor+nivel → modelo es 100% server-side (tamper-proof), igual que
+con Claude. Si el proyecto está en Gemini y falta `GEMINI_API_KEY`, el chat
+devuelve un error claro indicándolo.
+
 ## 3. Rebuild del dev client (módulo de audio)
 
 `expo-audio` es un módulo NATIVO nuevo — el dev client instalado no lo tiene.
@@ -49,6 +67,16 @@ npx expo run:android
    ve el Creador y el mapeo tier→modelo vive en el servidor (nadie puede forzar
    un modelo caro desde el celular).
 3. En el menú del proyecto aparece **Asistente IA**.
+
+## Fuentes de datos (frescura garantizada)
+
+- **Conteos, listas y estados** salen de la tabla `protocols`, que se sincroniza
+  con push inmediato + cola con reintentos en cada guardado/envío/aprobación —
+  la misma fuente que usa la versión web.
+- **Valores numéricos** (series, comparaciones, gráficos) salen de
+  `protocol_summary_rows` (derivada). Si a algún ensayo le faltan valores
+  sincronizados, el asistente lo ADVIERTE en la respuesta, y al abrir el chat
+  el celular repara en segundo plano las filas faltantes con sus datos locales.
 
 ## Qué sabe responder
 

@@ -240,6 +240,39 @@ export async function pullSummaryRows(projectId: string): Promise<void> {
   }
 }
 
+/** REPARACIÓN de nube (una vez por proyecto por instalación): además del
+ *  backfill local, RE-EMPUJA todas las filas resumen a Supabase vía la cola
+ *  (dedup + retry). Cubre el caso "la fila local existe y está al día, pero el
+ *  push a la nube falló en silencio en su momento" — que el backfill normal
+ *  salta. La usa el Asistente IA al abrirse (sus valores numéricos leen la nube). */
+// Guardas de la reparación: nunca dos corridas en paralelo del mismo proyecto
+// (reabrir el chat durante el proceso duplicaría todo el trabajo) y máximo una
+// corrida por proyecto por SESIÓN de app (el backfill N-escala no es gratis).
+const _repairInFlight = new Set<string>();
+const _repairedThisSession = new Set<string>();
+
+export async function repairCloudSummaryOnce(projectId: string): Promise<void> {
+  if (_repairInFlight.has(projectId) || _repairedThisSession.has(projectId)) return;
+  _repairInFlight.add(projectId);
+  const key = `summary_cloud_repair_v1:${projectId}`;
+  try {
+    await backfillLocalSummary(projectId);
+    _repairedThisSession.add(projectId);
+    if (await AsyncStorage.getItem(key)) return; // re-push ya hecho en esta instalación
+    const protos: any[] = await protocolsCollection
+      .query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')))
+      .fetch();
+    for (const p of protos) {
+      await enqueueSync({ opType: 'PUSH_SUMMARY_ROW', entityId: p.id, projectId }).catch(() => {});
+    }
+    await AsyncStorage.setItem(key, String(Date.now()));
+  } catch (e) {
+    console.warn('[summary] repairCloudSummaryOnce falló:', e);
+  } finally {
+    _repairInFlight.delete(projectId);
+  }
+}
+
 /** BACKFILL local: construye la fila resumen de los protocolos no-DRAFT del
  *  celular que aún no la tengan (datos previos a la feature). Garantiza que no
  *  falte ningún ensayo de origen móvil; también los empuja a la nube. */

@@ -285,15 +285,28 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
           <CheckRow label="Asistente de IA" description="Chat inteligente del proyecto: consultas en lenguaje natural sobre ensayos, sectores y avance, con gráficos y resumen narrado por voz. Solo en el celular por ahora."
             value={!!flags.module_ai_assistant} onToggle={() => toggleFlag('module_ai_assistant')} />
           {flags.module_ai_assistant && (
-            <View style={styles.subRow}>
-              <Text style={styles.subRowLabel}>Nivel del modelo</Text>
-              {([['economico', 'Económico'], ['potente', 'Potente'], ['maximo', 'Máximo']] as const).map(([val, label]) => (
-                <TouchableOpacity key={val} onPress={() => setFlag('ai_model_tier', val)}
-                  style={[styles.levelBtn, (flags.ai_model_tier ?? 'economico') === val && styles.levelBtnActive]}>
-                  <Text style={[styles.levelBtnText, (flags.ai_model_tier ?? 'economico') === val && { color: Colors.white }]}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <>
+              {/* v76 — Proveedor de IA. El mapeo proveedor+nivel → modelo real es
+                  server-side; requiere la API key del proveedor en secretos. */}
+              <View style={styles.subRow}>
+                <Text style={styles.subRowLabel}>Proveedor de IA</Text>
+                {([['claude', 'Claude'], ['gemini', 'Gemini']] as const).map(([val, label]) => (
+                  <TouchableOpacity key={val} onPress={() => setFlag('ai_provider', val)}
+                    style={[styles.levelBtn, (flags.ai_provider ?? 'claude') === val && styles.levelBtnActive]}>
+                    <Text style={[styles.levelBtnText, (flags.ai_provider ?? 'claude') === val && { color: Colors.white }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.subRow}>
+                <Text style={styles.subRowLabel}>Nivel del modelo</Text>
+                {([['economico', 'Económico'], ['potente', 'Potente'], ['maximo', 'Máximo']] as const).map(([val, label]) => (
+                  <TouchableOpacity key={val} onPress={() => setFlag('ai_model_tier', val)}
+                    style={[styles.levelBtn, (flags.ai_model_tier ?? 'economico') === val && styles.levelBtnActive]}>
+                    <Text style={[styles.levelBtnText, (flags.ai_model_tier ?? 'economico') === val && { color: Colors.white }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
           )}
 
           {/* ── v31 (Parte D+E) + v43: Llenado de protocolos ── */}

@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal,
   KeyboardAvoidingView, Platform, Animated, ScrollView, Alert, useWindowDimensions,
-  ActivityIndicator,
+  ActivityIndicator, type StyleProp, type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +23,7 @@ import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { projectSectorsCollection } from '@db/index';
+import { repairCloudSummaryOnce } from '@services/SummaryRowService';
 import {
   type AIChatMessage, type AIChatSession, deleteNarrationFile, deleteSession,
   loadSessions, newSessionId, requestNarration, saveSession, sendChatMessage,
@@ -37,11 +38,11 @@ import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSugges
 interface AudioPlayerLite {
   play: () => void;
   remove: () => void;
-  addListener: (event: 'playbackStatusUpdate', cb: (status: { didJustFinish?: boolean }) => void) => { remove: () => void };
+  addListener: (event: 'playbackStatusUpdate', cb: (status: { didJustFinish?: boolean; isLoaded?: boolean }) => void) => { remove: () => void };
 }
 function loadExpoAudio(): {
   createAudioPlayer: (source: { uri: string }) => AudioPlayerLite;
-  setAudioModeAsync: (mode: { playsInSilentMode: boolean }) => Promise<void>;
+  setAudioModeAsync: (mode: Record<string, unknown>) => Promise<void>;
 } | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -51,6 +52,18 @@ function loadExpoAudio(): {
   }
 }
 
+/** Config de audio para el TTS. La clave en Android es shouldRouteThroughEarpiece:
+ *  false — si otra parte de la app dejó el AudioManager en modo comunicación
+ *  (grabación/cámara), el audio saldría por el AURICULAR a volumen bajísimo y
+ *  "no se escucha" (clásico en Samsung). Esto lo resetea a altavoz multimedia. */
+const TTS_AUDIO_MODE = {
+  playsInSilentMode: true,             // iOS: sonar aunque el switch esté en silencio
+  interruptionMode: 'duckOthers',      // iOS
+  interruptionModeAndroid: 'duckOthers',
+  shouldPlayInBackground: false,
+  shouldRouteThroughEarpiece: false,   // Android: altavoz multimedia, no auricular
+};
+
 type Props = NativeStackScreenProps<RootStackParamList, 'AIChat'>;
 
 const fmtTime = (ms: number) => {
@@ -58,6 +71,21 @@ const fmtTime = (ms: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 const fmtDay = (ms: number) => new Date(ms).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
+
+/** Render mínimo de markdown en burbujas: **negritas**. El prompt pide texto
+ *  plano, pero los modelos a veces igual emiten asteriscos — mejor pintarlos
+ *  como negrita que mostrarlos literales. */
+function RichText({ text, style }: { text: string; style: StyleProp<TextStyle> }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <Text style={style}>
+      {parts.map((p, i) =>
+        p.startsWith('**') && p.endsWith('**') && p.length > 4
+          ? <Text key={i} style={{ fontWeight: '800' }}>{p.slice(2, -2)}</Text>
+          : p)}
+    </Text>
+  );
+}
 
 /** Indicador "escribiendo…" — 3 puntos con opacidad animada en cascada. */
 function TypingDots() {
@@ -105,9 +133,13 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // guard síncrono contra doble tap (el estado React llega tarde).
   const speechReqRef = useRef(0);
   const speechBusyRef = useRef(false);
+  // Timeout de seguridad: en Android didJustFinish puede dejar de llegar
+  // (issue conocido de expo-audio) — se libera solo tras un tope generoso.
+  const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopSpeech = useCallback(() => {
     speechReqRef.current++;
+    if (speechTimerRef.current) { clearTimeout(speechTimerRef.current); speechTimerRef.current = null; }
     playerSubRef.current?.remove();
     playerSubRef.current = null;
     try { playerRef.current?.remove(); } catch { /* ya liberado */ }
@@ -134,15 +166,26 @@ export default function AIChatScreen({ navigation, route }: Props) {
     try {
       const uri = await requestNarration(projectId, item.text);
       if (speechReqRef.current !== reqId) { deleteNarrationFile(uri); return; } // stop/back durante la espera
-      await audio.setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+      await audio.setAudioModeAsync(TTS_AUDIO_MODE).catch(() => {});
+      // Re-validar tras CADA await: un stop/back durante setAudioModeAsync crearía
+      // un reproductor fantasma que nada apaga (el timeout ya no le corresponde).
+      if (speechReqRef.current !== reqId) { deleteNarrationFile(uri); return; }
       const player = audio.createAudioPlayer({ uri });
       playerRef.current = player;
       audioUriRef.current = uri;
+      // Patrón defensivo: play() inmediato + re-play cuando isLoaded llegue
+      // (evita la carrera "play antes de cargar" que deja el audio mudo).
+      let started = false;
       playerSubRef.current = player.addListener('playbackStatusUpdate', s => {
+        if (s?.isLoaded && !started) { started = true; try { player.play(); } catch { /* ya sonando */ } }
         if (s?.didJustFinish) stopSpeech();
       });
       setSpeakingId(item.id);
       player.play();
+      // Liberación de seguridad (texto ≤1200 chars ≈ ~90 s de audio).
+      speechTimerRef.current = setTimeout(() => {
+        if (speechReqRef.current === reqId) stopSpeech();
+      }, 150_000);
     } catch (e) {
       if (speechReqRef.current === reqId) {
         stopSpeech();
@@ -153,6 +196,15 @@ export default function AIChatScreen({ navigation, route }: Props) {
       setLoadingSpeechId(prev => (prev === item.id ? null : prev));
     }
   }, [speakingId, projectId, stopSpeech]);
+
+  // AUTO-REPARACIÓN de datos del asistente: los valores numéricos que consulta
+  // la IA viven en protocol_summary_rows (nube), una tabla derivada que puede
+  // quedar incompleta (pushes fallidos / aprobaciones viejas). Al abrir el chat
+  // se regeneran las filas faltantes y (una vez por proyecto) se re-empujan
+  // TODAS a la nube vía la cola de sync — en segundo plano, no bloquea nada.
+  useEffect(() => {
+    repairCloudSummaryOnce(projectId).catch(() => {});
+  }, [projectId]);
 
   // Chips dinámicos: la pregunta de ejemplo usa el PRIMER sector real del
   // proyecto (base local) para que la consulta siempre tenga sentido.
@@ -180,7 +232,21 @@ export default function AIChatScreen({ navigation, route }: Props) {
     setSession({ id: newSessionId(), titulo: 'Nueva conversación', createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
   }, [stopSpeech]);
 
-  useEffect(() => { startNewSession(); }, [startNewSession]);
+  // Al entrar: RETOMAR la última conversación guardada (abrir siempre en blanco
+  // hacía sentir que "se perdía todo"). "Nueva conversación" sigue en el header.
+  useEffect(() => {
+    let alive = true;
+    loadSessions(projectId)
+      .then(all => {
+        if (!alive) return;
+        const latest = all.find(s => s.messages.length > 0);
+        if (latest) setSession(latest);
+        else startNewSession();
+      })
+      .catch(() => { if (alive) startNewSession(); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   const openHistory = useCallback(async () => {
     setPastSessions(await loadSessions(projectId));
@@ -283,9 +349,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
               <SvgXml xml={item.chartSvg!} width={chartW} height={chartW * (360 / 640)} />
             </View>
           )}
-          <Text style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}>
-            {isError ? item.text.slice(1).trim() : item.text}
-          </Text>
+          <RichText
+            style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}
+            text={isError ? item.text.slice(1).trim() : item.text}
+          />
           <View style={styles.msgFooter}>
             {!isUser && !isError && (
               loadingSpeechId === item.id ? (
