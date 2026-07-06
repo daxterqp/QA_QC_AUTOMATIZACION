@@ -9,6 +9,17 @@
 
 export interface ChartPoint { x: string; y: number } // x = YYYY-MM-DD
 
+/** Tipos de gráfico del PUENTE compartido: el mismo spec (kind + title +
+ *  points) alimenta a Flo hoy y a futuros renderers (reportes ya tienen su
+ *  gemelo en flow-qaqc-web/lib/reports/chart.ts — mantener la paridad al
+ *  agregar tipos nuevos aquí Y allá). */
+export type ChartKind = 'linea' | 'barras';
+
+/** Punto de entrada único del puente. Devuelve '' si no hay datos suficientes. */
+export function renderChartSvg(kind: ChartKind, title: string, points: ChartPoint[]): string {
+  return kind === 'barras' ? renderBarChartSvg(title, points) : renderTrendChartSvg(title, points);
+}
+
 const W = 640, H = 360;
 const M = { top: 44, right: 22, bottom: 44, left: 56 };
 const NAVY = '#0e213d', PRIMARY = '#394e7d', GRID = '#e2e8f0', MUTED = '#64748b';
@@ -90,5 +101,55 @@ export function renderTrendChartSvg(title: string, rawPoints: ChartPoint[]): str
   ${trend}
   ${dots}
   <text x="${W - M.right}" y="26" text-anchor="end" font-size="11" fill="${MUTED}">— datos  ‑ ‑ tendencia</text>
+</svg>`;
+}
+
+const MAX_BARS = 48;
+
+/** Barras verticales sobre eje categórico de fechas (ancladas en 0). Si hay
+ *  más de MAX_BARS puntos, se muestran los más RECIENTES (con nota). */
+export function renderBarChartSvg(title: string, rawPoints: ChartPoint[]): string {
+  const valid = rawPoints.filter(p =>
+    Number.isFinite(new Date(p.x + 'T00:00:00Z').getTime()) && Number.isFinite(p.y));
+  if (valid.length === 0) return '';
+  const clipped = valid.length > MAX_BARS;
+  const points = clipped ? valid.slice(-MAX_BARS) : valid;
+  const ys = points.map(p => p.y);
+  const ticks = niceTicks(Math.min(0, ...ys), Math.max(0, ...ys));
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const plotW = W - M.left - M.right, plotH = H - M.top - M.bottom;
+  const Y = (v: number) => M.top + plotH - ((v - y0) / (y1 - y0)) * plotH;
+  const step = plotW / points.length;
+  const barW = Math.max(2, step * 0.68);
+
+  const gridLines = ticks.map(v =>
+    `<line x1="${M.left}" y1="${Y(v).toFixed(1)}" x2="${W - M.right}" y2="${Y(v).toFixed(1)}" stroke="${GRID}" stroke-width="1"/>` +
+    `<text x="${M.left - 8}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end" font-size="11" fill="${MUTED}">${+v.toFixed(4)}</text>`
+  ).join('');
+
+  const bars = points.map((p, i) => {
+    const x = M.left + i * step + (step - barW) / 2;
+    const yTop = Y(Math.max(0, p.y));
+    const h = Math.abs(Y(p.y) - Y(0));
+    return `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, h).toFixed(1)}" fill="${NAVY}" opacity="0.88" rx="1.5"/>`;
+  }).join('');
+
+  // Etiquetas X: hasta 6, repartidas (centradas bajo su barra).
+  const nx = Math.min(6, points.length);
+  const xLabels = Array.from({ length: nx }, (_, i) => {
+    const idx = nx === 1 ? 0 : Math.round((i * (points.length - 1)) / (nx - 1));
+    const cx = M.left + idx * step + step / 2;
+    return `<text x="${cx.toFixed(1)}" y="${H - M.bottom + 18}" text-anchor="middle" font-size="11" fill="${MUTED}">${dmy(points[idx].x)}</text>`;
+  }).join('');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+  <rect width="${W}" height="${H}" fill="#ffffff" rx="8"/>
+  <text x="${M.left}" y="26" font-size="15" font-weight="bold" fill="${NAVY}">${esc(title)}</text>
+  ${gridLines}
+  <line x1="${M.left}" y1="${M.top}" x2="${M.left}" y2="${H - M.bottom}" stroke="${MUTED}" stroke-width="1.2"/>
+  <line x1="${M.left}" y1="${Y(Math.max(y0, Math.min(y1, 0))).toFixed(1)}" x2="${W - M.right}" y2="${Y(Math.max(y0, Math.min(y1, 0))).toFixed(1)}" stroke="${MUTED}" stroke-width="1.2"/>
+  ${xLabels}
+  ${bars}
+  ${clipped ? `<text x="${W - M.right}" y="26" text-anchor="end" font-size="11" fill="${MUTED}">últimos ${MAX_BARS} datos</text>` : ''}
 </svg>`;
 }

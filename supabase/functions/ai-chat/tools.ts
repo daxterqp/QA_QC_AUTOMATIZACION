@@ -17,7 +17,7 @@
  */
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { type DateUnit, isYmd, periodKeyOf, periodLabel } from './dates.ts';
-import { renderTrendChartSvg } from './chart.ts';
+import { type ChartKind, renderChartSvg } from './chart.ts';
 
 /** Nombre de la tool cuyo SVG intercepta index.ts (no vuelve al modelo). */
 export const CHART_TOOL_NAME = 'generar_grafico';
@@ -544,18 +544,19 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
     // ── Fase 2: "toda la app conversable" ────────────────────────────────────
     {
       name: CHART_TOOL_NAME,
-      description: 'Genera un GRÁFICO de tendencia (línea + recta de tendencia) de una columna numérica de un tipo de ensayo en el tiempo. El gráfico se muestra automáticamente en el chat — tú solo comenta las cifras del resumen que te devuelve. Úsala cuando pidan "grafica", "muéstrame la curva/tendencia/evolución".',
+      description: 'Genera un GRÁFICO de una columna numérica de un tipo de ensayo en el tiempo: estilo "linea" (con recta de tendencia — para evolución/tendencia) o "barras" (para comparar valores individuales). El gráfico se muestra automáticamente en el chat — tú solo comenta las cifras del resumen que te devuelve. Úsala cuando pidan "grafica", "muéstrame la curva/tendencia/evolución/barras".',
       input_schema: {
         type: 'object',
         properties: {
           ...COMMON_FILTER_PROPS,
           column_key: { type: 'string', description: 'Key exacta de la columna (de catalogo_proyecto)' },
           titulo: { type: 'string', description: 'Título corto del gráfico en español (ej. "Grado de compactación — última semana")' },
+          estilo: { type: 'string', enum: ['linea', 'barras'], description: 'Estilo del gráfico (default linea)' },
         },
         required: ['column_key', 'titulo'],
         additionalProperties: false,
       },
-      execute: async (input: CommonFilters & { column_key: string; titulo: string }) => {
+      execute: async (input: CommonFilters & { column_key: string; titulo: string; estilo?: string }) => {
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
         if (!res.templateId && !input.tipo_nombre) {
@@ -568,16 +569,19 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ x: r.ensayo_date, y: v });
         }
-        if (points.length < 2) {
+        const estilo: ChartKind = input.estilo === 'barras' ? 'barras' : 'linea';
+        // Barras funcionan desde 1 dato; la línea de tendencia necesita ≥2.
+        const minPoints = estilo === 'barras' ? 1 : 2;
+        if (points.length < minPoints) {
           const cobertura = await valueCoverageNote(supabase, projectId, input, res, total);
           return {
             grafico_generado: false,
-            mensaje: `Solo hay ${points.length} dato(s) numérico(s) para esa columna en el rango — no alcanza para una tendencia.`,
+            mensaje: `Solo hay ${points.length} dato(s) numérico(s) para esa columna en el rango — no alcanza para el gráfico.`,
             ...(cobertura ? { advertencia: cobertura } : {}),
           };
         }
         const ys = points.map(p => p.y);
-        const svg = renderTrendChartSvg(input.titulo.slice(0, 80), points);
+        const svg = renderChartSvg(estilo, input.titulo.slice(0, 80), points);
         // Total exacto (no la página truncada) — ver nota en serie_temporal.
         const cobertura = truncNote(rows.length, total) ?? await valueCoverageNote(supabase, projectId, input, res, total);
         return {

@@ -20,10 +20,24 @@ export interface AIChatTurn {
   content: string;
 }
 
+/** Acción propuesta por Flo (tarjeta de confirmación en el chat). El backend
+ *  la prepara con la tool `preparar_accion`; el móvil la EJECUTA solo cuando el
+ *  usuario toca el botón — Flo nunca ejecuta nada directamente. */
+export type AIAction =
+  | { kind: 'abrir_pantalla'; destino: string; etiqueta: string }
+  | {
+      kind: 'crear_ensayo'; templateId: string; templateNombre: string;
+      templateCodigo?: string | null; sectorId?: string | null;
+      sectorNombre?: string | null; fecha?: string | null; etiqueta: string;
+    }
+  | { kind: 'crear_muestra'; etiqueta: string };
+
 export interface AIChatReply {
   reply: string;
   /** SVG del gráfico generado por la tool `generar_grafico` (Fase 2). */
   chartSvg?: string;
+  /** Acción propuesta (tarjeta de confirmación). */
+  action?: AIAction;
   usage?: { input_tokens: number; output_tokens: number; model: string };
 }
 
@@ -94,6 +108,10 @@ export interface AIChatMessage {
   text: string;
   /** SVG del gráfico embebido (Fase 2). */
   chartSvg?: string;
+  /** Tarjeta de acción propuesta (se ejecuta al confirmar con el botón). */
+  action?: AIAction;
+  /** true una vez ejecutada — la tarjeta pasa a "Hecho" (one-shot). */
+  actionDone?: boolean;
   at: number; // epoch ms
 }
 

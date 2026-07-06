@@ -22,8 +22,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
-import { projectSectorsCollection } from '@db/index';
+import { projectSectorsCollection, protocolsCollection } from '@db/index';
 import { repairCloudSummaryOnce } from '@services/SummaryRowService';
+import { createInstances } from '@services/ProtocolInstanceService';
+import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
 import {
   type AIChatMessage, type AIChatSession, deleteNarrationFile, deleteSession,
   loadSessions, newSessionId, requestNarration, saveSession, sendChatMessage,
@@ -51,6 +53,23 @@ function loadExpoAudio(): {
     return null;
   }
 }
+
+/** Mapa destino → pantalla real para las tarjetas "abrir_pantalla" de Flo.
+ *  Debe cubrir los DESTINOS que declara la tool preparar_accion del backend. */
+const DESTINO_SCREEN: Record<string, { screen: string; params?: Record<string, unknown> }> = {
+  ensayos: { screen: 'Ensayos', params: { mode: 'date' } },
+  dossier: { screen: 'Dossier' },
+  muestras: { screen: 'Samples' },
+  mapa: { screen: 'ProjectMap' },
+  sectores: { screen: 'ProjectSectors' },
+  trazabilidad: { screen: 'TraceabilityHome' },
+  tablas_resumen: { screen: 'SummaryTables' },
+  configuracion: { screen: 'ProjectConfig' },
+  papelera: { screen: 'RecycleBin' },
+  topografia: { screen: 'TopoCargas' },
+  planos: { screen: 'PlansManagement' },
+  contactos: { screen: 'PhoneContacts' },
+};
 
 /** Config de audio para el TTS. La clave en Android es shouldRouteThroughEarpiece:
  *  false — si otra parte de la app dejó el AudioManager en modo comunicación
@@ -87,6 +106,22 @@ function RichText({ text, style }: { text: string; style: StyleProp<TextStyle> }
   );
 }
 
+/** Pulso de entrada del avatar (una onda al llegar cada respuesta). Solo anima
+ *  mensajes FRESCOS (recién llegados) — al retomar una sesión no pulsa todo. */
+function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolean }) {
+  const scale = useRef(new Animated.Value(fresh ? 0.4 : 1)).current;
+  useEffect(() => {
+    if (fresh) {
+      Animated.spring(scale, { toValue: 1, friction: 4, tension: 110, useNativeDriver: true }).start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
+}
+
+const ymdLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 /** Indicador "escribiendo…" — 3 puntos con opacidad animada en cascada. */
 function TypingDots() {
   const dots = [useRef(new Animated.Value(0.25)).current, useRef(new Animated.Value(0.25)).current, useRef(new Animated.Value(0.25)).current];
@@ -121,6 +156,40 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [pastSessions, setPastSessions] = useState<AIChatSession[]>([]);
   const [suggested, setSuggested] = useState<string[]>(AI_SUGGESTED_QUESTIONS);
   const listRef = useRef<FlatList<AIChatMessage>>(null);
+
+  // ── Flo visual: agua GL en la bienvenida (se desmonta al conversar) ──
+  const glRef = useRef<WaterGLHandle>(null);
+  const [glOk, setGlOk] = useState(true);
+  // Insight local del día (cero tokens: sale de la base local del celular).
+  const [insight, setInsight] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const now = new Date();
+        const hoy = ymdLocal(now);
+        const ayer = ymdLocal(new Date(now.getTime() - 86_400_000));
+        const [nHoy, nAyer] = await Promise.all([
+          protocolsCollection.query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')), Q.where('ensayo_date', hoy)).fetchCount(),
+          protocolsCollection.query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')), Q.where('ensayo_date', ayer)).fetchCount(),
+        ]);
+        if (!alive) return;
+        if (nHoy > 0 || nAyer > 0) {
+          setInsight(`Hoy: ${nHoy} ensayo${nHoy === 1 ? '' : 's'} registrado${nHoy === 1 ? '' : 's'} · Ayer: ${nAyer}`);
+        }
+      } catch { /* sin insight */ }
+    })();
+    return () => { alive = false; };
+  }, [projectId]);
+
+  // Arco de agua al mostrar la bienvenida (transición marca de la casa).
+  const isEmptyChat = (session?.messages.length ?? 0) === 0;
+  useEffect(() => {
+    if (isEmptyChat && glOk) {
+      const t = setTimeout(() => glRef.current?.bigWave(), 450);
+      return () => clearTimeout(t);
+    }
+  }, [isEmptyChat, glOk]);
 
   // ── Narración por voz (Fase 3) ──
   const [speakingId, setSpeakingId] = useState<string | null>(null);   // reproduciendo
@@ -312,6 +381,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
       const aiMsg: AIChatMessage = {
         id: `a-${stamp()}`, role: 'assistant', text: res.reply,
         ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
+        ...(res.action ? { action: res.action } : {}),
         at: Date.now(),
       };
       applyResult({ ...base, messages: [...base.messages, aiMsg], updatedAt: Date.now() });
@@ -329,6 +399,62 @@ export default function AIChatScreen({ navigation, route }: Props) {
     }
   }, [projectId, session, isFirstTurn]);
 
+  // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+
+  const markActionDone = useCallback((msgId: string) => {
+    setSession(prev => {
+      if (!prev) return prev;
+      const next = {
+        ...prev,
+        messages: prev.messages.map(m => (m.id === msgId ? { ...m, actionDone: true } : m)),
+        updatedAt: Date.now(),
+      };
+      saveSession(projectId, next).catch(() => {});
+      return next;
+    });
+  }, [projectId]);
+
+  const executeAction = useCallback(async (item: AIChatMessage) => {
+    const action = item.action;
+    if (!action || item.actionDone || runningActionId) return;
+    try {
+      if (action.kind === 'abrir_pantalla') {
+        const dest = DESTINO_SCREEN[action.destino];
+        if (!dest) { Alert.alert('Acción', 'Ese destino no está disponible en esta versión de la app.'); return; }
+        markActionDone(item.id);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        navigation.navigate(dest.screen as any, { projectId, projectName, ...(dest.params ?? {}) } as any);
+        return;
+      }
+      if (action.kind === 'crear_muestra') {
+        markActionDone(item.id);
+        navigation.navigate('Samples', { projectId, projectName });
+        return;
+      }
+      if (action.kind === 'crear_ensayo') {
+        setRunningActionId(item.id);
+        // MISMO motor que la UI (numeración correlativa, reserva atómica online,
+        // push + cola). createInstances es dueño del database.write.
+        const res = await createInstances({
+          projectId,
+          template: { id: action.templateId, name: action.templateNombre, idProtocolo: action.templateCodigo ?? null },
+          sectorId: action.sectorId ?? null,
+          sectorName: action.sectorNombre ?? null,
+          ensayoDate: action.fecha ?? null,
+        });
+        markActionDone(item.id);
+        const newId = res.ids[0];
+        if (newId) navigation.navigate('ProtocolFill', { protocolId: newId });
+        else Alert.alert('Acción', 'No se pudo crear el ensayo. Intente desde la pantalla de Ensayos.');
+      }
+    } catch (e) {
+      Alert.alert('Acción', e instanceof Error ? e.message : 'No se pudo ejecutar la acción.');
+    } finally {
+      setRunningActionId(null);
+    }
+  }, [projectId, projectName, navigation, runningActionId, markActionDone]);
+
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
@@ -339,9 +465,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
     return (
       <View style={[styles.msgRow, isUser ? styles.msgRowUser : styles.msgRowAI]}>
         {!isUser && (
-          <View style={styles.avatar}>
-            <Ionicons name="sparkles" size={13} color={Colors.white} />
-          </View>
+          <PulseIn fresh={Date.now() - item.at < 4000}>
+            <View style={styles.avatar}>
+              <Ionicons name="water" size={13} color={Colors.white} />
+            </View>
+          </PulseIn>
         )}
         <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAI, isError && styles.bubbleError, hasChart && styles.bubbleChart]}>
           {hasChart && (
@@ -353,6 +481,33 @@ export default function AIChatScreen({ navigation, route }: Props) {
             style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}
             text={isError ? item.text.slice(1).trim() : item.text}
           />
+          {/* ── Tarjeta de acción (confirmación explícita del usuario) ── */}
+          {!isUser && item.action && (
+            <TouchableOpacity
+              style={[styles.actionCard, item.actionDone && styles.actionCardDone]}
+              onPress={() => executeAction(item)}
+              disabled={!!item.actionDone || runningActionId === item.id}
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name={item.action.kind === 'crear_ensayo' ? 'flask-outline' : item.action.kind === 'crear_muestra' ? 'archive-outline' : 'navigate-outline'}
+                size={17}
+                color={item.actionDone ? Colors.success : Colors.primary}
+              />
+              <Text style={[styles.actionLabel, item.actionDone && { color: Colors.textMuted }]} numberOfLines={2}>
+                {item.action.etiqueta}
+              </Text>
+              {runningActionId === item.id ? (
+                <ActivityIndicator size={14} color={Colors.primary} />
+              ) : (
+                <View style={[styles.actionBtn, item.actionDone && styles.actionBtnDone]}>
+                  <Text style={styles.actionBtnText}>
+                    {item.actionDone ? 'Hecho ✓' : item.action.kind === 'abrir_pantalla' ? 'Abrir' : 'Crear'}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
           <View style={styles.msgFooter}>
             {!isUser && !isError && (
               loadingSpeechId === item.id ? (
@@ -372,7 +527,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         </View>
       </View>
     );
-  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech]);
+  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction]);
 
   return (
     <View style={styles.container}>
@@ -397,25 +552,32 @@ export default function AIChatScreen({ navigation, route }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {messages.length === 0 ? (
-          /* ── Estado inicial: bienvenida + chips de preguntas sugeridas ── */
-          <ScrollView contentContainerStyle={styles.emptyWrap}>
-            <View style={styles.emptyBadge}>
-              <Ionicons name="sparkles" size={30} color={Colors.primary} />
-            </View>
-            <Text style={styles.emptyTitle}>Pregúntele a su obra</Text>
-            <Text style={styles.emptyText}>
-              Consultas en lenguaje natural sobre los ensayos, sectores y avance de{' '}
-              <Text style={{ fontWeight: '800' }}>{projectName}</Text>. Las respuestas salen de los datos reales del proyecto.
-            </Text>
-            <View style={styles.chipsWrap}>
-              {suggested.map(q => (
-                <TouchableOpacity key={q} style={styles.chip} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={13} color={Colors.primary} />
-                  <Text style={styles.chipText}>{q}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
+          /* ── Bienvenida de Flo: agua viva (motor GL del login) + chips.
+                El agua SOLO vive aquí — al conversar se desmonta (batería). ── */
+          <View style={{ flex: 1 }}>
+            {glOk && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
+            <ScrollView contentContainerStyle={styles.emptyWrap}>
+              <View style={[styles.emptyBadge, glOk && styles.emptyBadgeDark]}>
+                <Ionicons name="water" size={30} color={glOk ? Colors.white : Colors.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, glOk && styles.emptyTitleDark]}>Flo — su asistente de obra</Text>
+              <Text style={[styles.emptyText, glOk && styles.emptyTextDark]}>
+                Pregúntele en lenguaje natural por los ensayos, sectores y avance de{' '}
+                <Text style={{ fontWeight: '800' }}>{projectName}</Text>. Las respuestas salen de los datos reales del proyecto.
+              </Text>
+              {insight && (
+                <Text style={[styles.insightText, glOk && styles.insightTextDark]}>{insight}</Text>
+              )}
+              <View style={styles.chipsWrap}>
+                {suggested.map(q => (
+                  <TouchableOpacity key={q} style={[styles.chip, glOk && styles.chipDark]} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={13} color={glOk ? Colors.white : Colors.primary} />
+                    <Text style={[styles.chipText, glOk && styles.chipTextDark]}>{q}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
         ) : (
           <FlatList
             ref={listRef}
@@ -426,7 +588,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
             ListFooterComponent={sending && sendingSessionId === session?.id ? (
               <View style={[styles.msgRow, styles.msgRowAI]}>
-                <View style={styles.avatar}><Ionicons name="sparkles" size={13} color={Colors.white} /></View>
+                <View style={styles.avatar}><Ionicons name="water" size={13} color={Colors.white} /></View>
                 <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
                   <TypingDots />
                 </View>
@@ -515,6 +677,14 @@ const styles = StyleSheet.create({
     borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, ...Shadow.subtle,
   },
   chipText: { fontSize: 12.5, fontWeight: '700', color: Colors.primary },
+  // Variante OSCURA de la bienvenida (sobre el agua GL navy del login).
+  emptyBadgeDark: { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.38)' },
+  emptyTitleDark: { color: Colors.white },
+  emptyTextDark: { color: '#d8e1ef' },
+  chipDark: { backgroundColor: 'rgba(255,255,255,0.13)', borderColor: 'rgba(255,255,255,0.42)' },
+  chipTextDark: { color: Colors.white },
+  insightText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
+  insightTextDark: { color: '#bcd0ea' },
 
   // Mensajes
   listContent: { padding: 14, gap: 10, paddingBottom: 18 },
@@ -534,6 +704,22 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm,
     overflow: 'hidden', marginBottom: 8, backgroundColor: Colors.white,
   },
+
+  // Tarjeta de acción
+  actionCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginTop: 8, paddingHorizontal: 10, paddingVertical: 9,
+    borderRadius: Radius.sm, borderWidth: 1.2, borderColor: Colors.primary + '55',
+    backgroundColor: Colors.primary + '0A',
+  },
+  actionCardDone: { borderColor: Colors.border, backgroundColor: Colors.surface },
+  actionLabel: { flex: 1, fontSize: 12.5, fontWeight: '700', color: Colors.textPrimary },
+  actionBtn: {
+    backgroundColor: Colors.primary, borderRadius: 14,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  actionBtnDone: { backgroundColor: Colors.success },
+  actionBtnText: { color: Colors.white, fontSize: 11.5, fontWeight: '800' },
   msgText: { fontSize: 14, lineHeight: 20 },
   msgTextUser: { color: Colors.white },
   msgTextAI: { color: Colors.textPrimary },
