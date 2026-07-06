@@ -130,6 +130,7 @@ Deno.serve(async (req: Request) => {
     return json({
       reply: result.reply || "No pude generar una respuesta. Intente reformular la pregunta.",
       ...(result.chartSvg ? { chartSvg: result.chartSvg } : {}),
+      ...(result.action ? { action: result.action } : {}),
       usage: { input_tokens: result.inputTokens, output_tokens: result.outputTokens, model, provider },
     });
   } catch (e) {

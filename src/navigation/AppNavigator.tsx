@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ToastHost } from '@components/Toast';
 import { ActiveSessionPrompt } from '@components/ActiveSessionPrompt';
+import { AIQuickBubble, type ActiveRouteInfo } from '@components/AIQuickBubble';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { Q } from '@nozbe/watermelondb';
 import { protocolsCollection, protocolTemplatesCollection } from '@db/index';
@@ -141,6 +142,12 @@ async function resolveDeepLink(
 export default function AppNavigator() {
   const { currentUser, isLoading, biometricLocked } = useAuth();
   const navigationRef = useRef<NavigationContainerRef<RootStackParamListFull>>(null);
+  // v76 — Ruta activa para la burbuja de Flo (se alimenta de onReady/onStateChange).
+  const [activeRoute, setActiveRoute] = React.useState<ActiveRouteInfo | null>(null);
+  const refreshActiveRoute = () => {
+    const r = navigationRef.current?.getCurrentRoute();
+    setActiveRoute(r ? { name: r.name, params: r.params as Record<string, unknown> | undefined } : null);
+  };
 
   // Solicitar permiso de cámara DESPUÉS del login (no en la pantalla de Login).
   // Evita asustar al usuario con prompts antes de que sepa qué es la app.
@@ -245,8 +252,10 @@ export default function AppNavigator() {
             pendingUrlRef.current = null;
             void resolveDeepLink(pending, navigationRef.current);
           }
+          refreshActiveRoute();
         }}
         onStateChange={() => {
+          refreshActiveRoute();
           // v30 — Cada cambio de pantalla dispara un forceTick del worker.
           // Cubre la regresión del chip "subiendo 1" pegado: si el chip quedó
           // mostrando pending desactualizado por una race del observable, al
@@ -333,6 +342,14 @@ export default function AppNavigator() {
           )}
         </Stack.Navigator>
         <TourOverlay />
+        {/* v76 — Burbuja flotante de Flo: acceso rápido al asistente desde
+            cualquier pantalla del proyecto (gateada por flags del proyecto). */}
+        {currentUser && (
+          <AIQuickBubble
+            route={activeRoute}
+            navigate={(screen, params) => navigationRef.current?.navigate(screen as any, params)}
+          />
+        )}
         {/* v27 — Detección de sesión activa al login (modal de continuar/pausar/cerrar) */}
         {currentUser && (
           <ActiveSessionPrompt

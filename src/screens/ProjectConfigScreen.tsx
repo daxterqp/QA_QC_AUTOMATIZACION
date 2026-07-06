@@ -306,6 +306,9 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
                   </TouchableOpacity>
                 ))}
               </View>
+              {/* v76 — Burbuja flotante de acceso rápido (arrastrable, recuerda posición). */}
+              <CheckRow label="Botón rápido de Flo" description="Burbuja flotante arrastrable para abrir el asistente desde cualquier pantalla del proyecto."
+                value={flags.ai_quick_button !== false} onToggle={() => setFlag('ai_quick_button', !(flags.ai_quick_button !== false))} />
             </>
           )}
 

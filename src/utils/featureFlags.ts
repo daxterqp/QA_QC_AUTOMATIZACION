@@ -252,6 +252,9 @@ export interface ProjectFeatureFlags {
    *  el mapeo a modelo real es SERVER-SIDE; el cliente solo guarda la preferencia.
    *  Default 'claude'. */
   ai_provider?: 'claude' | 'gemini';
+  /** v76 — Burbuja flotante de acceso rápido a Flo en todas las pantallas del
+   *  proyecto (arrastrable). Default ON cuando el módulo IA está activo. */
+  ai_quick_button?: boolean;
   /** v44 — Módulo "Carga de datos topográficos" (web + móvil). Default OFF. */
   module_topo?: boolean;
   /** v44 — Reemplazar coordenadas GPS: en las fichas se oculta la tarjeta GPS y se
@@ -332,6 +335,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_ai_assistant: false,
   ai_model_tier: 'economico',
   ai_provider: 'claude',
+  ai_quick_button: true,
   module_topo: false,
   topo_replace_gps: false,
   topo_keep_gps_fallback: false,

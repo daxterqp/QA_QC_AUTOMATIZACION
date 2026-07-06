@@ -23,6 +23,19 @@ import { renderTrendChartSvg } from './chart.ts';
 export const CHART_TOOL_NAME = 'generar_grafico';
 /** Clave interna del SVG dentro del resultado de la tool de gráfico. */
 export const CHART_SVG_KEY = '__chart_svg';
+/** Clave interna de la ACCIÓN propuesta (tarjeta de confirmación en el chat).
+ *  Igual que el SVG: se intercepta y NO viaja al modelo. */
+export const ACTION_KEY = '__action';
+
+/** Pantallas del proyecto a las que Flo puede llevar al usuario. */
+const DESTINOS = ['ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos'] as const;
+const DESTINO_LABEL: Record<string, string> = {
+  ensayos: 'Ensayos', dossier: 'Dossier de protocolos', muestras: 'Muestras',
+  mapa: 'Mapa del proyecto', sectores: 'Sectores', trazabilidad: 'Trazabilidad',
+  tablas_resumen: 'Tablas Resumen', configuracion: 'Configuración del proyecto',
+  papelera: 'Papelera de reciclaje', topografia: 'Datos topográficos',
+  planos: 'Planos', contactos: 'Contactos',
+};
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -700,6 +713,82 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
             resolucion: r.resolution_notes ? String(r.resolution_notes).slice(0, 200) : null,
           })),
         };
+      },
+    },
+    {
+      name: 'preparar_accion',
+      description: `Prepara una ACCIÓN en la app que el usuario confirma con un botón en el chat (tú NUNCA ejecutas nada directamente). Tipos: 'abrir_pantalla' lleva al usuario a un módulo del proyecto (destinos: ${DESTINOS.join(', ')}); 'crear_ensayo' crea un BORRADOR del tipo indicado (y sector/fecha opcionales) y abre la ficha para llenarla; 'crear_muestra' abre el registro de muestras. Antes de usarla: resuelve el tipo de ensayo y el sector con catalogo_proyecto y PREGUNTA al usuario lo que falte (para crear_ensayo el tipo es obligatorio). Tras llamarla, avisa al usuario en una frase que confirme con el botón de la tarjeta.`,
+      input_schema: {
+        type: 'object',
+        properties: {
+          tipo: { type: 'string', enum: ['abrir_pantalla', 'crear_ensayo', 'crear_muestra'], description: 'Qué acción preparar' },
+          destino: { type: 'string', enum: [...DESTINOS], description: 'Pantalla destino (solo para abrir_pantalla)' },
+          template_id: COMMON_FILTER_PROPS.template_id,
+          tipo_nombre: COMMON_FILTER_PROPS.tipo_nombre,
+          sector_id: COMMON_FILTER_PROPS.sector_id,
+          sector_nombre: COMMON_FILTER_PROPS.sector_nombre,
+          fecha: { type: 'string', description: 'Fecha del ensayo YYYY-MM-DD (solo crear_ensayo; default hoy)' },
+        },
+        required: ['tipo'],
+        additionalProperties: false,
+      },
+      execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string }) => {
+        if (input.tipo === 'abrir_pantalla') {
+          const destino = String(input.destino ?? '');
+          if (!DESTINOS.includes(destino as typeof DESTINOS[number])) {
+            return { error: 'destino_invalido', destinos_validos: DESTINOS };
+          }
+          return {
+            [ACTION_KEY]: { kind: 'abrir_pantalla', destino, etiqueta: `Abrir ${DESTINO_LABEL[destino]}` },
+            tarjeta_mostrada: true,
+            resumen: `Tarjeta lista para abrir ${DESTINO_LABEL[destino]}. Pide al usuario confirmarla con el botón.`,
+          };
+        }
+        if (input.tipo === 'crear_muestra') {
+          return {
+            [ACTION_KEY]: { kind: 'crear_muestra', etiqueta: 'Registrar nueva muestra' },
+            tarjeta_mostrada: true,
+            resumen: 'Tarjeta lista para ir al registro de muestras. Pide al usuario confirmarla con el botón.',
+          };
+        }
+        if (input.tipo === 'crear_ensayo') {
+          if (input.fecha != null && !isYmd(input.fecha)) {
+            return { error: 'fecha_invalida', mensaje: 'La fecha debe ser YYYY-MM-DD.' };
+          }
+          // Resolver tipo (OBLIGATORIO) y sector (opcional) contra el catálogo.
+          const cat = await loadCatalog(supabase, projectId);
+          let tpl = input.template_id ? cat.tipos.find(t => t.template_id === input.template_id) : undefined;
+          if (!tpl && input.tipo_nombre) {
+            const r = resolveByName(cat.tipos.map(t => ({ ...t, nombre: `${t.codigo ?? ''} ${t.nombre}`.trim() })), input.tipo_nombre);
+            if (r.match) tpl = cat.tipos.find(t => t.template_id === r.match!.template_id);
+            else return { error: 'tipo_ambiguo_o_inexistente', consulta: input.tipo_nombre, candidatos: (r.candidatos ?? cat.tipos).map(t => ({ template_id: t.template_id, codigo: t.codigo, nombre: t.nombre })) };
+          }
+          if (!tpl) return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre del ensayo a crear (pregunta al usuario si no lo dijo).' };
+          let sectorId: string | null = input.sector_id ?? null;
+          let sectorNombre: string | null = null;
+          if (!sectorId && input.sector_nombre) {
+            const r = resolveByName(cat.sectores, input.sector_nombre);
+            if (r.match) { sectorId = r.match.id; sectorNombre = r.match.nombre; }
+            else return { error: 'sector_ambiguo_o_inexistente', consulta: input.sector_nombre, candidatos: (r.candidatos ?? cat.sectores).map(s => ({ id: s.id, nombre: s.nombre })) };
+          } else if (sectorId) {
+            sectorNombre = cat.sectores.find(s => s.id === sectorId)?.nombre ?? null;
+          }
+          const etiqueta = `Crear ensayo ${tpl.codigo ? tpl.codigo + ' · ' : ''}${tpl.nombre}${sectorNombre ? ` — ${sectorNombre}` : ''}`;
+          return {
+            [ACTION_KEY]: {
+              kind: 'crear_ensayo',
+              templateId: tpl.template_id,
+              templateNombre: tpl.nombre,
+              templateCodigo: tpl.codigo,
+              sectorId, sectorNombre,
+              fecha: input.fecha ?? null,
+              etiqueta,
+            },
+            tarjeta_mostrada: true,
+            resumen: `Tarjeta lista: "${etiqueta}". Al confirmarla se crea el BORRADOR y se abre la ficha. Pide al usuario confirmarla con el botón.`,
+          };
+        }
+        return { error: 'tipo_invalido' };
       },
     },
     {

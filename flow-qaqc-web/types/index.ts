@@ -104,6 +104,8 @@ export interface ProjectFeatureFlags {
   ai_model_tier?: 'economico' | 'potente' | 'maximo';
   /** v76 — Proveedor de IA del asistente (mapeo a modelo real es server-side). Default 'claude'. */
   ai_provider?: 'claude' | 'gemini';
+  /** v76 — Burbuja flotante de acceso rápido al asistente (móvil). Default ON. */
+  ai_quick_button?: boolean;
   /** v44 — Módulo "Carga de datos topográficos" (web + móvil). Default OFF. */
   module_topo?: boolean;
   /** v44 — Reemplazar coords GPS en fichas (solo topográficas). */
@@ -168,6 +170,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_ai_assistant: false,
   ai_model_tier: 'economico',
   ai_provider: 'claude',
+  ai_quick_button: true,
   module_topo: false,
   topo_replace_gps: false,
   topo_keep_gps_fallback: false,
