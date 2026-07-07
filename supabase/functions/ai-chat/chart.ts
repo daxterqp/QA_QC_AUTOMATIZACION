@@ -106,11 +106,14 @@ export function renderTrendChartSvg(title: string, rawPoints: ChartPoint[]): str
 
 const MAX_BARS = 48;
 
-/** Barras verticales sobre eje categórico de fechas (ancladas en 0). Si hay
- *  más de MAX_BARS puntos, se muestran los más RECIENTES (con nota). */
+/** Barras verticales sobre eje CATEGÓRICO (ancladas en 0). El eje x acepta
+ *  fechas YYYY-MM-DD (se muestran dd/mm) O etiquetas libres (ej. nombres de
+ *  sector — comparar_sectores). Si hay más de MAX_BARS puntos, se muestran
+ *  los más RECIENTES (con nota). */
 export function renderBarChartSvg(title: string, rawPoints: ChartPoint[]): string {
-  const valid = rawPoints.filter(p =>
-    Number.isFinite(new Date(p.x + 'T00:00:00Z').getTime()) && Number.isFinite(p.y));
+  // Solo exige y numérico: las barras no usan eje temporal (dmy() deja pasar
+  // las etiquetas que no son fecha).
+  const valid = rawPoints.filter(p => Number.isFinite(p.y));
   if (valid.length === 0) return '';
   const clipped = valid.length > MAX_BARS;
   const points = clipped ? valid.slice(-MAX_BARS) : valid;
@@ -134,12 +137,14 @@ export function renderBarChartSvg(title: string, rawPoints: ChartPoint[]): strin
     return `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, h).toFixed(1)}" fill="${NAVY}" opacity="0.88" rx="1.5"/>`;
   }).join('');
 
-  // Etiquetas X: hasta 6, repartidas (centradas bajo su barra).
+  // Etiquetas X: hasta 6, repartidas (centradas bajo su barra). esc(): las
+  // etiquetas categóricas (sectores) pueden traer & / < que romperían el SVG.
   const nx = Math.min(6, points.length);
   const xLabels = Array.from({ length: nx }, (_, i) => {
     const idx = nx === 1 ? 0 : Math.round((i * (points.length - 1)) / (nx - 1));
     const cx = M.left + idx * step + step / 2;
-    return `<text x="${cx.toFixed(1)}" y="${H - M.bottom + 18}" text-anchor="middle" font-size="11" fill="${MUTED}">${dmy(points[idx].x)}</text>`;
+    const label = dmy(points[idx].x);
+    return `<text x="${cx.toFixed(1)}" y="${H - M.bottom + 18}" text-anchor="middle" font-size="11" fill="${MUTED}">${esc(label.length > 14 ? label.slice(0, 13) + '…' : label)}</text>`;
   }).join('');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">

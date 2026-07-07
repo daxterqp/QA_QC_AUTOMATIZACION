@@ -6,7 +6,7 @@
  * proyecto (tamper-proof): el celular solo guarda la preferencia, jamás decide
  * el modelo real ni toca las API keys.
  */
-import { ACTION_KEY, CHART_SVG_KEY, CHART_TOOL_NAME, LINKS_KEY, type ToolDef } from './tools.ts';
+import { ACTION_KEY, CHART_SVG_KEY, LINKS_KEY, type ToolDef } from './tools.ts';
 
 export interface ChatArgs {
   apiKey: string;
@@ -56,11 +56,13 @@ export async function executeToolCall(tools: ToolDef[], name: string, input: unk
   let links: unknown[] | null = null;
   try {
     let out = await def.execute(input ?? {});
-    if (def.name === CHART_TOOL_NAME && out && typeof out === 'object' && CHART_SVG_KEY in out) {
+    // Genérico: CUALQUIER tool puede emitir un gráfico (generar_grafico,
+    // comparar_sectores, futuras) — la clave se intercepta igual.
+    if (out && typeof out === 'object' && CHART_SVG_KEY in out) {
       // deno-lint-ignore no-explicit-any
       const { [CHART_SVG_KEY]: svg, ...rest } = out as any;
       if (typeof svg === 'string' && svg) chartSvg = svg;
-      out = { ...rest, nota: 'El gráfico ya se muestra en el chat: NO lo describas visualmente, solo comenta las cifras del resumen.' };
+      out = { ...rest, nota: 'El gráfico ya se muestra en el chat: NO lo describas visualmente, solo comenta las cifras.' };
     }
     if (out && typeof out === 'object' && ACTION_KEY in out) {
       // deno-lint-ignore no-explicit-any

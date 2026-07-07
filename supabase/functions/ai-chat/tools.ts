@@ -16,7 +16,7 @@
  * Nunca se cuentan borradores (status DRAFT).
  */
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { type DateUnit, isRealYmd, isYmd, periodKeyOf, periodLabel } from './dates.ts';
+import { type DateUnit, isRealYmd, isYmd, periodKeyOf, periodLabel, todayLimaYmd } from './dates.ts';
 import { type ChartKind, renderChartSvg } from './chart.ts';
 
 /** Nombre de la tool cuyo SVG intercepta index.ts (no vuelve al modelo). */
@@ -274,6 +274,32 @@ async function valueCoverageNote(supabase: SupabaseClient, projectId: string, f:
     }
   } catch { /* la advertencia es best-effort */ }
   return undefined;
+}
+
+// ── Helpers de fecha del parte diario (Lima) ─────────────────────────────────
+
+const todayYmd = () => todayLimaYmd();
+const addDaysYmd = (ymd: string, days: number): string => {
+  const d = new Date(ymd + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+/** Lunes de la semana del ymd (mirror del corte semanal de la app). */
+const mondayOfWeek = (ymd: string): string => periodKeyOf(ymd, 'semana');
+
+/** Extrae el rango [min:max] de UN segmento de método de validación numérico:
+ *  `numerico-[min:max]`, `porcentaje-[min:max]` o `numerico-fx[expr]:[min:max]`
+ *  (los modificadores posteriores tipo `:nopdf` no estorban). Devuelve null si
+ *  el segmento no define rango — texto/checkbox/fórmulas sin tolerancia. */
+function parseRangeFromSegment(seg: string): { min: number; max: number } | null {
+  const num = '(-?\\d+(?:[.,]\\d+)?)';
+  const m = seg.match(new RegExp(`^(?:numerico|porcentaje)-\\[${num}:${num}\\]`, 'i'))
+    ?? seg.match(new RegExp(`^numerico-fx\\[.+?\\]:\\[${num}:${num}\\]`, 'i'));
+  if (!m) return null;
+  const min = Number(m[1].replace(',', '.'));
+  const max = Number(m[2].replace(',', '.'));
+  if (!isFinite(min) || !isFinite(max) || min > max) return null;
+  return { min, max };
 }
 
 /** Nombres de usuarios (realizó/aprobó) por id — best-effort bajo RLS de org. */
@@ -742,6 +768,171 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
             estado: r.status === 'OPEN' ? 'abierta' : 'resuelta',
             resolucion: r.resolution_notes ? String(r.resolution_notes).slice(0, 200) : null,
           })),
+        };
+      },
+    },
+    {
+      name: 'parte_diario',
+      description: 'PARTE DIARIO de la obra en una sola llamada: ensayos de hoy y de la semana, estado del flujo de aprobación, no conformidades abiertas y jornadas activas. Úsala cuando pidan "el parte del día", "cómo amaneció la obra", "resumen de hoy" o un panorama general rápido.',
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => {
+        const hoy = todayYmd();
+        const ayer = addDaysYmd(hoy, -1);
+        const lunes = mondayOfWeek(hoy);
+        const [hoyQ, ayerQ, semanaQ, subQ, aprQ, rejQ, ncQ, actQ] = await Promise.all([
+          protocolsQuery(supabase, projectId, { desde: hoy, hasta: hoy }, {}, 'id', true).limit(1),
+          protocolsQuery(supabase, projectId, { desde: ayer, hasta: ayer }, {}, 'id', true).limit(1),
+          protocolsQuery(supabase, projectId, { desde: lunes, hasta: hoy }, {}, 'id', true).limit(1),
+          protocolsQuery(supabase, projectId, { estado: 'SUBMITTED' }, {}, 'id', true).limit(1),
+          protocolsQuery(supabase, projectId, { estado: 'APPROVED' }, {}, 'id', true).limit(1),
+          protocolsQuery(supabase, projectId, { estado: 'REJECTED' }, {}, 'id', true).limit(1),
+          supabase.from('non_conformities').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'OPEN'),
+          supabase.from('work_sessions').select('id', { count: 'exact', head: true }).eq('project_id', projectId).eq('status', 'ACTIVE'),
+        ]);
+        return {
+          fecha: hoy,
+          ensayos_hoy: hoyQ.count ?? 0,
+          ensayos_ayer: ayerQ.count ?? 0,
+          ensayos_semana: semanaQ.count ?? 0,
+          aprobaciones: { en_revision: subQ.count ?? 0, aprobados: aprQ.count ?? 0, rechazados: rejQ.count ?? 0 },
+          nc_abiertas: ncQ.count ?? 0,
+          jornadas_activas: actQ.count ?? 0,
+        };
+      },
+    },
+    {
+      name: 'comparar_sectores',
+      description: 'Compara el PROMEDIO de una columna numérica de un tipo de ensayo ENTRE SECTORES (ej. "compárame la compactación del sector 1 vs el 2"). Genera automáticamente un gráfico de barras por sector en el chat — tú solo comenta las cifras. El tipo de ensayo es obligatorio; sin lista de sectores compara todos los que tengan datos.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          template_id: COMMON_FILTER_PROPS.template_id,
+          tipo_nombre: COMMON_FILTER_PROPS.tipo_nombre,
+          column_key: { type: 'string', description: 'Key exacta de la columna (de catalogo_proyecto)' },
+          sectores: { type: 'array', items: { type: 'string' }, description: 'Nombres de sectores a comparar (opcional: default todos con datos)' },
+          desde: COMMON_FILTER_PROPS.desde,
+          hasta: COMMON_FILTER_PROPS.hasta,
+          titulo: { type: 'string', description: 'Título corto del gráfico en español' },
+        },
+        required: ['column_key', 'titulo'],
+        additionalProperties: false,
+      },
+      execute: async (input: { template_id?: string; tipo_nombre?: string; column_key: string; sectores?: string[]; desde?: string; hasta?: string; titulo: string }) => {
+        const res = await resolveFilters(supabase, projectId, input);
+        if (!res.ok) return res.error;
+        if (!res.templateId) return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: la comparación es de una columna de UN tipo de ensayo.' };
+        const cat = await loadCatalog(supabase, projectId);
+        // Sectores objetivo: los pedidos (resueltos por nombre) o todos.
+        let objetivo = cat.sectores;
+        if (input.sectores?.length) {
+          const elegidos: typeof cat.sectores = [];
+          for (const nombre of input.sectores.slice(0, 12)) {
+            const r = resolveByName(cat.sectores, String(nombre));
+            if (!r.match) return { error: 'sector_ambiguo_o_inexistente', consulta: nombre, candidatos: (r.candidatos ?? cat.sectores).map(s => ({ id: s.id, nombre: s.nombre })) };
+            elegidos.push(r.match);
+          }
+          objetivo = elegidos;
+        }
+        const { rows } = await fetchRows(supabase, projectId, input, res);
+        const porSector = new Map<string, number[]>();
+        for (const r of rows) {
+          if (!r.sector_id) continue;
+          const v = numValue(r.values_json, input.column_key);
+          if (v == null) continue;
+          const arr = porSector.get(r.sector_id) ?? [];
+          arr.push(v);
+          porSector.set(r.sector_id, arr);
+        }
+        const resultados = objetivo
+          .map(s => {
+            const vals = porSector.get(s.id) ?? [];
+            return {
+              sector: s.nombre,
+              n: vals.length,
+              promedio: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+            };
+          })
+          .filter(x => input.sectores?.length ? true : x.n > 0); // sin lista: solo sectores con datos
+        const conDatos = resultados.filter(x => x.promedio != null);
+        if (conDatos.length === 0) {
+          return { resultados, mensaje: 'Ningún sector tiene datos numéricos de esa columna en el rango.' };
+        }
+        const svg = renderChartSvg('barras', input.titulo.slice(0, 80),
+          conDatos.map(x => ({ x: x.sector, y: x.promedio as number })));
+        return {
+          ...(svg ? { [CHART_SVG_KEY]: svg } : {}),
+          grafico_generado: !!svg,
+          resultados,
+        };
+      },
+    },
+    {
+      name: 'fuera_de_norma',
+      description: 'Detecta resultados FUERA DE TOLERANCIA: cruza los valores de los ensayos contra los rangos [min:max] definidos en las fichas (métodos de validación numéricos). Úsala ante "¿hay resultados fuera de norma/tolerancia/rango?". Si un tipo no define rangos, lo dice. Filtros de tipo/fechas opcionales.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          template_id: COMMON_FILTER_PROPS.template_id,
+          tipo_nombre: COMMON_FILTER_PROPS.tipo_nombre,
+          desde: COMMON_FILTER_PROPS.desde,
+          hasta: COMMON_FILTER_PROPS.hasta,
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: { template_id?: string; tipo_nombre?: string; desde?: string; hasta?: string }) => {
+        const res = await resolveFilters(supabase, projectId, input);
+        if (!res.ok) return res.error;
+        // 1. Plantillas objetivo + sus ítems con rangos [min:max].
+        let tplQ = supabase.from('protocol_templates').select('id, id_protocolo, name').eq('project_id', projectId);
+        if (res.templateId) tplQ = tplQ.eq('id', res.templateId);
+        const { data: tpls } = await tplQ;
+        const templates = tpls ?? [];
+        if (templates.length === 0) return { violaciones: [], mensaje: 'Sin tipos de ensayo.' };
+        const { data: items } = await supabase.from('protocol_template_items')
+          .select('template_id, partida_item, validation_method')
+          .in('template_id', templates.map(t => t.id));
+        // Rangos por template: key de values_json (`partida:LETRA` o `partida`) → {min,max}.
+        const rangesByTpl = new Map<string, Map<string, { min: number; max: number }>>();
+        for (const it of items ?? []) {
+          const vm = String(it.validation_method ?? '');
+          const partida = String(it.partida_item ?? '').trim();
+          if (!vm || !partida) continue;
+          const segs = vm.split('//').map(s => s.trim());
+          segs.forEach((seg, idx) => {
+            const range = parseRangeFromSegment(seg);
+            if (!range) return;
+            const key = segs.length > 1 ? `${partida}:${String.fromCharCode(65 + idx)}` : partida;
+            const m = rangesByTpl.get(String(it.template_id)) ?? new Map();
+            m.set(key, range);
+            rangesByTpl.set(String(it.template_id), m);
+          });
+        }
+        const conRangos = [...rangesByTpl.keys()];
+        if (conRangos.length === 0) {
+          return { violaciones: [], mensaje: 'Los tipos consultados no definen rangos de tolerancia numéricos en sus fichas.' };
+        }
+        // 2. Valores reales (filas resumen) vs rangos.
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
+        const violaciones: { codigo: string | null; fecha: string | null; celda: string; valor: number; min: number; max: number }[] = [];
+        for (const r of rows) {
+          const ranges = r.template_id ? rangesByTpl.get(r.template_id) : undefined;
+          if (!ranges) continue;
+          for (const [key, rg] of ranges) {
+            const v = numValue(r.values_json, key);
+            if (v == null) continue;
+            if (v < rg.min || v > rg.max) {
+              violaciones.push({ codigo: r.protocol_code, fecha: r.ensayo_date, celda: key, valor: v, min: rg.min, max: rg.max });
+            }
+          }
+        }
+        const nota = truncNote(rows.length, total);
+        return {
+          ...(nota ? { advertencia: nota } : {}),
+          total_violaciones: violaciones.length,
+          ensayos_revisados: rows.length,
+          tipos_con_rangos: conRangos.length,
+          violaciones: violaciones.slice(0, 30),
+          ...(violaciones.length > 30 ? { nota: `Mostrando 30 de ${violaciones.length} violaciones.` } : {}),
         };
       },
     },
