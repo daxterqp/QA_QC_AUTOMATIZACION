@@ -38,6 +38,8 @@ interface Props {
   onBack: () => void;
   onOpenProtocol: (protocolId: string, status: string) => void;
   onPreviewPdf?: (pdfUri: string) => void;
+  /** v77 — FLOW abre el dossier con filtros ya aplicados. */
+  initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string };
 }
 
 interface DaySection {
@@ -53,7 +55,7 @@ function toDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export default function DossierScreen({ projectId, projectName, onBack, onOpenProtocol, onPreviewPdf }: Props) {
+export default function DossierScreen({ projectId, projectName, onBack, onOpenProtocol, onPreviewPdf, initialFilters }: Props) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const { currentUser } = useAuth();
@@ -78,13 +80,20 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const [sectorOptions, setSectorOptions] = useState<{ id: string; label: string }[]>([]);
 
   // Estado de filtros — multiselección (Set) + rango de fechas en ms.
-  const [showFilters, setShowFilters] = useState(false);
-  const [dateFromMs, setDateFromMs] = useState<number | null>(null);
-  const [dateToMs, setDateToMs] = useState<number | null>(null);
+  // v77 — FLOW puede abrir el dossier con filtros ya aplicados (initialFilters):
+  // se siembran como estado inicial y el bloque de filtros arranca visible.
+  const ymdToLocalMs = (s?: string): number | null => {
+    if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d).getTime();
+  };
+  const [showFilters, setShowFilters] = useState(!!initialFilters);
+  const [dateFromMs, setDateFromMs] = useState<number | null>(ymdToLocalMs(initialFilters?.desde));
+  const [dateToMs, setDateToMs] = useState<number | null>(ymdToLocalMs(initialFilters?.hasta));
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(['APPROVED', 'SUBMITTED', 'REJECTED']));
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(initialFilters?.templateId ? [initialFilters.templateId] : []));
   const [locFilter, setLocFilter] = useState<Set<string>>(new Set());
-  const [sectorFilter, setSectorFilter] = useState<Set<string>>(new Set());
+  const [sectorFilter, setSectorFilter] = useState<Set<string>>(new Set(initialFilters?.sectorId ? [initialFilters.sectorId] : []));
   // Modal multiselección de Tipo / Ubicación / Sector.
   const [showFilterPicker, setShowFilterPicker] = useState<null | 'tipo' | 'ubicacion' | 'sector'>(null);
 

@@ -30,7 +30,20 @@ export type AIAction =
       templateCodigo?: string | null; sectorId?: string | null;
       sectorNombre?: string | null; fecha?: string | null; etiqueta: string;
     }
-  | { kind: 'crear_muestra'; etiqueta: string };
+  | { kind: 'crear_muestra'; etiqueta: string }
+  | { kind: 'abrir_ensayo'; protocolId: string; codigo: string | null; estado?: string | null; etiqueta: string }
+  | { kind: 'crear_nc'; protocolId: string; codigo: string | null; descripcion: string; etiqueta: string }
+  | {
+      kind: 'abrir_dossier'; desde?: string | null; hasta?: string | null;
+      templateId?: string | null; sectorId?: string | null; etiqueta: string;
+    };
+
+/** Ensayo listado por FLOW como chip tocable (abre el ensayo directo). */
+export interface AIEnsayoLink {
+  codigo: string | null;
+  protocolId: string;
+  estado?: string | null;
+}
 
 export interface AIChatReply {
   reply: string;
@@ -38,6 +51,8 @@ export interface AIChatReply {
   chartSvg?: string;
   /** Acción propuesta (tarjeta de confirmación). */
   action?: AIAction;
+  /** Ensayos listados (chips tocables). */
+  links?: AIEnsayoLink[];
   usage?: { input_tokens: number; output_tokens: number; model: string };
 }
 
@@ -112,6 +127,8 @@ export interface AIChatMessage {
   action?: AIAction;
   /** true una vez ejecutada — la tarjeta pasa a "Hecho" (one-shot). */
   actionDone?: boolean;
+  /** Ensayos listados como chips tocables (abren el ensayo). */
+  links?: AIEnsayoLink[];
   at: number; // epoch ms
 }
 

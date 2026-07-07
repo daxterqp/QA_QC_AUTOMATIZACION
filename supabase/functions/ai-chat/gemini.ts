@@ -75,6 +75,7 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
   let totalIn = 0, totalOut = 0;
   let chartSvg: string | null = null;
   let action: unknown | null = null;
+  let links: unknown[] | null = null;
   let reply = '';
 
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
@@ -119,6 +120,7 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
       const out = await executeToolCall(a.tools, String(call.name ?? ''), call.args ?? {});
       if (out.chartSvg) chartSvg = out.chartSvg;
       if (out.action) action = out.action;
+      if (out.links) links = out.links;
       // deno-lint-ignore no-explicit-any
       let parsed: any;
       try { parsed = JSON.parse(out.resultStr); } catch { parsed = out.resultStr; }
@@ -133,5 +135,5 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
     contents.push({ role: 'user', parts: responses });
   }
 
-  return { reply, chartSvg, action, inputTokens: totalIn, outputTokens: totalOut };
+  return { reply, chartSvg, action, links, inputTokens: totalIn, outputTokens: totalOut };
 }

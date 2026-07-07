@@ -431,6 +431,7 @@ function DossierScreenWrapper({
     <DossierScreen
       projectId={route.params.projectId}
       projectName={route.params.projectName}
+      initialFilters={route.params.initialFilters}
       onBack={() => navigation.goBack()}
       onOpenProtocol={(protocolId, status) => navigation.navigate(
         status === 'REJECTED' ? 'ProtocolFill' : 'ProtocolAudit',

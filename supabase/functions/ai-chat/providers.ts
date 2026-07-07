@@ -6,7 +6,7 @@
  * proyecto (tamper-proof): el celular solo guarda la preferencia, jamás decide
  * el modelo real ni toca las API keys.
  */
-import { ACTION_KEY, CHART_SVG_KEY, CHART_TOOL_NAME, type ToolDef } from './tools.ts';
+import { ACTION_KEY, CHART_SVG_KEY, CHART_TOOL_NAME, LINKS_KEY, type ToolDef } from './tools.ts';
 
 export interface ChatArgs {
   apiKey: string;
@@ -23,6 +23,8 @@ export interface ChatResult {
   chartSvg: string | null;
   /** Acción propuesta (tarjeta de confirmación) — el móvil la ejecuta al confirmar. */
   action: unknown | null;
+  /** Ensayos listados como chips tocables (abren el ensayo directo). */
+  links: unknown[] | null;
   inputTokens: number;
   outputTokens: number;
 }
@@ -38,6 +40,8 @@ export interface ToolExecOutcome {
   chartSvg: string | null;
   /** Acción interceptada si la tool fue preparar_accion (no viaja al modelo). */
   action: unknown | null;
+  /** Links de ensayos interceptados de listar_ensayos (no viajan al modelo). */
+  links: unknown[] | null;
 }
 
 /** Ejecuta una tool por nombre, intercepta SVG/acción y acota el tamaño del
@@ -45,10 +49,11 @@ export interface ToolExecOutcome {
 export async function executeToolCall(tools: ToolDef[], name: string, input: unknown): Promise<ToolExecOutcome> {
   const def = tools.find(t => t.name === name);
   if (!def) {
-    return { resultStr: JSON.stringify({ error: `herramienta desconocida: ${name}` }), isError: true, chartSvg: null, action: null };
+    return { resultStr: JSON.stringify({ error: `herramienta desconocida: ${name}` }), isError: true, chartSvg: null, action: null, links: null };
   }
   let chartSvg: string | null = null;
   let action: unknown | null = null;
+  let links: unknown[] | null = null;
   try {
     let out = await def.execute(input ?? {});
     if (def.name === CHART_TOOL_NAME && out && typeof out === 'object' && CHART_SVG_KEY in out) {
@@ -63,11 +68,17 @@ export async function executeToolCall(tools: ToolDef[], name: string, input: unk
       if (act && typeof act === 'object') action = act;
       out = rest;
     }
+    if (out && typeof out === 'object' && LINKS_KEY in out) {
+      // deno-lint-ignore no-explicit-any
+      const { [LINKS_KEY]: lk, ...rest } = out as any;
+      if (Array.isArray(lk) && lk.length > 0) links = lk;
+      out = rest;
+    }
     let resultStr = JSON.stringify(out ?? null);
     // Defensa de contexto: un resultado gigante se trunca (el modelo puede re-pedir acotado).
     if (resultStr.length > 30000) resultStr = resultStr.slice(0, 30000) + '…(truncado, acota el rango)';
-    return { resultStr, isError: false, chartSvg, action };
+    return { resultStr, isError: false, chartSvg, action, links };
   } catch (e) {
-    return { resultStr: JSON.stringify({ error: String((e as Error)?.message ?? e) }), isError: true, chartSvg: null, action: null };
+    return { resultStr: JSON.stringify({ error: String((e as Error)?.message ?? e) }), isError: true, chartSvg: null, action: null, links: null };
   }
 }

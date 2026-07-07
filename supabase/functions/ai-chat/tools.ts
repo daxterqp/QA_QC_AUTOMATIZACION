@@ -26,6 +26,9 @@ export const CHART_SVG_KEY = '__chart_svg';
 /** Clave interna de la ACCIÓN propuesta (tarjeta de confirmación en el chat).
  *  Igual que el SVG: se intercepta y NO viaja al modelo. */
 export const ACTION_KEY = '__action';
+/** Clave interna de los LINKS de ensayos (chips tocables bajo la respuesta).
+ *  Se intercepta y NO viaja al modelo (los ids serían ruido para él). */
+export const LINKS_KEY = '__links';
 
 /** Pantallas del proyecto a las que Flo puede llevar al usuario. */
 const DESTINOS = ['ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos'] as const;
@@ -423,6 +426,9 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
             realizo: r.filled_by_id ? (names.get(r.filled_by_id) ?? null) : null,
             aprobo: r.signed_by_id ? (names.get(r.signed_by_id) ?? null) : null,
           })),
+          // Interceptado (no viaja al modelo): chips tocables en el chat que
+          // abren cada ensayo directamente.
+          [LINKS_KEY]: recent.map(r => ({ codigo: r.protocol_code, protocolId: r.id, estado: r.status })),
         };
       },
     },
@@ -741,22 +747,79 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
     },
     {
       name: 'preparar_accion',
-      description: `Prepara una ACCIÓN en la app que el usuario confirma con un botón en el chat (tú NUNCA ejecutas nada directamente). Tipos: 'abrir_pantalla' lleva al usuario a un módulo del proyecto (destinos: ${DESTINOS.join(', ')}); 'crear_ensayo' crea un BORRADOR del tipo indicado (y sector/fecha opcionales) y abre la ficha para llenarla; 'crear_muestra' abre el registro de muestras. Antes de usarla: resuelve el tipo de ensayo y el sector con catalogo_proyecto y PREGUNTA al usuario lo que falte (para crear_ensayo el tipo es obligatorio). Tras llamarla, avisa al usuario en una frase que confirme con el botón de la tarjeta.`,
+      description: `Prepara una ACCIÓN en la app que el usuario confirma con un botón en el chat (tú NUNCA ejecutas nada directamente). Tipos: 'abrir_pantalla' lleva a un módulo del proyecto (destinos: ${DESTINOS.join(', ')}); 'crear_ensayo' crea un BORRADOR del tipo indicado (sector/fecha opcionales) y abre la ficha; 'crear_muestra' abre el registro de muestras; 'abrir_ensayo' abre UN ensayo específico por su código (ej. "ábreme el PRD-260003"); 'crear_nc' registra una NO CONFORMIDAD sobre un ensayo (requiere codigo del ensayo + descripcion de mínimo 10 caracteres — pide al usuario el motivo si no lo dio); 'abrir_dossier' abre el Dossier con filtros ya aplicados (fechas/tipo/sector opcionales). Antes de usarla: resuelve tipo/sector con catalogo_proyecto y PREGUNTA lo que falte. Tras llamarla, avisa en una frase que confirme con el botón de la tarjeta.`,
       input_schema: {
         type: 'object',
         properties: {
-          tipo: { type: 'string', enum: ['abrir_pantalla', 'crear_ensayo', 'crear_muestra'], description: 'Qué acción preparar' },
+          tipo: { type: 'string', enum: ['abrir_pantalla', 'crear_ensayo', 'crear_muestra', 'abrir_ensayo', 'crear_nc', 'abrir_dossier'], description: 'Qué acción preparar' },
           destino: { type: 'string', enum: [...DESTINOS], description: 'Pantalla destino (solo para abrir_pantalla)' },
           template_id: COMMON_FILTER_PROPS.template_id,
           tipo_nombre: COMMON_FILTER_PROPS.tipo_nombre,
           sector_id: COMMON_FILTER_PROPS.sector_id,
           sector_nombre: COMMON_FILTER_PROPS.sector_nombre,
           fecha: { type: 'string', description: 'Fecha del ensayo YYYY-MM-DD (solo crear_ensayo; default hoy)' },
+          codigo: { type: 'string', description: 'Código del ensayo (para abrir_ensayo / crear_nc), ej. PRD-260003' },
+          descripcion: { type: 'string', description: 'Descripción de la no conformidad (crear_nc, mínimo 10 caracteres)' },
+          desde: { type: 'string', description: 'Fecha inicial YYYY-MM-DD (abrir_dossier)' },
+          hasta: { type: 'string', description: 'Fecha final YYYY-MM-DD (abrir_dossier)' },
         },
         required: ['tipo'],
         additionalProperties: false,
       },
-      execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string }) => {
+      execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string; codigo?: string; descripcion?: string; desde?: string; hasta?: string }) => {
+        // Helper: valida un código de ensayo contra protocols (fuente fresca).
+        const findByCode = async (codigo: string) => {
+          const { data } = await supabase.from('protocols')
+            .select('id, protocol_code, status')
+            .eq('project_id', projectId)
+            .eq('protocol_code', codigo.trim().toUpperCase())
+            .limit(1);
+          return data?.[0] ?? null;
+        };
+
+        if (input.tipo === 'abrir_ensayo') {
+          if (!input.codigo?.trim()) return { error: 'falta_codigo', mensaje: 'Indica el código del ensayo (pregúntalo si el usuario no lo dio).' };
+          const p = await findByCode(input.codigo);
+          if (!p) return { error: 'ensayo_no_encontrado', consulta: input.codigo, mensaje: 'No existe un ensayo con ese código en este proyecto — verifica con listar_ensayos.' };
+          return {
+            [ACTION_KEY]: { kind: 'abrir_ensayo', protocolId: p.id, codigo: p.protocol_code, estado: p.status, etiqueta: `Abrir ensayo ${p.protocol_code}` },
+            tarjeta_mostrada: true,
+            resumen: `Tarjeta lista para abrir el ensayo ${p.protocol_code} (estado ${p.status}). Pide al usuario confirmarla con el botón.`,
+          };
+        }
+        if (input.tipo === 'crear_nc') {
+          if (!input.codigo?.trim()) return { error: 'falta_codigo', mensaje: 'Indica el código del ensayo al que se registrará la NC.' };
+          const desc = (input.descripcion ?? '').trim();
+          if (desc.length < 10) return { error: 'descripcion_corta', mensaje: 'La descripción de la no conformidad debe tener al menos 10 caracteres — pide al usuario el motivo.' };
+          const p = await findByCode(input.codigo);
+          if (!p) return { error: 'ensayo_no_encontrado', consulta: input.codigo, mensaje: 'No existe un ensayo con ese código en este proyecto.' };
+          return {
+            [ACTION_KEY]: { kind: 'crear_nc', protocolId: p.id, codigo: p.protocol_code, descripcion: desc.slice(0, 500), etiqueta: `Registrar NC en ${p.protocol_code}` },
+            tarjeta_mostrada: true,
+            resumen: `Tarjeta lista: "Registrar NC en ${p.protocol_code}". Al confirmarla se crea la no conformidad ABIERTA con esa descripción. Pide al usuario confirmarla con el botón.`,
+          };
+        }
+        if (input.tipo === 'abrir_dossier') {
+          if ((input.desde != null && !isRealYmd(input.desde)) || (input.hasta != null && !isRealYmd(input.hasta))) {
+            return { error: 'fecha_invalida', mensaje: 'desde/hasta deben ser fechas YYYY-MM-DD válidas.' };
+          }
+          // Resolver tipo/sector (opcionales) contra el catálogo.
+          const res = await resolveFilters(supabase, projectId, input);
+          if (!res.ok) return res.error;
+          const partes: string[] = [];
+          if (input.desde || input.hasta) partes.push(`${input.desde ?? '…'} → ${input.hasta ?? '…'}`);
+          const etiqueta = `Abrir Dossier${partes.length ? ` (${partes.join(', ')})` : ' filtrado'}`;
+          return {
+            [ACTION_KEY]: {
+              kind: 'abrir_dossier',
+              desde: input.desde ?? null, hasta: input.hasta ?? null,
+              templateId: res.templateId ?? null, sectorId: res.sectorId ?? null,
+              etiqueta,
+            },
+            tarjeta_mostrada: true,
+            resumen: `Tarjeta lista para abrir el Dossier con los filtros aplicados. Pide al usuario confirmarla con el botón.`,
+          };
+        }
         if (input.tipo === 'abrir_pantalla') {
           const destino = String(input.destino ?? '');
           if (!DESTINOS.includes(destino as typeof DESTINOS[number])) {

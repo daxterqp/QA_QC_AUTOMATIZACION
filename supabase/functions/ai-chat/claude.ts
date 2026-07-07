@@ -24,6 +24,7 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
   let totalIn = 0, totalOut = 0;
   let chartSvg: string | null = null;
   let action: unknown | null = null;
+  let links: unknown[] | null = null;
   // deno-lint-ignore no-explicit-any
   let response: any = null;
 
@@ -58,6 +59,7 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
       const out = await executeToolCall(a.tools, block.name, block.input);
       if (out.chartSvg) chartSvg = out.chartSvg; // si hay varios, gana el último
       if (out.action) action = out.action;
+      if (out.links) links = out.links;
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: out.resultStr, is_error: out.isError });
     }
     messages.push({ role: 'assistant', content: response.content });
@@ -72,5 +74,5 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
     .join('\n')
     .trim();
 
-  return { reply, chartSvg, action, inputTokens: totalIn, outputTokens: totalOut };
+  return { reply, chartSvg, action, links, inputTokens: totalIn, outputTokens: totalOut };
 }

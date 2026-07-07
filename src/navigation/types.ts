@@ -42,7 +42,11 @@ export type RootStackParamList = {
   LocationsImport: { projectId: string; projectName: string };
   ProtocolAudit: { protocolId: string };
   NonConformity: { protocolId: string; projectId: string };
-  Dossier: { projectId: string; projectName: string };
+  /** v77 — initialFilters: FLOW puede abrir el dossier con filtros ya aplicados. */
+  Dossier: {
+    projectId: string; projectName: string;
+    initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string };
+  };
   PlansManagement: { projectId: string; projectName: string; mode?: 'viewer' | 'measure' };
   FileUpload: { projectId: string; projectName: string };
   PlanViewer: { planId: string; planName: string; protocolId?: string; annotationId?: string; locationId?: string };

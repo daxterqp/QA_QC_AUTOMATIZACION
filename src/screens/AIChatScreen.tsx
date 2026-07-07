@@ -24,16 +24,17 @@ import { useAuth } from '@context/AuthContext';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import {
-  projectSectorsCollection, protocolsCollection,
+  database, nonConformitiesCollection, projectSectorsCollection, protocolsCollection,
   protocolTemplatesCollection, protocolTemplateItemsCollection,
 } from '@db/index';
 import { repairCloudSummaryOnce } from '@services/SummaryRowService';
 import { createInstances } from '@services/ProtocolInstanceService';
+import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
 import {
-  type AIChatMessage, type AIChatSession, deleteNarrationFile, deleteSession,
-  loadSessions, newSessionId, requestNarration, saveSession, sendChatMessage,
-  sessionTitleFrom,
+  type AIChatMessage, type AIChatSession, type AIEnsayoLink, deleteNarrationFile,
+  deleteSession, loadSessions, newSessionId, requestNarration, saveSession,
+  sendChatMessage, sessionTitleFrom,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
@@ -467,6 +468,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         id: `a-${stamp()}`, role: 'assistant', text: res.reply,
         ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
         ...(res.action ? { action: res.action } : {}),
+        ...(res.links?.length ? { links: res.links } : {}),
         at: Date.now(),
       });
     } catch (e) {
@@ -512,11 +514,75 @@ export default function AIChatScreen({ navigation, route }: Props) {
     });
   }, [projectId]);
 
+  /** Abre un ensayo con la MISMA lógica de EnsayosScreen (Fill si se puede
+   *  llenar, Audit si está enviado/aprobado; el rol manda). Local-first: si el
+   *  ensayo aún no está sincronizado en este teléfono, avisa. */
+  const openEnsayo = useCallback(async (protocolId: string): Promise<boolean> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p: any = await protocolsCollection.find(protocolId).catch(() => null);
+    if (!p) {
+      Alert.alert('Ensayo sin sincronizar', 'Ese ensayo aún no está descargado en este teléfono. Entre a Ensayos para sincronizar e intente de nuevo.');
+      return false;
+    }
+    const role = (currentUser as any)?.role;
+    const canFillStatus = p.status === 'DRAFT' || p.status === 'IN_PROGRESS' || (p.status === 'REJECTED' && (p.correctionsAllowed ?? false));
+    if (role === 'CREATOR' || role === 'SUPERVISOR' || role === 'RESIDENT') {
+      if (canFillStatus) navigation.navigate('ProtocolFill', { protocolId: p.id });
+      else navigation.navigate('ProtocolAudit', { protocolId: p.id });
+    } else {
+      navigation.navigate('ProtocolFill', { protocolId: p.id });
+    }
+    return true;
+  }, [navigation, currentUser]);
+
   const executeAction = useCallback(async (item: AIChatMessage) => {
     const action = item.action;
     const sessionId = sessionIdRef.current;
     if (!action || item.actionDone || runningActionId || !sessionId) return;
     try {
+      if (action.kind === 'abrir_ensayo') {
+        if (await openEnsayo(action.protocolId)) markActionDone(sessionId, item.id);
+        return;
+      }
+      if (action.kind === 'abrir_dossier') {
+        markActionDone(sessionId, item.id);
+        navigation.navigate('Dossier', {
+          projectId, projectName,
+          initialFilters: {
+            ...(action.desde ? { desde: action.desde } : {}),
+            ...(action.hasta ? { hasta: action.hasta } : {}),
+            ...(action.templateId ? { templateId: action.templateId } : {}),
+            ...(action.sectorId ? { sectorId: action.sectorId } : {}),
+          },
+        });
+        return;
+      }
+      if (action.kind === 'crear_nc') {
+        setRunningActionId(item.id);
+        // Mismo guardado que NonConformityScreen (validación de 10+ chars ya
+        // hecha server-side) + push del proyecto para que la nube la vea.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const proto: any = await protocolsCollection.find(action.protocolId).catch(() => null);
+        if (!proto) {
+          Alert.alert('Ensayo sin sincronizar', 'Ese ensayo aún no está descargado en este teléfono. Sincronice e intente de nuevo.');
+          return;
+        }
+        await database.write(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await nonConformitiesCollection.create((nc: any) => {
+            nc.projectId = projectId;
+            nc.protocolId = action.protocolId;
+            nc.description = action.descripcion;
+            nc.status = 'OPEN';
+            nc.raisedById = (currentUser as any)?.id ?? '';
+            nc.resolutionNotes = null;
+          });
+        });
+        pushProjectToSupabase(projectId).catch(() => {});
+        markActionDone(sessionId, item.id);
+        Alert.alert('No conformidad registrada', `NC abierta sobre ${action.codigo ?? 'el ensayo'}.`);
+        return;
+      }
       if (action.kind === 'abrir_pantalla') {
         const dest = DESTINO_SCREEN[action.destino];
         if (!dest) { Alert.alert('Acción', 'Ese destino no está disponible en esta versión de la app.'); return; }
@@ -565,7 +631,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     } finally {
       setRunningActionId(null);
     }
-  }, [projectId, projectName, navigation, runningActionId, markActionDone]);
+  }, [projectId, projectName, navigation, runningActionId, markActionDone, openEnsayo, currentUser]);
 
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
@@ -593,6 +659,22 @@ export default function AIChatScreen({ navigation, route }: Props) {
             style={[styles.msgText, isUser ? styles.msgTextUser : styles.msgTextAI, isError && styles.msgTextError]}
             text={isError ? item.text.slice(1).trim() : item.text}
           />
+          {/* ── Chips de ensayos listados (tocables → abren el ensayo) ── */}
+          {!isUser && !!item.links?.length && (
+            <View style={styles.linksWrap}>
+              {item.links.map((lk: AIEnsayoLink) => (
+                <TouchableOpacity
+                  key={lk.protocolId}
+                  style={styles.linkChip}
+                  onPress={() => { openEnsayo(lk.protocolId); }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="open-outline" size={12} color={Colors.primary} />
+                  <Text style={styles.linkChipText} numberOfLines={1}>{lk.codigo ?? 'Ensayo'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           {/* ── Tarjeta de acción (confirmación explícita del usuario) ── */}
           {!isUser && item.action && (
             <TouchableOpacity
@@ -602,7 +684,14 @@ export default function AIChatScreen({ navigation, route }: Props) {
               activeOpacity={0.75}
             >
               <Ionicons
-                name={item.action.kind === 'crear_ensayo' ? 'flask-outline' : item.action.kind === 'crear_muestra' ? 'archive-outline' : 'navigate-outline'}
+                name={
+                  item.action.kind === 'crear_ensayo' ? 'flask-outline'
+                  : item.action.kind === 'crear_muestra' ? 'archive-outline'
+                  : item.action.kind === 'crear_nc' ? 'alert-circle-outline'
+                  : item.action.kind === 'abrir_ensayo' ? 'document-text-outline'
+                  : item.action.kind === 'abrir_dossier' ? 'folder-open-outline'
+                  : 'navigate-outline'
+                }
                 size={17}
                 color={item.actionDone ? Colors.success : Colors.primary}
               />
@@ -614,7 +703,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
               ) : (
                 <View style={[styles.actionBtn, item.actionDone && styles.actionBtnDone]}>
                   <Text style={styles.actionBtnText}>
-                    {item.actionDone ? 'Hecho ✓' : item.action.kind === 'abrir_pantalla' ? 'Abrir' : 'Crear'}
+                    {item.actionDone ? 'Hecho ✓'
+                      : item.action.kind === 'crear_ensayo' || item.action.kind === 'crear_muestra' ? 'Crear'
+                      : item.action.kind === 'crear_nc' ? 'Registrar'
+                      : 'Abrir'}
                   </Text>
                 </View>
               )}
@@ -639,7 +731,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         </View>
       </View>
     );
-  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction]);
+  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction, openEnsayo]);
 
   return (
     <View style={styles.container}>
@@ -870,6 +962,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm,
     overflow: 'hidden', marginBottom: 8, backgroundColor: Colors.white,
   },
+
+  // Chips de ensayos listados
+  linksWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  linkChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderColor: Colors.primary + '55', borderRadius: 12,
+    paddingHorizontal: 9, paddingVertical: 5, backgroundColor: Colors.primary + '0A',
+    maxWidth: 170,
+  },
+  linkChipText: { fontSize: 11.5, fontWeight: '700', color: Colors.primary },
 
   // Tarjeta de acción
   actionCard: {
