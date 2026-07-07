@@ -23,7 +23,8 @@ import { Q } from '@nozbe/watermelondb';
 import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { parseNumericRow, parseNumeric, splitRowComments, isNumericProtocol } from '@utils/numericProtocol';
-import NumericTable from '@components/NumericTable';
+import NumericTable, { type NumericTableHandle } from '@components/NumericTable';
+import { loadSpeech, parseSpokenValue } from '@utils/speechModule';
 import { useTour } from '@context/TourContext';
 import type Protocol from '@models/Protocol';
 import type ProtocolItem from '@models/ProtocolItem';
@@ -167,6 +168,82 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
     const subHide = Keyboard.addListener('keyboardDidHide', () => { kbVisibleRef.current = false; });
     return () => { subShow.remove(); subHide.remove(); };
   }, []);
+  // ── v77 — DICTADO POR VOZ celda-a-celda (LOTE F v1) ──
+  // Modo escucha CONTINUA: el usuario toca una celda, dicta el valor y al ser
+  // final se escribe con el MISMO flujo de una edición manual (commitRow →
+  // fórmulas y validación corren igual). Sin celda enfocada, el resultado se
+  // ignora (aviso sutil). Módulo nativo con require diferido.
+  const numericTableRef = useRef<NumericTableHandle>(null);
+  const [dictating, setDictating] = useState(false);
+  const dictSubsRef = useRef<{ remove: () => void }[]>([]);
+  const clearDictSubs = useCallback(() => {
+    dictSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
+    dictSubsRef.current = [];
+  }, []);
+  const stopDictation = useCallback(() => {
+    // Ref primero y SÍNCRONO: el 'end' que dispara abort() no debe reabrir.
+    dictatingRef.current = false;
+    try { loadSpeech()?.abort(); } catch { /* no activo */ }
+    clearDictSubs();
+    setDictating(false);
+  }, [clearDictSubs]);
+  const toggleDictation = useCallback(async () => {
+    if (dictating) { stopDictation(); return; }
+    const speech = loadSpeech();
+    if (!speech) {
+      Alert.alert('Función no disponible', 'El dictado por voz requiere reinstalar la aplicación (nuevo módulo de voz).');
+      return;
+    }
+    try {
+      const perm = await speech.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Micrófono', 'Sin permiso de micrófono no se puede dictar.');
+        return;
+      }
+      clearDictSubs();
+      dictSubsRef.current = [
+        speech.addListener('result', e => {
+          if (!e?.isFinal) return; // solo resultados FINALES escriben la celda
+          const txt = String(e?.results?.[0]?.transcript ?? '').trim();
+          if (!txt) return;
+          const ok = numericTableRef.current?.dictateToFocusedCell(parseSpokenValue(txt));
+          if (!ok) {
+            // Sin celda enfocada: no escribir a ciegas (integridad del ensayo).
+            Alert.alert('Dictado', 'Toque primero la celda que quiere llenar y vuelva a dictar.');
+          }
+        }),
+        speech.addListener('end', () => {
+          // El reconocedor cierra solo tras cada frase final → reabrir mientras
+          // el modo dictado siga activo (escucha continua real).
+          if (dictatingRef.current) {
+            try { speech.start({ lang: 'es-PE', interimResults: false, continuous: false }); }
+            catch { setDictating(false); clearDictSubs(); }
+          }
+        }),
+        speech.addListener('error', e => {
+          const code = String(e?.error ?? '');
+          if (code === 'no-speech') return; // silencio: el 'end' reabre solo
+          dictatingRef.current = false;
+          clearDictSubs();
+          setDictating(false);
+          if (code !== 'aborted') Alert.alert('Dictado', 'No se pudo reconocer la voz. Intente de nuevo.');
+        }),
+      ];
+      speech.start({ lang: 'es-PE', interimResults: false, continuous: false });
+      dictatingRef.current = true;
+      setDictating(true);
+    } catch {
+      dictatingRef.current = false;
+      clearDictSubs();
+      setDictating(false);
+      Alert.alert('Dictado', 'No se pudo iniciar el dictado.');
+    }
+  }, [dictating, stopDictation, clearDictSubs]);
+  // Ref espejo SÍNCRONO para el listener 'end' (el estado React llega tarde).
+  const dictatingRef = useRef(false);
+  // Apagar el dictado al salir de la pantalla.
+  useEffect(() => stopDictation, [stopDictation]);
+
   const ensureCellVisible = useCallback((el: { measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void } | null) => {
     if (!el?.measureInWindow) return;
     // Pequeño delay: deja que el teclado abra para medir contra su altura real.
@@ -998,7 +1075,24 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
           </View>
             {numericMode && (
               <>
+                {/* v77 — Dictado por voz celda-a-celda: toque una celda y dicte
+                    el valor ("dos punto quince" / "2.15"). Solo si la ficha es
+                    editable. El módulo de voz se carga diferido (dev clients
+                    viejos muestran aviso de reinstalar). */}
+                {!isReadOnly && (
+                  <TouchableOpacity
+                    style={[styles.dictateBar, dictating && styles.dictateBarActive]}
+                    onPress={toggleDictation}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name={dictating ? 'mic' : 'mic-outline'} size={16} color={dictating ? Colors.white : Colors.primary} />
+                    <Text style={[styles.dictateBarText, dictating && { color: Colors.white }]}>
+                      {dictating ? 'Escuchando… toque una celda y dicte el valor' : 'Dictar valores por voz'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <NumericTable
+                  ref={numericTableRef}
                   protocolCode={(protocol as any)?.protocolCode ?? null}
                   auxTables={auxTables}
                   projectId={(protocol as any)?.projectId ?? undefined}
@@ -1466,6 +1560,15 @@ const styles = StyleSheet.create({
   },
   extraPhotoBtnText: { color: Colors.primary, fontWeight: '700', fontSize: 13 },
   // v32 — fila de botones de evidencia (archivos + cámara)
+  // v77 — Barra de dictado por voz (fichas numéricas editables).
+  dictateBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: Colors.primary, borderRadius: Radius.md,
+    paddingVertical: 10, marginBottom: 8, backgroundColor: Colors.white,
+  },
+  dictateBarActive: { backgroundColor: Colors.danger, borderColor: Colors.danger },
+  dictateBarText: { fontSize: 12.5, fontWeight: '800', color: Colors.primary },
+
   extraBtnsRow: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
   extraCameraBtn: {
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14,

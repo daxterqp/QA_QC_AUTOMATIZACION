@@ -125,10 +125,20 @@ function renderHeaderCellsMobile(hr: NumericHeaderSpec, maxCols: number, cellWid
   return out;
 }
 
+/** v77 — Handle imperativo para el DICTADO POR VOZ (LOTE F): el contenedor
+ *  (ProtocolFillScreen) escribe el texto reconocido en la celda ENFOCADA y la
+ *  fila se commitea igual que una edición manual. */
+export interface NumericTableHandle {
+  /** ¿Hay una celda tipeable con foco? (para habilitar el botón de mic). */
+  hasFocusedCell: () => boolean;
+  /** Escribe `text` en la celda enfocada y commitea la fila. false = sin celda. */
+  dictateToFocusedCell: (text: string) => boolean;
+}
+
 /** Tabla unificada para protocolos numéricos en móvil. Soporta filas multi-celda
  *  con `//`, etiquetadas A, B, C, … La tabla scrollea horizontal si hay más de
  *  una columna para mantener la metáfora Excel sin romper la legibilidad. */
-export default function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, frozen, onFocusCell, protocolCode, auxTables, projectId, cellScale, groupingPresets, groupingContext }: Props) {
+const NumericTable = React.forwardRef<NumericTableHandle, Props>(function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, frozen, onFocusCell, protocolCode, auxTables, projectId, cellScale, groupingPresets, groupingContext }: Props, fwdRef) {
   const { t } = useI18n();
   const readOnly = readOnlyProp || frozen;
   // v43.1 — Escala de ancho de celda (zoom out del Audit ensancha la visibilidad de
@@ -596,6 +606,23 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
     setXrefPicker(null);
     setXrefSearch('');
   }, [xrefPicker, commitRow]);
+
+  // v77 — DICTADO POR VOZ: escribir en la celda enfocada exactamente como una
+  // edición manual (mismo localValues + commitRow → fórmulas/validación corren
+  // igual). El contenedor decide QUÉ texto llega (número parseado del habla).
+  React.useImperativeHandle(fwdRef, () => ({
+    hasFocusedCell: () => focusedKey != null,
+    dictateToFocusedCell: (text: string) => {
+      if (!focusedKey || readOnly) return false;
+      const itemId = focusedKey.split(':')[0];
+      const row = mainRows.find(r => r.item.id === itemId);
+      if (!row || row.spec?.kind !== 'row') return false;
+      const updated = { ...localValues, [focusedKey]: sanitizeCellText(text) };
+      setLocalValues(updated);
+      commitRow(itemId, row.spec, updated);
+      return true;
+    },
+  }), [focusedKey, readOnly, mainRows, localValues, commitRow]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   // v34 — La tabla se compone por SECCIONES: cada una con su propia fila de
@@ -1302,7 +1329,9 @@ export default function NumericTable({ items, readOnly: readOnlyProp, onChangeMa
       </Modal>
     </View>
   );
-}
+});
+
+export default NumericTable;
 
 // ── Herramienta de desarrollo: autollenado (solo __DEV__) ────────────────────
 // Perfil del ensayo PROCTOR (PRV5): valores REALES tomados del Excel de ejemplo
