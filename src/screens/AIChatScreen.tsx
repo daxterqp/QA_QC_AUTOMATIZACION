@@ -179,6 +179,12 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const { currentUser } = useAuth();
   // Primer nombre para el saludo de la bienvenida ("Hola Joseph, ¿por dónde empezamos?").
   const firstName = ((currentUser as any)?.name ?? '').trim().split(/\s+/)[0] || null;
+  // Montaje vivo (gates de callbacks diferidos: narración manos-libres, etc.).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const [session, setSession] = useState<AIChatSession | null>(null);
   const [input, setInput] = useState('');
@@ -236,6 +242,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const micSubsRef = useRef<{ remove: () => void }[]>([]);
   const micBaseTextRef = useRef('');
   const micPulse = useRef(new Animated.Value(1)).current;
+  // Guard SÍNCRONO: hay un await (permisos) antes de setMicActive — dos taps
+  // rápidos iniciarían el reconocedor dos veces.
+  const micBusyRef = useRef(false);
 
   const clearMicSubs = useCallback(() => {
     micSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
@@ -251,11 +260,13 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   const startMic = useCallback(async () => {
     if (micActive) { stopMic(); return; }
+    if (micBusyRef.current) return;
     const speech = loadSpeech();
     if (!speech) {
       Alert.alert('Función no disponible', 'El dictado por voz requiere reinstalar la aplicación (nuevo módulo de voz).');
       return;
     }
+    micBusyRef.current = true;
     try {
       const perm = await speech.requestPermissionsAsync();
       if (!perm.granted) {
@@ -286,6 +297,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
       clearMicSubs();
       setMicActive(false);
       Alert.alert('Dictado', 'No se pudo iniciar el dictado.');
+    } finally {
+      micBusyRef.current = false;
     }
   }, [micActive, input, stopMic, clearMicSubs]);
 
@@ -302,15 +315,20 @@ export default function AIChatScreen({ navigation, route }: Props) {
   useEffect(() => () => { stopMic(true); }, [stopMic]);
 
   // Dictado directo desde la burbuja (long-press) → autoMic en los params.
-  const autoMicDoneRef = useRef(false);
+  // El param se LIMPIA tras usarse (setParams) para que un nuevo long-press
+  // sobre la pantalla ya montada vuelva a disparar el mic.
+  const autoMicParam = (route.params as { autoMic?: boolean }).autoMic;
   useEffect(() => {
-    if (!booting && (route.params as { autoMic?: boolean }).autoMic && !autoMicDoneRef.current) {
-      autoMicDoneRef.current = true;
-      const t = setTimeout(() => { startMic(); }, 400);
+    if (!booting && autoMicParam) {
+      const t = setTimeout(() => {
+        startMic();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        navigation.setParams({ autoMic: undefined } as any);
+      }, 400);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booting]);
+  }, [booting, autoMicParam]);
 
   // ── Modo manos libres (E2): narra sola cada respuesta nueva ──
   const [handsFree, setHandsFree] = useState(false);
@@ -528,7 +546,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const applyRename = useCallback(async () => {
     if (!renaming) return;
     const nuevo = renaming.titulo.trim() || 'Conversación';
-    const target = pastSessions.find(s => s.id === renaming.id);
+    // Snapshot FRESCO del storage (no el de pastSessions al abrir el modal):
+    // si llegó un guardado más nuevo mientras el modal estaba abierto, un
+    // snapshot viejo pisaría esos mensajes.
+    const all = await loadSessions(projectId).catch(() => [] as AIChatSession[]);
+    const target = all.find(s => s.id === renaming.id);
     if (target) {
       const updated = { ...target, titulo: nuevo }; // sin bumpear updatedAt: no reordena
       await saveSession(projectId, updated).catch(() => {});
@@ -536,7 +558,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     }
     setSession(prev => (prev && prev.id === renaming.id ? { ...prev, titulo: nuevo } : prev));
     setRenaming(null);
-  }, [renaming, pastSessions, projectId]);
+  }, [renaming, projectId]);
 
   const removeSession = useCallback((s: AIChatSession) => {
     Alert.alert('Eliminar conversación', `¿Eliminar "${s.titulo}" del historial?`, [
@@ -623,9 +645,14 @@ export default function AIChatScreen({ navigation, route }: Props) {
         at: Date.now(),
       };
       applyResult(aiMsg);
-      // Manos libres: narrar sola la respuesta nueva (E2).
+      // Manos libres: narrar sola la respuesta nueva (E2) — SOLO si la pantalla
+      // sigue montada Y el usuario sigue en ESTA conversación (sin esto, la
+      // narración arrancaba tras salir del chat o sobre otra sesión).
       if (handsFreeRef.current && res.reply) {
-        setTimeout(() => { toggleSpeech(aiMsg); }, 250);
+        setTimeout(() => {
+          if (!mountedRef.current || sessionIdRef.current !== base.id) return;
+          toggleSpeech(aiMsg);
+        }, 250);
       }
     } catch (e) {
       applyResult({
@@ -642,6 +669,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  // Guard SÍNCRONO (el estado del closure llega tarde ante doble tap — misma
+  // clase de bug que sendingRef en send).
+  const runningActionRef = useRef(false);
   // Id de la sesión visible, siempre fresco (para el guard de markActionDone).
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = session?.id ?? null;
@@ -694,7 +724,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const executeAction = useCallback(async (item: AIChatMessage) => {
     const action = item.action;
     const sessionId = sessionIdRef.current;
-    if (!action || item.actionDone || runningActionId || !sessionId) return;
+    if (!action || item.actionDone || runningActionRef.current || !sessionId) return;
+    runningActionRef.current = true;
     try {
       if (action.kind === 'abrir_ensayo') {
         if (await openEnsayo(action.protocolId)) markActionDone(sessionId, item.id);
@@ -785,9 +816,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
     } catch (e) {
       Alert.alert('Acción', e instanceof Error ? e.message : 'No se pudo ejecutar la acción.');
     } finally {
+      runningActionRef.current = false;
       setRunningActionId(null);
     }
-  }, [projectId, projectName, navigation, runningActionId, markActionDone, openEnsayo, currentUser]);
+  }, [projectId, projectName, navigation, markActionDone, openEnsayo, currentUser]);
 
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
@@ -1006,7 +1038,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
             placeholderTextColor={micActive ? Colors.primary : Colors.textMuted}
             multiline
             maxLength={2000}
-            editable={!sending}
+            // Mientras dicta, el teclado queda bloqueado: una edición manual
+            // sería pisada por el próximo resultado del reconocedor.
+            editable={!sending && !micActive}
           />
           {/* Dictado por voz: toque para hablar, toque de nuevo para parar. */}
           <Animated.View style={{ transform: [{ scale: micPulse }] }}>

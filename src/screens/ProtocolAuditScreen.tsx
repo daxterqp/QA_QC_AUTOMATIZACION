@@ -177,12 +177,19 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
 
   const extraPhotosKey = `protocol_extra_photos_${protocolId}`;
 
-  // Cargar fotos extra al montar
+  // Cargar fotos extra al montar Y al VOLVER (la cámara guarda en la misma key
+  // de AsyncStorage — sin el listener de focus, la foto recién tomada no
+  // aparecía hasta reabrir la pantalla).
   useEffect(() => {
-    AsyncStorage.getItem(extraPhotosKey)
-      .then((val) => { if (val) setExtraPhotos(JSON.parse(val)); })
-      .catch(() => {});
-  }, [extraPhotosKey]);
+    const load = () => {
+      AsyncStorage.getItem(extraPhotosKey)
+        .then((val) => { if (val) setExtraPhotos(JSON.parse(val)); })
+        .catch(() => {});
+    };
+    load();
+    const unsub = navigation.addListener('focus', load);
+    return unsub;
+  }, [extraPhotosKey, navigation]);
 
   const handleAddExtraPhoto = async () => {
     if (!protocol) return;

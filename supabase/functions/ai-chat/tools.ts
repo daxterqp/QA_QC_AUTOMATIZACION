@@ -287,6 +287,26 @@ const addDaysYmd = (ymd: string, days: number): string => {
 /** Lunes de la semana del ymd (mirror del corte semanal de la app). */
 const mondayOfWeek = (ymd: string): string => periodKeyOf(ymd, 'semana');
 
+/** Mirror de splitCells (src/utils/numericProtocol.ts v42e): separa por `//`
+ *  IGNORANDO los `//` dentro de corchetes (un literal `val-[3//8 pulg]` no debe
+ *  partirse). El alineamiento segmento↔letra debe ser IDÉNTICO al de la app. */
+function splitCellsMirror(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0, last = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '[') depth++;
+    else if (ch === ']') { if (depth > 0) depth--; }
+    else if (ch === '/' && s[i + 1] === '/' && depth === 0) {
+      out.push(s.slice(last, i));
+      i++;
+      last = i + 1;
+    }
+  }
+  out.push(s.slice(last));
+  return out;
+}
+
 /** Extrae el rango [min:max] de UN segmento de método de validación numérico:
  *  `numerico-[min:max]`, `porcentaje-[min:max]` o `numerico-fx[expr]:[min:max]`
  *  (los modificadores posteriores tipo `:nopdf` no estorban). Devuelve null si
@@ -843,18 +863,21 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         if (!res.ok) return res.error;
         if (!res.templateId) return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: la comparación es de una columna de UN tipo de ensayo.' };
         const cat = await loadCatalog(supabase, projectId);
-        // Sectores objetivo: los pedidos (resueltos por nombre) o todos.
+        // Sectores objetivo: los pedidos (resueltos por nombre, DEDUP) o todos.
         let objetivo = cat.sectores;
+        let notaSectores: string | undefined;
         if (input.sectores?.length) {
+          if (input.sectores.length > 12) notaSectores = `Se comparan solo los primeros 12 de los ${input.sectores.length} sectores pedidos.`;
+          const vistos = new Set<string>();
           const elegidos: typeof cat.sectores = [];
           for (const nombre of input.sectores.slice(0, 12)) {
             const r = resolveByName(cat.sectores, String(nombre));
             if (!r.match) return { error: 'sector_ambiguo_o_inexistente', consulta: nombre, candidatos: (r.candidatos ?? cat.sectores).map(s => ({ id: s.id, nombre: s.nombre })) };
-            elegidos.push(r.match);
+            if (!vistos.has(r.match.id)) { vistos.add(r.match.id); elegidos.push(r.match); }
           }
           objetivo = elegidos;
         }
-        const { rows } = await fetchRows(supabase, projectId, input, res);
+        const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const porSector = new Map<string, number[]>();
         for (const r of rows) {
           if (!r.sector_id) continue;
@@ -880,9 +903,14 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
         }
         const svg = renderChartSvg('barras', input.titulo.slice(0, 80),
           conDatos.map(x => ({ x: x.sector, y: x.promedio as number })));
+        // Misma disciplina de cobertura que las demás tools de valores.
+        const advertencia = notaSectores
+          ?? truncNote(rows.length, total)
+          ?? await valueCoverageNote(supabase, projectId, input, res, total);
         return {
           ...(svg ? { [CHART_SVG_KEY]: svg } : {}),
           grafico_generado: !!svg,
+          ...(advertencia ? { advertencia } : {}),
           resultados,
         };
       },
@@ -918,11 +946,14 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           const vm = String(it.validation_method ?? '');
           const partida = String(it.partida_item ?? '').trim();
           if (!vm || !partida) continue;
-          const segs = vm.split('//').map(s => s.trim());
+          // split IGUAL que la app (v42e: `//` dentro de corchetes no separa) y
+          // key SIEMPRE `partida:LETRA` — así escriben values_json los writers
+          // (SummaryRowService.extractValues), incluso para filas de una celda.
+          const segs = splitCellsMirror(vm).map(s => s.trim());
           segs.forEach((seg, idx) => {
             const range = parseRangeFromSegment(seg);
             if (!range) return;
-            const key = segs.length > 1 ? `${partida}:${String.fromCharCode(65 + idx)}` : partida;
+            const key = `${partida}:${String.fromCharCode(65 + idx)}`;
             const m = rangesByTpl.get(String(it.template_id)) ?? new Map();
             m.set(key, range);
             rangesByTpl.set(String(it.template_id), m);
@@ -980,11 +1011,16 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       },
       execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string; codigo?: string; descripcion?: string; desde?: string; hasta?: string }) => {
         // Helper: valida un código de ensayo contra protocols (fuente fresca).
+        // ilike = igualdad case-insensitive (los códigos pueden incluir el
+        // nombre del sector con minúsculas). Se neutralizan los comodines de
+        // patrón (%/*/_) para que siga siendo IGUALDAD, no un LIKE abierto.
         const findByCode = async (codigo: string) => {
+          const safe = codigo.trim().replace(/[%*]/g, '').replace(/_/g, '\\_');
+          if (!safe) return null;
           const { data } = await supabase.from('protocols')
             .select('id, protocol_code, status')
             .eq('project_id', projectId)
-            .eq('protocol_code', codigo.trim().toUpperCase())
+            .ilike('protocol_code', safe)
             .limit(1);
           return data?.[0] ?? null;
         };
@@ -1015,9 +1051,19 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
           if ((input.desde != null && !isRealYmd(input.desde)) || (input.hasta != null && !isRealYmd(input.hasta))) {
             return { error: 'fecha_invalida', mensaje: 'desde/hasta deben ser fechas YYYY-MM-DD válidas.' };
           }
-          // Resolver tipo/sector (opcionales) contra el catálogo.
+          // Resolver tipo/sector (opcionales) contra el catálogo. Los IDs
+          // directos también se VALIDAN (un id inventado no pasa a la tarjeta).
           const res = await resolveFilters(supabase, projectId, input);
           if (!res.ok) return res.error;
+          if (input.template_id || input.sector_id) {
+            const cat = await loadCatalog(supabase, projectId);
+            if (input.template_id && !cat.tipos.some(t => t.template_id === input.template_id)) {
+              return { error: 'tipo_inexistente', consulta: input.template_id, candidatos: cat.tipos.map(t => ({ template_id: t.template_id, codigo: t.codigo, nombre: t.nombre })) };
+            }
+            if (input.sector_id && !cat.sectores.some(s => s.id === input.sector_id)) {
+              return { error: 'sector_inexistente', consulta: input.sector_id, candidatos: cat.sectores.map(s => ({ id: s.id, nombre: s.nombre })) };
+            }
+          }
           const partes: string[] = [];
           if (input.desde || input.hasta) partes.push(`${input.desde ?? '…'} → ${input.hasta ?? '…'}`);
           const etiqueta = `Abrir Dossier${partes.length ? ` (${partes.join(', ')})` : ' filtrado'}`;

@@ -15,6 +15,7 @@ import { resolveScopeCells, extractRefs, type ScopeCell, type Scope, type AuxTab
 import { resolveXrefs, scanXrefs } from '@services/XrefResolver';
 import { searchRecentProtocols, type RecentProtocol } from '@services/ProtocolSearchService';
 import { resolvePreset, type GroupingContext } from '@services/ProtocolGroupingService';
+import { parseSpokenValue } from '@utils/speechModule';
 import type { GroupingPreset } from '@utils/featureFlags';
 import { SHOW_DEV_TOOLS } from '../config/devFlags';
 import { useI18n, tx } from '@i18n/index';
@@ -609,15 +610,20 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
 
   // v77 — DICTADO POR VOZ: escribir en la celda enfocada exactamente como una
   // edición manual (mismo localValues + commitRow → fórmulas/validación corren
-  // igual). El contenedor decide QUÉ texto llega (número parseado del habla).
+  // igual). El texto llega CRUDO del reconocedor: el parseo numérico ("dos
+  // punto quince" → 2.15) se aplica SOLO si la celda es numérica — a una celda
+  // de texto la palabra "punto" legítima no debe corromperla.
   React.useImperativeHandle(fwdRef, () => ({
     hasFocusedCell: () => focusedKey != null,
     dictateToFocusedCell: (text: string) => {
       if (!focusedKey || readOnly) return false;
-      const itemId = focusedKey.split(':')[0];
+      const [itemId, letter] = focusedKey.split(':');
       const row = mainRows.find(r => r.item.id === itemId);
       if (!row || row.spec?.kind !== 'row') return false;
-      const updated = { ...localValues, [focusedKey]: sanitizeCellText(text) };
+      const idx = letter ? letter.charCodeAt(0) - 65 : 0;
+      const kind = row.spec.cells[idx]?.kind;
+      const value = (kind === 'manual' || kind === 'percent') ? parseSpokenValue(text) : text;
+      const updated = { ...localValues, [focusedKey]: sanitizeCellText(value) };
       setLocalValues(updated);
       commitRow(itemId, row.spec, updated);
       return true;

@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, ScrollView, Image, Modal, Dimensions,
-  useWindowDimensions, Keyboard,
+  useWindowDimensions, Keyboard, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
@@ -24,7 +24,7 @@ import { useAuth } from '@context/AuthContext';
 import { useTourStep } from '@hooks/useTourStep';
 import { parseNumericRow, parseNumeric, splitRowComments, isNumericProtocol } from '@utils/numericProtocol';
 import NumericTable, { type NumericTableHandle } from '@components/NumericTable';
-import { loadSpeech, parseSpokenValue } from '@utils/speechModule';
+import { loadSpeech } from '@utils/speechModule';
 import { useTour } from '@context/TourContext';
 import type Protocol from '@models/Protocol';
 import type ProtocolItem from '@models/ProtocolItem';
@@ -176,6 +176,8 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   const numericTableRef = useRef<NumericTableHandle>(null);
   const [dictating, setDictating] = useState(false);
   const dictSubsRef = useRef<{ remove: () => void }[]>([]);
+  // Aviso "toque una celda" UNA sola vez por activación del dictado.
+  const noCellAlertShownRef = useRef(false);
   const clearDictSubs = useCallback(() => {
     dictSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
     dictSubsRef.current = [];
@@ -206,9 +208,13 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
           if (!e?.isFinal) return; // solo resultados FINALES escriben la celda
           const txt = String(e?.results?.[0]?.transcript ?? '').trim();
           if (!txt) return;
-          const ok = numericTableRef.current?.dictateToFocusedCell(parseSpokenValue(txt));
-          if (!ok) {
+          // El texto va CRUDO: NumericTable decide el parseo según el KIND de
+          // la celda (numérica → "dos punto quince" = 2.15; texto → tal cual).
+          const ok = numericTableRef.current?.dictateToFocusedCell(txt);
+          if (!ok && !noCellAlertShownRef.current) {
             // Sin celda enfocada: no escribir a ciegas (integridad del ensayo).
+            // Aviso UNA vez por activación (la escucha continua produciría ráfaga).
+            noCellAlertShownRef.current = true;
             Alert.alert('Dictado', 'Toque primero la celda que quiere llenar y vuelva a dictar.');
           }
         }),
@@ -229,6 +235,7 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
           if (code !== 'aborted') Alert.alert('Dictado', 'No se pudo reconocer la voz. Intente de nuevo.');
         }),
       ];
+      noCellAlertShownRef.current = false;
       speech.start({ lang: 'es-PE', interimResults: false, continuous: false });
       dictatingRef.current = true;
       setDictating(true);
@@ -241,8 +248,15 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
   }, [dictating, stopDictation, clearDictSubs]);
   // Ref espejo SÍNCRONO para el listener 'end' (el estado React llega tarde).
   const dictatingRef = useRef(false);
-  // Apagar el dictado al salir de la pantalla.
+  // Apagar el dictado al salir de la pantalla, al PERDER FOCO (navegar a la
+  // cámara/otra pantalla) y al backgroundear la app — sin esto el bucle de
+  // escucha continua seguía reabriendo el micrófono.
   useEffect(() => stopDictation, [stopDictation]);
+  useEffect(() => {
+    const unsubBlur = navigation.addListener('blur', () => stopDictation());
+    const subApp = AppState.addEventListener('change', s => { if (s !== 'active') stopDictation(); });
+    return () => { unsubBlur(); subApp.remove(); };
+  }, [navigation, stopDictation]);
 
   const ensureCellVisible = useCallback((el: { measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void } | null) => {
     if (!el?.measureInWindow) return;

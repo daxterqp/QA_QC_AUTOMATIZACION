@@ -128,6 +128,15 @@ export async function deleteNarrationFile(uri: string): Promise<void> {
 const MAX_PREFS = 10;
 const prefsKey = (projectId: string) => `ai_prefs:${projectId}`;
 
+// Serialización de escrituras (add/remove son read-modify-write: dos llamadas
+// concurrentes perderían una de las dos sin este candado).
+let prefsLock: Promise<unknown> = Promise.resolve();
+function withPrefsLock<T>(fn: () => Promise<T>): Promise<T> {
+  const p = prefsLock.then(fn);
+  prefsLock = p.catch(() => {});
+  return p;
+}
+
 export async function loadPrefs(projectId: string): Promise<string[]> {
   try {
     const raw = await AsyncStorage.getItem(prefsKey(projectId));
@@ -138,21 +147,25 @@ export async function loadPrefs(projectId: string): Promise<string[]> {
   }
 }
 
-export async function addPref(projectId: string, texto: string): Promise<string[]> {
-  const clean = texto.trim().slice(0, 140);
-  if (!clean) return loadPrefs(projectId);
-  const prev = await loadPrefs(projectId);
-  // Dedup (case-insensitive) + la más nueva al final; tope con poda de la más vieja.
-  const next = [...prev.filter(p => p.toLowerCase() !== clean.toLowerCase()), clean].slice(-MAX_PREFS);
-  await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
-  return next;
+export function addPref(projectId: string, texto: string): Promise<string[]> {
+  return withPrefsLock(async () => {
+    const clean = texto.trim().slice(0, 140);
+    if (!clean) return loadPrefs(projectId);
+    const prev = await loadPrefs(projectId);
+    // Dedup (case-insensitive) + la más nueva al final; tope con poda de la más vieja.
+    const next = [...prev.filter(p => p.toLowerCase() !== clean.toLowerCase()), clean].slice(-MAX_PREFS);
+    await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
+    return next;
+  });
 }
 
-export async function removePref(projectId: string, texto: string): Promise<string[]> {
-  const prev = await loadPrefs(projectId);
-  const next = prev.filter(p => p !== texto);
-  await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
-  return next;
+export function removePref(projectId: string, texto: string): Promise<string[]> {
+  return withPrefsLock(async () => {
+    const prev = await loadPrefs(projectId);
+    const next = prev.filter(p => p !== texto);
+    await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
+    return next;
+  });
 }
 
 // ── Historial de sesiones (LOCAL, por proyecto) ──────────────────────────────

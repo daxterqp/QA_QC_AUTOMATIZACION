@@ -78,20 +78,38 @@ npx expo run:android
   sincronizados, el asistente lo ADVIERTE en la respuesta, y al abrir el chat
   el celular repara en segundo plano las filas faltantes con sus datos locales.
 
-## Qué sabe responder
+## Qué sabe hacer FLOW (v77)
 
 Toda cifra sale de los datos reales del proyecto (RLS con el JWT del usuario —
 un usuario sin acceso al proyecto no ve nada):
 
-- Conteos y listados de ensayos por fecha/tipo/sector/estado ("¿cuántos ensayos
-  se hicieron ayer en el sector 3?").
-- Series y comparaciones de columnas numéricas ("¿mejoró la compactación esta
-  semana?").
-- **Gráficos** de tendencia embebidos en el chat ("grafícame la compactación").
-- Muestras (por material y condición), estado de aprobaciones (+ motivos de
-  rechazo), no conformidades, jornadas de trazabilidad.
-- "¿Cómo va el proyecto?" → panorama combinado, narrable por voz (botón de
-  altavoz en cada respuesta).
+**Consultas**
+- Conteos y listados por fecha/tipo/sector/estado ("¿cuántos ensayos se
+  hicieron ayer en el sector 3?") — los ensayos listados salen como CHIPS
+  tocables que abren la ficha directo.
+- Series, comparaciones entre periodos y **entre sectores** (barras por sector).
+- **Gráficos** de línea (tendencia) o barras, embebidos y compartibles.
+- "El parte del día" → panorama completo en una llamada.
+- **Fuera de norma**: cruza los valores contra los rangos [min:max] de las fichas.
+- Muestras, aprobaciones (+ motivos de rechazo), NCs, trazabilidad.
+
+**Manos (siempre con tarjeta de confirmación)**
+- Crear ensayo (borrador con numeración oficial → abre la ficha).
+- Abrir un ensayo por código, registrar una no conformidad, abrir el Dossier
+  con filtros ya aplicados, ir a cualquier módulo, registrar muestra.
+
+**Experiencia**
+- **Dictado por voz** (mic en la barra; long-press de la burbuja flotante =
+  abrir dictando). Requiere el rebuild (módulo nativo).
+- **Manos libres** (ícono audífonos): narra sola cada respuesta.
+- **Compartir** cualquier respuesta o gráfico (PNG) a WhatsApp/otros.
+- **Preferencias**: "siempre muéstramelo por sector" → FLOW lo recuerda
+  (local; editable desde el historial, sección "FLOW recuerda").
+- Burbuja flotante arrastrable en todas las pantallas del proyecto.
+- Bienvenida con agua táctil (motor GL del login) + transición suave.
+
+**Dictado en fichas** (fuera del chat): en una ficha numérica editable, botón
+"Dictar valores por voz" → toque una celda, dicte "2.15" y pase a la siguiente.
 
 ## Costos y límites
 

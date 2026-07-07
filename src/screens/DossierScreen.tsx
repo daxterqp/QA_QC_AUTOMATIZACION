@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, Alert, ActivityIndicator, ScrollView,
@@ -94,6 +94,20 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(initialFilters?.templateId ? [initialFilters.templateId] : []));
   const [locFilter, setLocFilter] = useState<Set<string>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<string>>(new Set(initialFilters?.sectorId ? [initialFilters.sectorId] : []));
+  // Si el Dossier YA estaba montado en el stack y FLOW navega con filtros
+  // nuevos, React Navigation solo actualiza los params: re-sembrar aquí.
+  const appliedFiltersRef = useRef<string>(JSON.stringify(initialFilters ?? null));
+  useEffect(() => {
+    const sig = JSON.stringify(initialFilters ?? null);
+    if (sig === appliedFiltersRef.current || !initialFilters) return;
+    appliedFiltersRef.current = sig;
+    setShowFilters(true);
+    setDateFromMs(ymdToLocalMs(initialFilters.desde));
+    setDateToMs(ymdToLocalMs(initialFilters.hasta));
+    setTypeFilter(new Set(initialFilters.templateId ? [initialFilters.templateId] : []));
+    setSectorFilter(new Set(initialFilters.sectorId ? [initialFilters.sectorId] : []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFilters]);
   // Modal multiselección de Tipo / Ubicación / Sector.
   const [showFilterPicker, setShowFilterPicker] = useState<null | 'tipo' | 'ubicacion' | 'sector'>(null);
 

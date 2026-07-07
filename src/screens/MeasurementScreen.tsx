@@ -2055,7 +2055,11 @@ export default function MeasurementScreen({ navigation, route }: Props) {
   const areaToggleRef = useTourStep('measurement_toggle_area');
   const anglesToggleRef = useTourStep('measurement_toggle_angles');
 
-  // Resolver planId canónico (mismo nombre en mismo proyecto → plan más antiguo)
+  // Resolver planId canónico (mismo nombre en mismo proyecto → plan más antiguo).
+  // `planReady` evita que el load de PDF corra DOS veces (con el routePlanId
+  // inicial y luego con el canónico): con hermanos duplicados eso leía dos
+  // veces el base64 (pesado) y podía disparar descargas S3 duplicadas.
+  const [planReady, setPlanReady] = useState(false);
   useEffect(() => {
     (async () => {
       try {
@@ -2072,6 +2076,8 @@ export default function MeasurementScreen({ navigation, route }: Props) {
         setPlanId(canonical.id);
       } catch {
         setPlanId(routePlanId);
+      } finally {
+        setPlanReady(true);
       }
     })();
   }, [routePlanId]);
@@ -2081,6 +2087,7 @@ export default function MeasurementScreen({ navigation, route }: Props) {
   // canónico más antiguo podía tener el archivo ausente/corrupto → pdf.js
   // reventaba con "Invalid PDF structure" mientras el visor sí funcionaba).
   useEffect(() => {
+    if (!planReady) return; // espera la resolución canónica (una sola corrida)
     (async () => {
       try {
         const plan = await plansCollection.find(planId);
@@ -2122,7 +2129,7 @@ export default function MeasurementScreen({ navigation, route }: Props) {
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     })();
-  }, [planId, routePlanId]);
+  }, [planId, routePlanId, planReady]);
 
   const sendCmd = useCallback((cmd: any) => {
     webRef.current?.postMessage(JSON.stringify(cmd));

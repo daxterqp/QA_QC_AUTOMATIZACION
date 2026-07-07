@@ -73,12 +73,13 @@ export default function LocationListScreen({ navigation, route }: Props) {
     if (didCloudPullRef.current) return;
     didCloudPullRef.current = true;
     let alive = true;
+    let pullDone = false; // el fetchCount puede resolver DESPUÉS del pull → no re-encender el skeleton
     locationsCollection.query(Q.where('project_id', projectId)).fetchCount()
-      .then(n => { if (alive && n === 0) setSyncing(true); })
+      .then(n => { if (alive && !pullDone && n === 0) setSyncing(true); })
       .catch(() => {});
     pullProjectFromCloud(projectId)
       .catch(() => {})
-      .finally(() => { if (alive) setSyncing(false); });
+      .finally(() => { pullDone = true; if (alive) setSyncing(false); });
     return () => { alive = false; };
   }, [projectId]);
 
