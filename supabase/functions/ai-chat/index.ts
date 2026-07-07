@@ -92,6 +92,14 @@ Deno.serve(async (req: Request) => {
     // de arriba puede dejar un assistant huérfano al inicio.
     while (history.length > 0 && history[0].role === "assistant") history.shift();
 
+    // Preferencias del usuario (guardadas en SU dispositivo) — saneadas.
+    const rawPrefs: unknown = body?.preferencias;
+    const preferencias: string[] = Array.isArray(rawPrefs)
+      ? rawPrefs.filter((p): p is string => typeof p === "string" && p.trim() !== "")
+        .slice(0, 10)
+        .map(p => p.slice(0, 140))
+      : [];
+
     // ── Acceso al proyecto + proveedor/tier (RLS: sin acceso, viene vacío) ──
     const { data: proj } = await supabase.from("projects")
       .select("id, name, feature_flags").eq("id", projectId).maybeSingle();
@@ -118,6 +126,7 @@ Deno.serve(async (req: Request) => {
     const tools = buildTools(supabase, projectId);
     const system = buildSystemPrompt({
       userName, userRole: profile?.role ?? null, projectName: String(proj.name ?? "el proyecto"), isFirstTurn,
+      preferencias,
     });
 
     const args = {

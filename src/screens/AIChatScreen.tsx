@@ -12,9 +12,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal,
   KeyboardAvoidingView, Platform, Animated, ScrollView, Alert, useWindowDimensions,
-  ActivityIndicator, type StyleProp, type TextStyle,
+  ActivityIndicator, Share, type StyleProp, type TextStyle,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { SvgXml } from 'react-native-svg';
 import { Q } from '@nozbe/watermelondb';
@@ -32,9 +35,9 @@ import { createInstances } from '@services/ProtocolInstanceService';
 import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
 import {
-  type AIChatMessage, type AIChatSession, type AIEnsayoLink, deleteNarrationFile,
-  deleteSession, loadSessions, newSessionId, requestNarration, saveSession,
-  sendChatMessage, sessionTitleFrom,
+  type AIChatMessage, type AIChatSession, type AIEnsayoLink, addPref,
+  deleteNarrationFile, deleteSession, loadPrefs, loadSessions, newSessionId,
+  removePref, requestNarration, saveSession, sendChatMessage, sessionTitleFrom,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
@@ -54,6 +57,26 @@ function loadExpoAudio(): {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('expo-audio');
+  } catch {
+    return null;
+  }
+}
+
+// ── expo-speech-recognition con require DIFERIDO (mismo motivo que expo-audio:
+// módulo NATIVO nuevo — un dev client viejo no lo tiene y no debe reventar). ──
+interface SpeechModuleLite {
+  requestPermissionsAsync: () => Promise<{ granted: boolean }>;
+  start: (opts: { lang: string; interimResults?: boolean; continuous?: boolean }) => void;
+  stop: () => void;
+  abort: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  addListener: (event: string, cb: (e: any) => void) => { remove: () => void };
+}
+function loadSpeech(): SpeechModuleLite | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const m = require('expo-speech-recognition');
+    return m.ExpoSpeechRecognitionModule ?? null;
   } catch {
     return null;
   }
@@ -207,6 +230,127 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // bienvenida queda como overlay que se DESVANECE sobre la lista.
   const welcomeFade = useRef(new Animated.Value(1)).current;
   const [welcomeLeaving, setWelcomeLeaving] = useState(false);
+
+  // ── Dictado por voz (E4): micrófono del sistema, es-PE, resultados en vivo ──
+  const [micActive, setMicActive] = useState(false);
+  const micSubsRef = useRef<{ remove: () => void }[]>([]);
+  const micBaseTextRef = useRef('');
+  const micPulse = useRef(new Animated.Value(1)).current;
+
+  const clearMicSubs = useCallback(() => {
+    micSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
+    micSubsRef.current = [];
+  }, []);
+
+  const stopMic = useCallback((abort = false) => {
+    const speech = loadSpeech();
+    try { if (abort) speech?.abort(); else speech?.stop(); } catch { /* no estaba activo */ }
+    clearMicSubs();
+    setMicActive(false);
+  }, [clearMicSubs]);
+
+  const startMic = useCallback(async () => {
+    if (micActive) { stopMic(); return; }
+    const speech = loadSpeech();
+    if (!speech) {
+      Alert.alert('Función no disponible', 'El dictado por voz requiere reinstalar la aplicación (nuevo módulo de voz).');
+      return;
+    }
+    try {
+      const perm = await speech.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Micrófono', 'Sin permiso de micrófono no se puede dictar. Actívelo en los ajustes del sistema.');
+        return;
+      }
+      // Conserva lo ya escrito y dicta a continuación.
+      micBaseTextRef.current = input.trim() ? `${input.trim()} ` : '';
+      clearMicSubs();
+      micSubsRef.current = [
+        speech.addListener('result', e => {
+          const txt = e?.results?.[0]?.transcript ?? '';
+          if (txt) setInput(micBaseTextRef.current + txt);
+        }),
+        speech.addListener('end', () => { clearMicSubs(); setMicActive(false); }),
+        speech.addListener('error', e => {
+          clearMicSubs();
+          setMicActive(false);
+          const code = String(e?.error ?? '');
+          if (code !== 'aborted' && code !== 'no-speech') {
+            Alert.alert('Dictado', 'No se pudo reconocer la voz. Intente de nuevo.');
+          }
+        }),
+      ];
+      speech.start({ lang: 'es-PE', interimResults: true, continuous: false });
+      setMicActive(true);
+    } catch {
+      clearMicSubs();
+      setMicActive(false);
+      Alert.alert('Dictado', 'No se pudo iniciar el dictado.');
+    }
+  }, [micActive, input, stopMic, clearMicSubs]);
+
+  // Pulso del botón de mic mientras escucha + liberación al salir.
+  useEffect(() => {
+    if (!micActive) { micPulse.setValue(1); return; }
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(micPulse, { toValue: 1.18, duration: 550, useNativeDriver: true }),
+      Animated.timing(micPulse, { toValue: 1, duration: 550, useNativeDriver: true }),
+    ]));
+    anim.start();
+    return () => anim.stop();
+  }, [micActive, micPulse]);
+  useEffect(() => () => { stopMic(true); }, [stopMic]);
+
+  // Dictado directo desde la burbuja (long-press) → autoMic en los params.
+  const autoMicDoneRef = useRef(false);
+  useEffect(() => {
+    if (!booting && (route.params as { autoMic?: boolean }).autoMic && !autoMicDoneRef.current) {
+      autoMicDoneRef.current = true;
+      const t = setTimeout(() => { startMic(); }, 400);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booting]);
+
+  // ── Modo manos libres (E2): narra sola cada respuesta nueva ──
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef(false);
+  useEffect(() => {
+    AsyncStorage.getItem('ai_hands_free').then(v => {
+      const on = v === '1';
+      setHandsFree(on);
+      handsFreeRef.current = on;
+    }).catch(() => {});
+  }, []);
+  const toggleHandsFree = useCallback(() => {
+    setHandsFree(prev => {
+      const next = !prev;
+      handsFreeRef.current = next;
+      AsyncStorage.setItem('ai_hands_free', next ? '1' : '0').catch(() => {});
+      return next;
+    });
+  }, []);
+
+  // ── Compartir respuestas (E1): texto vía Share nativo; gráfico como PNG ──
+  const chartShotRefs = useRef<Map<string, View>>(new Map());
+  const shareMessage = useCallback(async (item: AIChatMessage) => {
+    try {
+      if (item.chartSvg) {
+        const node = chartShotRefs.current.get(item.id);
+        if (node) {
+          const uri = await captureRef(node, { format: 'png', quality: 1, result: 'tmpfile' });
+          const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+          await Sharing.shareAsync(fileUri, { mimeType: 'image/png', dialogTitle: 'Compartir gráfico' });
+          return;
+        }
+      }
+      await Share.share({ message: item.text });
+    } catch { /* usuario canceló el share sheet */ }
+  }, []);
+
+  // ── Preferencias de FLOW (E3): gestión desde el modal de historial ──
+  const [prefs, setPrefs] = useState<string[]>([]);
+  useEffect(() => { loadPrefs(projectId).then(setPrefs).catch(() => {}); }, [projectId]);
   // Insight local del día (cero tokens: sale de la base local del celular).
   const [insight, setInsight] = useState<string | null>(null);
   useEffect(() => {
@@ -464,13 +608,25 @@ export default function AIChatScreen({ navigation, route }: Props) {
         .filter(m => !isErrorMsg(m))
         .map(m => ({ role: m.role, content: m.text }));
       const res = await sendChatMessage({ projectId, message: msg, history, isFirstTurn });
-      applyResult({
+      // recordar_preferencia es SILENCIOSA: se guarda local, sin tarjeta
+      // (no es destructiva y FLOW ya la confirma en el texto).
+      let action = res.action;
+      if (action?.kind === 'recordar_preferencia') {
+        addPref(projectId, action.texto).then(setPrefs).catch(() => {});
+        action = undefined;
+      }
+      const aiMsg: AIChatMessage = {
         id: `a-${stamp()}`, role: 'assistant', text: res.reply,
         ...(res.chartSvg ? { chartSvg: res.chartSvg } : {}),
-        ...(res.action ? { action: res.action } : {}),
+        ...(action ? { action } : {}),
         ...(res.links?.length ? { links: res.links } : {}),
         at: Date.now(),
-      });
+      };
+      applyResult(aiMsg);
+      // Manos libres: narrar sola la respuesta nueva (E2).
+      if (handsFreeRef.current && res.reply) {
+        setTimeout(() => { toggleSpeech(aiMsg); }, 250);
+      }
     } catch (e) {
       applyResult({
         id: `e-${stamp()}`, role: 'assistant',
@@ -482,7 +638,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
       setSending(false);
       setSendingSessionId(null);
     }
-  }, [projectId, session, isFirstTurn]);
+  }, [projectId, session, isFirstTurn, welcomeFade, toggleSpeech]);
 
   // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
@@ -651,7 +807,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
         )}
         <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAI, isError && styles.bubbleError, hasChart && styles.bubbleChart]}>
           {hasChart && (
-            <View style={styles.chartBox}>
+            <View
+              style={styles.chartBox}
+              collapsable={false}
+              ref={node => { if (node) chartShotRefs.current.set(item.id, node); else chartShotRefs.current.delete(item.id); }}
+            >
               <SvgXml xml={item.chartSvg!} width={chartW} height={chartW * (360 / 640)} />
             </View>
           )}
@@ -714,6 +874,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
           )}
           <View style={styles.msgFooter}>
             {!isUser && !isError && (
+              <TouchableOpacity onPress={() => shareMessage(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="share-social-outline" size={15} color={Colors.textMuted} />
+              </TouchableOpacity>
+            )}
+            {!isUser && !isError && (
               loadingSpeechId === item.id ? (
                 <ActivityIndicator size={13} color={Colors.primary} />
               ) : (
@@ -731,7 +896,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         </View>
       </View>
     );
-  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction, openEnsayo]);
+  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction, openEnsayo, shareMessage]);
 
   return (
     <View style={styles.container}>
@@ -741,6 +906,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
         onBack={() => navigation.goBack()}
         rightContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+            {/* Manos libres: FLOW narra sola cada respuesta (campo con guantes). */}
+            <TouchableOpacity onPress={toggleHandsFree} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name={handsFree ? 'headset' : 'headset-outline'} size={20} color={handsFree ? '#8fd3ff' : Colors.white} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={openHistory} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="time-outline" size={21} color={Colors.white} />
             </TouchableOpacity>
@@ -833,15 +1002,26 @@ export default function AIChatScreen({ navigation, route }: Props) {
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Escriba su consulta…"
-            placeholderTextColor={Colors.textMuted}
+            placeholder={micActive ? 'Escuchando…' : 'Escriba su consulta…'}
+            placeholderTextColor={micActive ? Colors.primary : Colors.textMuted}
             multiline
             maxLength={2000}
             editable={!sending}
           />
+          {/* Dictado por voz: toque para hablar, toque de nuevo para parar. */}
+          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+            <TouchableOpacity
+              style={[styles.micBtn, micActive && styles.micBtnActive]}
+              onPress={startMic}
+              disabled={sending}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
+            </TouchableOpacity>
+          </Animated.View>
           <TouchableOpacity
             style={[styles.sendBtn, (!input.trim() || sending) && styles.sendBtnDisabled]}
-            onPress={() => send(input)}
+            onPress={() => { stopMic(); send(input); }}
             disabled={!input.trim() || sending}
             activeOpacity={0.8}
           >
@@ -883,6 +1063,24 @@ export default function AIChatScreen({ navigation, route }: Props) {
                   </TouchableOpacity>
                 </View>
               ))}
+              {/* ── Preferencias que FLOW recuerda (locales, editables) ── */}
+              {prefs.length > 0 && (
+                <View style={styles.prefsSection}>
+                  <Text style={styles.prefsTitle}>FLOW recuerda</Text>
+                  {prefs.map(p => (
+                    <View key={p} style={styles.prefRow}>
+                      <Ionicons name="bookmark-outline" size={13} color={Colors.primary} />
+                      <Text style={styles.prefText} numberOfLines={2}>{p}</Text>
+                      <TouchableOpacity
+                        onPress={() => { removePref(projectId, p).then(setPrefs).catch(() => {}); }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="close-circle" size={15} color={Colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
             </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -1017,6 +1215,18 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', ...Shadow.subtle,
   },
   sendBtnDisabled: { backgroundColor: Colors.textMuted },
+  micBtn: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.white,
+    borderWidth: 1.5, borderColor: Colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  micBtnActive: { backgroundColor: Colors.danger, borderColor: Colors.danger },
+
+  // Preferencias de FLOW
+  prefsSection: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.surface, gap: 6 },
+  prefsTitle: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, letterSpacing: 0.6, textTransform: 'uppercase' },
+  prefRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  prefText: { flex: 1, fontSize: 12.5, color: Colors.textPrimary },
 
   // Historial
   modalOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.55)', justifyContent: 'center', padding: 22 },

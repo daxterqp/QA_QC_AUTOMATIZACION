@@ -772,6 +772,27 @@ export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef
       },
     },
     {
+      name: 'recordar_preferencia',
+      description: 'Guarda una PREFERENCIA estable del usuario para futuras conversaciones (se almacena en su dispositivo y te llegará en cada consulta). Úsala SOLO cuando exprese una preferencia duradera ("siempre muéstramelo por sector", "prefiero gráficos de barras", "de ahora en adelante..."). Redacta el texto corto y en tercera persona (ej. "Prefiere ver los conteos desglosados por sector").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          texto: { type: 'string', description: 'La preferencia, corta y en tercera persona (máx 140 caracteres)' },
+        },
+        required: ['texto'],
+        additionalProperties: false,
+      },
+      execute: (input: { texto: string }) => {
+        const texto = String(input.texto ?? '').trim().slice(0, 140);
+        if (texto.length < 4) return Promise.resolve({ error: 'texto_invalido', mensaje: 'La preferencia debe ser un texto corto y claro.' });
+        return Promise.resolve({
+          [ACTION_KEY]: { kind: 'recordar_preferencia', texto, etiqueta: `Recordar: ${texto}` },
+          guardada: true,
+          resumen: 'Preferencia guardada en el dispositivo del usuario. Confírmaselo en una frase natural.',
+        });
+      },
+    },
+    {
       name: 'parte_diario',
       description: 'PARTE DIARIO de la obra en una sola llamada: ensayos de hoy y de la semana, estado del flujo de aprobación, no conformidades abiertas y jornadas activas. Úsala cuando pidan "el parte del día", "cómo amaneció la obra", "resumen de hoy" o un panorama general rápido.',
       input_schema: { type: 'object', properties: {}, additionalProperties: false },

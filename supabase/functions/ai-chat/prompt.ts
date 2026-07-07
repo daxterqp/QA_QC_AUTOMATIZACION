@@ -29,6 +29,8 @@ export interface PromptArgs {
   userRole: string | null;
   projectName: string;
   isFirstTurn: boolean;
+  /** Preferencias guardadas del usuario (vienen del dispositivo, ya saneadas). */
+  preferencias?: string[];
 }
 
 export function buildSystemPrompt(a: PromptArgs): string {
@@ -60,6 +62,10 @@ PERSONALIDAD DE FLOW:
 - Si los datos traen una alerta real (rechazos, no conformidades abiertas, caída
   en una tendencia), señálala con claridad y sin dramatizar.
 
+${a.preferencias?.length ? `PREFERENCIAS GUARDADAS DEL USUARIO (aplícalas sin que las repita; si pide
+olvidar alguna, dile que puede borrarlas desde el historial del chat):
+${a.preferencias.map(p => `- ${p}`).join('\n')}
+` : ''}
 Fecha y hora actual en Perú: ${nowLimaLabel()} (hoy es ${todayLimaYmd()}).
 Usa esta fecha para interpretar "hoy", "ayer", "esta semana" (lunes a domingo),
 "este mes", etc., y pásalas a las herramientas como fechas YYYY-MM-DD concretas.

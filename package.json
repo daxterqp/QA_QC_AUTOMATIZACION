@@ -36,6 +36,7 @@
     "expo-notifications": "~0.31.5",
     "expo-print": "~14.1.4",
     "expo-sharing": "~13.1.5",
+    "expo-speech-recognition": "^56.0.1",
     "expo-status-bar": "~2.2.3",
     "expo-task-manager": "~13.1.6",
     "expo-web-browser": "~14.2.0",

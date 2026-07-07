@@ -96,11 +96,12 @@ export function AIQuickBubble({ route, navigate }: Props) {
   const settleRef = useRef(settle);
   settleRef.current = settle;
 
+  const grantAtRef = useRef(0);
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) + Math.abs(g.dy) > 6,
-      onPanResponderGrant: () => { dragTotal.current = 0; },
+      onPanResponderGrant: () => { dragTotal.current = 0; grantAtRef.current = Date.now(); },
       onPanResponderMove: (_e, g) => {
         // MÁXIMO recorrido (no el neto): arrastrar y volver al origen NO es un tap.
         dragTotal.current = Math.max(dragTotal.current, Math.abs(g.dx) + Math.abs(g.dy));
@@ -110,9 +111,15 @@ export function AIQuickBubble({ route, navigate }: Props) {
         const moved = Math.max(dragTotal.current, Math.abs(g.dx) + Math.abs(g.dy));
         settleRef.current(g.dx, g.dy);
         if (moved <= 6) {
-          // Tap: abrir a FLOW.
           const target = targetRef.current;
-          if (target) navigate('AIChat', { projectId: target.projectId, projectName: target.projectName });
+          if (!target) return;
+          // Tap: abrir a FLOW. LONG-press (≥450ms): abrir DICTANDO (autoMic).
+          const longPress = Date.now() - grantAtRef.current >= 450;
+          navigate('AIChat', {
+            projectId: target.projectId,
+            projectName: target.projectName,
+            ...(longPress ? { autoMic: true } : {}),
+          });
         }
       },
       // Si el sistema u otro responder roba el gesto a mitad de arrastre, la

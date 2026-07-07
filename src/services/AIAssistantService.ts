@@ -36,7 +36,9 @@ export type AIAction =
   | {
       kind: 'abrir_dossier'; desde?: string | null; hasta?: string | null;
       templateId?: string | null; sectorId?: string | null; etiqueta: string;
-    };
+    }
+  /** Silenciosa: el móvil la guarda localmente SIN tarjeta (no es destructiva). */
+  | { kind: 'recordar_preferencia'; texto: string; etiqueta: string };
 
 /** Ensayo listado por FLOW como chip tocable (abre el ensayo directo). */
 export interface AIEnsayoLink {
@@ -62,12 +64,16 @@ export async function sendChatMessage(args: {
   history: AIChatTurn[];
   isFirstTurn: boolean;
 }): Promise<AIChatReply> {
+  // Preferencias LOCALES del usuario (E3): viajan en cada request y el server
+  // las inyecta al system prompt ("siempre por sector", etc.).
+  const preferencias = await loadPrefs(args.projectId).catch(() => [] as string[]);
   const { data, error } = await supabase.functions.invoke('ai-chat', {
     body: {
       projectId: args.projectId,
       message: args.message,
       history: args.history.slice(-8),
       isFirstTurn: args.isFirstTurn,
+      ...(preferencias.length ? { preferencias } : {}),
     },
   });
   if (error) {
@@ -113,6 +119,40 @@ export async function requestNarration(projectId: string, text: string): Promise
 /** Borra el MP3 temporal de una narración ya reproducida (best-effort). */
 export async function deleteNarrationFile(uri: string): Promise<void> {
   try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* cache: el SO purga */ }
+}
+
+// ── Preferencias del usuario (LOCALES, por proyecto) ─────────────────────────
+// FLOW las "recuerda" vía la tool recordar_preferencia: el server la intercepta
+// como acción silenciosa, el móvil la guarda aquí y la reenvía en cada request.
+
+const MAX_PREFS = 10;
+const prefsKey = (projectId: string) => `ai_prefs:${projectId}`;
+
+export async function loadPrefs(projectId: string): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(prefsKey(projectId));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === 'string').slice(0, MAX_PREFS) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addPref(projectId: string, texto: string): Promise<string[]> {
+  const clean = texto.trim().slice(0, 140);
+  if (!clean) return loadPrefs(projectId);
+  const prev = await loadPrefs(projectId);
+  // Dedup (case-insensitive) + la más nueva al final; tope con poda de la más vieja.
+  const next = [...prev.filter(p => p.toLowerCase() !== clean.toLowerCase()), clean].slice(-MAX_PREFS);
+  await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
+  return next;
+}
+
+export async function removePref(projectId: string, texto: string): Promise<string[]> {
+  const prev = await loadPrefs(projectId);
+  const next = prev.filter(p => p !== texto);
+  await AsyncStorage.setItem(prefsKey(projectId), JSON.stringify(next)).catch(() => {});
+  return next;
 }
 
 // ── Historial de sesiones (LOCAL, por proyecto) ──────────────────────────────
