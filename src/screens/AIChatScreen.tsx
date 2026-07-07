@@ -20,6 +20,7 @@ import { SvgXml } from 'react-native-svg';
 import { Q } from '@nozbe/watermelondb';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
+import { useAuth } from '@context/AuthContext';
 import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import {
@@ -151,6 +152,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
   const insets = useSafeAreaInsets();
   const { width: winWidth } = useWindowDimensions();
+  const { currentUser } = useAuth();
+  // Primer nombre para el saludo de la bienvenida ("Hola Joseph, ¿por dónde empezamos?").
+  const firstName = ((currentUser as any)?.name ?? '').trim().split(/\s+/)[0] || null;
 
   const [session, setSession] = useState<AIChatSession | null>(null);
   const [input, setInput] = useState('');
@@ -160,12 +164,48 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [suggested, setSuggested] = useState<string[]>(AI_SUGGESTED_QUESTIONS);
   const listRef = useRef<FlatList<AIChatMessage>>(null);
 
-  // ── Flo visual: agua GL en la bienvenida (se desmonta al conversar) ──
+  // ── FLOW visual: agua GL en la bienvenida (se desmonta al conversar) ──
   const glRef = useRef<WaterGLHandle>(null);
   const [glOk, setGlOk] = useState(true);
   // true mientras se decide si hay sesión que retomar (evita el flash de
   // bienvenida). Se declara AQUÍ porque el efecto del bigWave la lee.
   const [booting, setBooting] = useState(true);
+
+  // Agua TÁCTIL (feedback QA: "no tiene la misma física que el login") — mismo
+  // patrón del login: captura en fase capture SIN robar el responder, coords
+  // normalizadas al área del agua (medida con measureInWindow, no pageX crudo:
+  // este contenedor arranca debajo del header).
+  const waterBoxRef = useRef<View>(null);
+  const waterBox = useRef({ x: 0, y: 0, w: 1, h: 1 });
+  const lastDrop = useRef({ x: 0, y: 0 });
+  const measureWaterBox = useCallback(() => {
+    waterBoxRef.current?.measureInWindow((x, y, w, h) => {
+      waterBox.current = { x, y, w: w || 1, h: h || 1 };
+    });
+  }, []);
+  const dropAt = useCallback((pageX: number, pageY: number, isMove: boolean) => {
+    const b = waterBox.current;
+    glRef.current?.drop((pageX - b.x) / b.w, (pageY - b.y) / b.h, isMove);
+  }, []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onWaterTouch = useCallback((e: any) => {
+    const { pageX, pageY } = e.nativeEvent;
+    lastDrop.current = { x: pageX, y: pageY };
+    dropAt(pageX, pageY, false);
+  }, [dropAt]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onWaterMove = useCallback((e: any) => {
+    const { pageX, pageY } = e.nativeEvent;
+    if (Math.hypot(pageX - lastDrop.current.x, pageY - lastDrop.current.y) > 8) {
+      lastDrop.current = { x: pageX, y: pageY };
+      dropAt(pageX, pageY, true);
+    }
+  }, [dropAt]);
+
+  // Transición suave bienvenida → chat (feedback QA: "muy brusco"): la
+  // bienvenida queda como overlay que se DESVANECE sobre la lista.
+  const welcomeFade = useRef(new Animated.Value(1)).current;
+  const [welcomeLeaving, setWelcomeLeaving] = useState(false);
   // Insight local del día (cero tokens: sale de la base local del celular).
   const [insight, setInsight] = useState<string | null>(null);
   useEffect(() => {
@@ -336,6 +376,23 @@ export default function AIChatScreen({ navigation, route }: Props) {
     setShowHistory(false);
   }, [stopSpeech]);
 
+  // Feedback QA: renombrar conversaciones (el título automático del primer
+  // mensaje no siempre describe de qué se habló). Android no tiene
+  // Alert.prompt → mini-modal propio con TextInput.
+  const [renaming, setRenaming] = useState<{ id: string; titulo: string } | null>(null);
+  const applyRename = useCallback(async () => {
+    if (!renaming) return;
+    const nuevo = renaming.titulo.trim() || 'Conversación';
+    const target = pastSessions.find(s => s.id === renaming.id);
+    if (target) {
+      const updated = { ...target, titulo: nuevo }; // sin bumpear updatedAt: no reordena
+      await saveSession(projectId, updated).catch(() => {});
+      setPastSessions(prev => prev.map(s => (s.id === renaming.id ? updated : s)));
+    }
+    setSession(prev => (prev && prev.id === renaming.id ? { ...prev, titulo: nuevo } : prev));
+    setRenaming(null);
+  }, [renaming, pastSessions, projectId]);
+
   const removeSession = useCallback((s: AIChatSession) => {
     Alert.alert('Eliminar conversación', `¿Eliminar "${s.titulo}" del historial?`, [
       { text: 'Cancelar', style: 'cancel' },
@@ -366,6 +423,15 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
     const stamp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const userMsg: AIChatMessage = { id: `u-${stamp()}`, role: 'user', text: msg, at: Date.now() };
+    // Primer mensaje de la sesión → desvanecer la bienvenida sobre el chat
+    // (crossfade) en vez del corte seco.
+    if (session.messages.length === 0) {
+      setWelcomeLeaving(true);
+      Animated.timing(welcomeFade, { toValue: 0, duration: 450, useNativeDriver: true }).start(() => {
+        setWelcomeLeaving(false);
+        welcomeFade.setValue(1); // lista para la próxima bienvenida (nueva conversación)
+      });
+    }
     const base: AIChatSession = {
       ...session,
       titulo: session.messages.length === 0 ? sessionTitleFrom(msg) : session.titulo,
@@ -578,7 +644,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title="Asistente IA"
+        title="FLOW IA"
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
@@ -600,50 +666,73 @@ export default function AIChatScreen({ navigation, route }: Props) {
         {booting ? (
           /* Cargando la última sesión: nada de bienvenida hasta decidir. */
           <View style={{ flex: 1 }} />
-        ) : messages.length === 0 ? (
-          /* ── Bienvenida de Flo: agua viva (motor GL del login) + chips.
-                El agua SOLO vive aquí — al conversar se desmonta (batería). ── */
-          <View style={{ flex: 1 }}>
-            {glOk && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
-            <ScrollView contentContainerStyle={styles.emptyWrap}>
-              <View style={[styles.emptyBadge, glOk && styles.emptyBadgeDark]}>
-                <Ionicons name="water" size={30} color={glOk ? Colors.white : Colors.primary} />
-              </View>
-              <Text style={[styles.emptyTitle, glOk && styles.emptyTitleDark]}>Flo — su asistente de obra</Text>
-              <Text style={[styles.emptyText, glOk && styles.emptyTextDark]}>
-                Pregúntele en lenguaje natural por los ensayos, sectores y avance de{' '}
-                <Text style={{ fontWeight: '800' }}>{projectName}</Text>. Las respuestas salen de los datos reales del proyecto.
-              </Text>
-              {insight && (
-                <Text style={[styles.insightText, glOk && styles.insightTextDark]}>{insight}</Text>
-              )}
-              <View style={styles.chipsWrap}>
-                {suggested.map(q => (
-                  <TouchableOpacity key={q} style={[styles.chip, glOk && styles.chipDark]} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={13} color={glOk ? Colors.white : Colors.primary} />
-                    <Text style={[styles.chipText, glOk && styles.chipTextDark]}>{q}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
         ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={m => m.id}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.listContent}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-            ListFooterComponent={sending && sendingSessionId === session?.id ? (
-              <View style={[styles.msgRow, styles.msgRowAI]}>
-                <View style={styles.avatar}><Ionicons name="water" size={13} color={Colors.white} /></View>
-                <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
-                  <TypingDots />
+          <View style={{ flex: 1 }}>
+            {messages.length > 0 && (
+              <FlatList
+                ref={listRef}
+                data={messages}
+                keyExtractor={m => m.id}
+                renderItem={renderMessage}
+                contentContainerStyle={styles.listContent}
+                onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+                ListFooterComponent={sending && sendingSessionId === session?.id ? (
+                  <View style={[styles.msgRow, styles.msgRowAI]}>
+                    <View style={styles.avatar}><Ionicons name="water" size={13} color={Colors.white} /></View>
+                    <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
+                      <TypingDots />
+                    </View>
+                  </View>
+                ) : null}
+              />
+            )}
+            {/* ── Bienvenida de FLOW: agua viva TÁCTIL (motor GL del login).
+                  Es un OVERLAY que se desvanece al primer mensaje (crossfade
+                  sobre la lista) y se desmonta al conversar (batería). ── */}
+            {(messages.length === 0 || welcomeLeaving) && (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, { opacity: welcomeFade }]}
+                pointerEvents={welcomeLeaving ? 'none' : 'auto'}
+              >
+                <View
+                  ref={waterBoxRef}
+                  style={{ flex: 1 }}
+                  onLayout={measureWaterBox}
+                  onStartShouldSetResponderCapture={(e) => { onWaterTouch(e); return false; }}
+                  onMoveShouldSetResponderCapture={(e) => { onWaterMove(e); return false; }}
+                >
+                  {glOk && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
+                  <ScrollView contentContainerStyle={styles.emptyWrap}>
+                    <View style={[styles.emptyBadge, glOk && styles.emptyBadgeDark]}>
+                      <Ionicons name="water" size={30} color={glOk ? Colors.white : Colors.primary} />
+                    </View>
+                    <Text style={[styles.flowLogoText, !glOk && { color: Colors.navy }]}>
+                      FLOW <Text style={styles.flowLogoIA}>IA</Text>
+                    </Text>
+                    <Text style={[styles.flowSlogan, !glOk && { color: Colors.textSecondary }]}>La inteligencia de su obra</Text>
+                    <Text style={[styles.emptyTitle, glOk && styles.emptyTitleDark]}>
+                      {firstName ? `Hola ${firstName}, ¿por dónde empezamos?` : 'Hola, ¿por dónde empezamos?'}
+                    </Text>
+                    <Text style={[styles.emptyText, glOk && styles.emptyTextDark]}>
+                      Pregúntele en lenguaje natural por los ensayos, sectores y avance de{' '}
+                      <Text style={{ fontWeight: '800' }}>{projectName}</Text>.
+                    </Text>
+                    {insight && (
+                      <Text style={[styles.insightText, glOk && styles.insightTextDark]}>{insight}</Text>
+                    )}
+                    <View style={styles.chipsWrap}>
+                      {suggested.map(q => (
+                        <TouchableOpacity key={q} style={[styles.chip, glOk && styles.chipDark]} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
+                          <Ionicons name="chatbubble-ellipses-outline" size={13} color={glOk ? Colors.white : Colors.primary} />
+                          <Text style={[styles.chipText, glOk && styles.chipTextDark]}>{q}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
                 </View>
-              </View>
-            ) : null}
-          />
+              </Animated.View>
+            )}
+          </View>
         )}
 
         {/* ── Barra de entrada ── */}
@@ -694,12 +783,37 @@ export default function AIChatScreen({ navigation, route }: Props) {
                       {fmtDay(s.updatedAt)} · {fmtTime(s.updatedAt)} · {s.messages.length} mensajes
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setRenaming({ id: s.id, titulo: s.titulo })} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="pencil-outline" size={16} color={Colors.textMuted} />
+                  </TouchableOpacity>
                   <TouchableOpacity onPress={() => removeSession(s)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                     <Ionicons name="trash-outline" size={17} color={Colors.textMuted} />
                   </TouchableOpacity>
                 </View>
               ))}
             </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Modal: renombrar conversación ── */}
+      <Modal visible={renaming != null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setRenaming(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.historyCard} onPress={() => {}}>
+            <Text style={styles.historyTitle}>Renombrar conversación</Text>
+            <TextInput
+              style={styles.renameInput}
+              value={renaming?.titulo ?? ''}
+              onChangeText={txt => setRenaming(prev => (prev ? { ...prev, titulo: txt } : prev))}
+              placeholder="Nombre de la conversación"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={60}
+              autoFocus
+            />
+            <TouchableOpacity style={styles.newChatBtn} onPress={applyRename} activeOpacity={0.8}>
+              <Ionicons name="checkmark" size={17} color={Colors.white} />
+              <Text style={styles.newChatBtnText}>Guardar</Text>
+            </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -712,6 +826,9 @@ const styles = StyleSheet.create({
 
   // Estado inicial
   emptyWrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
+  flowLogoText: { fontSize: 34, fontWeight: '900', color: Colors.white, letterSpacing: 4 },
+  flowLogoIA: { fontSize: 20, fontWeight: '800', color: '#9fc3ee', letterSpacing: 2 },
+  flowSlogan: { fontSize: 12, fontWeight: '700', color: '#bcd0ea', letterSpacing: 1.5, textTransform: 'uppercase', marginTop: -6 },
   emptyBadge: {
     width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.primary + '14',
     alignItems: 'center', justifyContent: 'center', marginBottom: 2,
@@ -810,6 +927,11 @@ const styles = StyleSheet.create({
   },
   newChatBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
   historyEmpty: { fontSize: 12.5, color: Colors.textMuted, textAlign: 'center', paddingVertical: 18 },
+  renameInput: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm,
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.textPrimary,
+    marginVertical: 12, backgroundColor: Colors.surface,
+  },
   historyItem: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 10, paddingHorizontal: 8, borderRadius: Radius.sm,

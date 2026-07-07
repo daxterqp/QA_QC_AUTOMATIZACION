@@ -1,11 +1,11 @@
 /**
- * AIQuickBubble — Burbuja flotante ARRASTRABLE de acceso rápido a Flo (v76).
+ * AIQuickBubble — Burbuja flotante ARRASTRABLE de acceso rápido a FLOW (v76).
  *
  * Overlay global (montada una sola vez en AppNavigator): aparece en cualquier
  * pantalla del proyecto cuyos params traigan `projectId`, si el proyecto tiene
  * `module_ai_assistant` ON y `ai_quick_button` no está apagado (default ON).
  * Se arrastra a donde no estorbe, hace snap al borde más cercano y RECUERDA su
- * posición (AsyncStorage, global del dispositivo). Tap = abrir el chat de Flo.
+ * posición (AsyncStorage, global del dispositivo). Tap = abrir el chat de FLOW.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, PanResponder, StyleSheet } from 'react-native';
@@ -110,7 +110,7 @@ export function AIQuickBubble({ route, navigate }: Props) {
         const moved = Math.max(dragTotal.current, Math.abs(g.dx) + Math.abs(g.dy));
         settleRef.current(g.dx, g.dy);
         if (moved <= 6) {
-          // Tap: abrir a Flo.
+          // Tap: abrir a FLOW.
           const target = targetRef.current;
           if (target) navigate('AIChat', { projectId: target.projectId, projectName: target.projectName });
         }

@@ -19,6 +19,19 @@ import { type ChatArgs, type ChatResult, executeToolCall, MAX_TOOL_ITERATIONS } 
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+// Reintentos ante saturación (feedback QA: "el error por alta demanda no puede
+// haber"). 429 = rate limit, 503 = modelo sobrecargado, 500 = transitorio.
+const RETRYABLE_STATUS = new Set([429, 500, 503]);
+const RETRY_DELAYS_MS = [600, 1500];
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let i = 0; ; i++) {
+    const resp = await fetch(url, init);
+    if (resp.ok || !RETRYABLE_STATUS.has(resp.status) || i >= RETRY_DELAYS_MS.length) return resp;
+    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[i]));
+  }
+}
+
 /** Limpia keywords de JSON Schema que el Schema de Gemini no soporta. */
 // deno-lint-ignore no-explicit-any
 function toGeminiSchema(schema: any): any {
@@ -65,7 +78,7 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
   let reply = '';
 
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
-    const resp = await fetch(url, {
+    const resp = await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'x-goog-api-key': a.apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -78,6 +91,9 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
       }),
     });
     if (!resp.ok) {
+      if (RETRYABLE_STATUS.has(resp.status)) {
+        throw new Error('El modelo de IA está saturado en este momento. Vuelva a intentarlo en unos segundos.');
+      }
       const detail = await resp.text().catch(() => '');
       throw new Error(`Gemini ${resp.status}: ${detail.slice(0, 400)}`);
     }

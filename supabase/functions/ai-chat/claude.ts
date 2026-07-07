@@ -8,7 +8,9 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.110.0';
 import { type ChatArgs, type ChatResult, executeToolCall, MAX_TOKENS, MAX_TOOL_ITERATIONS } from './providers.ts';
 
 export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
-  const anthropic = new Anthropic({ apiKey: a.apiKey });
+  // maxRetries: el SDK reintenta solo ante 429/5xx con backoff (feedback QA:
+  // "el error por alta demanda no puede haber").
+  const anthropic = new Anthropic({ apiKey: a.apiKey, maxRetries: 3 });
   const anthropicTools = a.tools.map(t => ({
     name: t.name, description: t.description, input_schema: t.input_schema,
   }));
@@ -26,13 +28,23 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
   let response: any = null;
 
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
-    response = await anthropic.messages.create({
-      model: a.model,
-      max_tokens: MAX_TOKENS,
-      system: a.system,
-      tools: anthropicTools,
-      messages,
-    });
+    try {
+      response = await anthropic.messages.create({
+        model: a.model,
+        max_tokens: MAX_TOKENS,
+        system: a.system,
+        tools: anthropicTools,
+        messages,
+      });
+    } catch (e) {
+      // Tras agotar los reintentos del SDK: mensaje amable, no el error crudo.
+      // deno-lint-ignore no-explicit-any
+      const status = (e as any)?.status;
+      if (status === 429 || status === 503 || status === 529) {
+        throw new Error('El modelo de IA está saturado en este momento. Vuelva a intentarlo en unos segundos.');
+      }
+      throw e;
+    }
     totalIn += response.usage?.input_tokens ?? 0;
     totalOut += response.usage?.output_tokens ?? 0;
 
