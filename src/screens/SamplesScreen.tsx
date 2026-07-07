@@ -105,14 +105,11 @@ export default function SamplesScreen({ route, navigation }: Props) {
   // Filtro (oculto tras toggle, como el Dosier; calendarios + modales como los otros módulos)
   const [showFilters, setShowFilters] = useState(false);
   const [search, setSearch] = useState('');
-  const [fromSeq, setFromSeq] = useState('');
-  const [toSeq, setToSeq] = useState('');
   const [filterFromMs, setFilterFromMs] = useState<number | null>(null);
   const [filterToMs, setFilterToMs] = useState<number | null>(null);
   const [filterSectorId, setFilterSectorId] = useState<string | null>(null);
   const [filterLayer, setFilterLayer] = useState('');
   const [showFilterSector, setShowFilterSector] = useState(false);
-  const [showRangeModal, setShowRangeModal] = useState(false);
   const [showLayerModal, setShowLayerModal] = useState(false);
 
   // Alta de muestra
@@ -368,11 +365,9 @@ export default function SamplesScreen({ route, navigation }: Props) {
     const d = s.sampleDate; if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
     const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).getTime();
   };
+  // Feedback QA: el rango "desde-hasta" por correlativo se quitó — los códigos
+  // de muestra son alfanuméricos y el buscador de texto ya cubre esa búsqueda.
   const filtered = useMemo(() => samples.filter((s: any) => {
-    // Rango por correlativo: el usuario ingresa solo los últimos dígitos (1 = 0001, 25 = 0025).
-    const f = parseInt(fromSeq, 10), t = parseInt(toSeq, 10);
-    if (!isNaN(f) && (s.seq ?? 0) < f) return false;
-    if (!isNaN(t) && (s.seq ?? 0) > t) return false;
     if (filterSectorId && s.sectorId !== filterSectorId) return false;
     if (filterFromMs != null || filterToMs != null) {
       const ms = dateMs(s); if (ms == null) return false;
@@ -386,9 +381,9 @@ export default function SamplesScreen({ route, navigation }: Props) {
       if (!hay.includes(q)) return false;
     }
     return true;
-  }), [samples, search, fromSeq, toSeq, filterSectorId, filterFromMs, filterToMs, filterLayer, showLayerFilter]);
-  const hasActiveFilter = !!(search || fromSeq || toSeq || filterSectorId || filterFromMs != null || filterToMs != null || filterLayer);
-  const clearFilters = () => { setSearch(''); setFromSeq(''); setToSeq(''); setFilterFromMs(null); setFilterToMs(null); setFilterSectorId(null); setFilterLayer(''); };
+  }), [samples, search, filterSectorId, filterFromMs, filterToMs, filterLayer, showLayerFilter]);
+  const hasActiveFilter = !!(search || filterSectorId || filterFromMs != null || filterToMs != null || filterLayer);
+  const clearFilters = () => { setSearch(''); setFilterFromMs(null); setFilterToMs(null); setFilterSectorId(null); setFilterLayer(''); };
   const previewCode = buildSampleCode(sampleIdentifier, fDate.trim() || todaySampleDate(), nextSampleSeq(samples.map((s: any) => s.seq)));
 
   const ListHeader = (
@@ -423,11 +418,6 @@ export default function SamplesScreen({ route, navigation }: Props) {
                 {filterSectorId && <TouchableOpacity onPress={() => setFilterSectorId(null)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}><Ionicons name="close-circle" size={14} color={Colors.primary} /></TouchableOpacity>}
               </TouchableOpacity>
             ) : null}
-            <TouchableOpacity style={[styles.filterChip, (fromSeq || toSeq) && styles.filterChipActive]} onPress={() => setShowRangeModal(true)}>
-              <Ionicons name="cube-outline" size={13} color={(fromSeq || toSeq) ? Colors.primary : Colors.textSecondary} />
-              <Text style={[styles.filterChipText, (fromSeq || toSeq) && styles.filterChipTextActive]} numberOfLines={1}>{(fromSeq || toSeq) ? t('samples.sampleRangeValue', { from: fromSeq || '1', to: toSeq || '∞' }) : t('samples.sampleRange')}</Text>
-              {(fromSeq || toSeq) && <TouchableOpacity onPress={() => { setFromSeq(''); setToSeq(''); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}><Ionicons name="close-circle" size={14} color={Colors.primary} /></TouchableOpacity>}
-            </TouchableOpacity>
             {showLayerFilter ? (
               <TouchableOpacity style={[styles.filterChip, filterLayer && styles.filterChipActive]} onPress={() => setShowLayerModal(true)}>
                 <Ionicons name="layers-outline" size={13} color={filterLayer ? Colors.primary : Colors.textSecondary} />
@@ -652,21 +642,6 @@ export default function SamplesScreen({ route, navigation }: Props) {
         options={[{ id: '__all__', name: t('samples.allSegments') }, ...sectors.map(s => ({ id: s.id, name: s.name }))]}
         onSelect={(id) => { setFilterSectorId(id === '__all__' ? null : id); setShowFilterSector(false); }}
         onClose={() => setShowFilterSector(false)} />
-
-      {/* Modal: rango de muestras (desde/hasta por correlativo) */}
-      <Modal visible={showRangeModal} transparent animationType="fade" onRequestClose={() => setShowRangeModal(false)}>
-        <View style={styles.modalBg}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowRangeModal(false)} />
-          <View style={styles.filterCard}>
-            <Text style={styles.modalTitleDark}>{t('samples.sampleRangeTitle')}</Text>
-            <View style={styles.twoCol}>
-              <View style={{ flex: 1, gap: 4 }}><Text style={styles.filterFieldLabel}>{t('samples.fromSample')}</Text><TextInput style={styles.input} value={fromSeq} onChangeText={setFromSeq} keyboardType="number-pad" placeholder={t('samples.numberPlaceholder')} placeholderTextColor="#bbb" /></View>
-              <View style={{ flex: 1, gap: 4 }}><Text style={styles.filterFieldLabel}>{t('samples.toSample')}</Text><TextInput style={styles.input} value={toSeq} onChangeText={setToSeq} keyboardType="number-pad" placeholder={t('samples.numberPlaceholder')} placeholderTextColor="#bbb" /></View>
-            </View>
-            <TouchableOpacity style={styles.ghostBtn} onPress={() => setShowRangeModal(false)}><Text style={styles.ghostBtnText}>{t('samples.apply')}</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Modal: filtro por capa */}
       <Modal visible={showLayerModal} transparent animationType="fade" onRequestClose={() => setShowLayerModal(false)}>

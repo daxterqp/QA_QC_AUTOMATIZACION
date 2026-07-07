@@ -208,8 +208,11 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const [fillBySample, setFillBySample] = useState(false);
   const [samplesLite, setSamplesLite] = useState<{ id: string; code: string; seq: number }[]>([]);
   const [filterSampleIds, setFilterSampleIds] = useState<Set<string>>(new Set());
-  const [sampleFrom, setSampleFrom] = useState('');
-  const [sampleTo, setSampleTo] = useState('');
+  // Feedback QA: el rango numérico "desde-hasta" era inútil con códigos
+  // alfanuméricos → se reemplazó por un BUSCADOR de texto dentro del picker
+  // (estilo filtros de Excel), común a tipo/sector/muestra.
+  const [pickerSearch, setPickerSearch] = useState('');
+  useEffect(() => { setPickerSearch(''); }, [showFilterPicker]);
 
   // Modal "Adicionar ensayo"
   const [modalGroup, setModalGroup] = useState<Group | null>(null);
@@ -329,19 +332,11 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     return unsub;
   }, [navigation, tourActive, isContextual, dismissTour]);
 
-  // Conjunto de sample_ids permitidos por el filtro de muestra (selección + rango).
+  // Conjunto de sample_ids permitidos por el filtro de muestra (multiselección).
   const allowedSampleIds = useMemo(() => {
-    const f = parseInt(sampleFrom, 10), t = parseInt(sampleTo, 10);
-    const hasRange = !isNaN(f) || !isNaN(t);
-    if (filterSampleIds.size === 0 && !hasRange) return null; // sin filtro de muestra
-    const ids = new Set<string>(filterSampleIds);
-    if (hasRange) for (const s of samplesLite) {
-      if (!isNaN(f) && s.seq < f) continue;
-      if (!isNaN(t) && s.seq > t) continue;
-      ids.add(s.id);
-    }
-    return ids;
-  }, [filterSampleIds, sampleFrom, sampleTo, samplesLite]);
+    if (filterSampleIds.size === 0) return null; // sin filtro de muestra
+    return new Set<string>(filterSampleIds);
+  }, [filterSampleIds]);
 
   const filtersActive = search.trim() !== '' || filterFromMs != null || filterToMs != null
     || filterTemplateIds.size > 0 || filterSectorIds.size > 0 || allowedSampleIds != null;
@@ -811,7 +806,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
         <Ionicons name={filtersActive ? 'funnel' : 'funnel-outline'} size={15} color={filtersActive ? Colors.primary : Colors.textSecondary} />
         <Text style={[styles.filterToggleText, filtersActive && { color: Colors.primary }]}>{filtersActive ? t('ensayos.filters.labelActive') : t('ensayos.filters.label')}</Text>
         <View style={{ flex: 1 }} />
-        {filtersActive && <TouchableOpacity onPress={() => { setSearch(''); setFilterFromMs(null); setFilterToMs(null); setFilterTemplateIds(new Set()); setFilterSectorIds(new Set()); setFilterSampleIds(new Set()); setSampleFrom(''); setSampleTo(''); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Text style={styles.filterClearLink}>{t('ensayos.filters.clear')}</Text></TouchableOpacity>}
+        {filtersActive && <TouchableOpacity onPress={() => { setSearch(''); setFilterFromMs(null); setFilterToMs(null); setFilterTemplateIds(new Set()); setFilterSectorIds(new Set()); setFilterSampleIds(new Set()); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Text style={styles.filterClearLink}>{t('ensayos.filters.clear')}</Text></TouchableOpacity>}
         <TouchableOpacity onPress={() => setShowSortModal(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 12 }}>
           <Ionicons name="swap-vertical-outline" size={15} color={Colors.textSecondary} />
           <Text style={styles.filterClearLink}>Orden</Text>
@@ -932,7 +927,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               {allowedSampleIds != null ? t('ensayos.filters.sample.many', { count: allowedSampleIds.size }) : t('ensayos.filters.sample')}
             </Text>
             {allowedSampleIds != null && (
-              <TouchableOpacity onPress={() => { setFilterSampleIds(new Set()); setSampleFrom(''); setSampleTo(''); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
+              <TouchableOpacity onPress={() => { setFilterSampleIds(new Set()); }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
                 <Ionicons name="close-circle" size={14} color={Colors.primary} />
               </TouchableOpacity>
             )}
@@ -1164,24 +1159,31 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             </View>
             <Text style={styles.pickerHint}>{t('ensayos.picker.hint')}</Text>
-            {showFilterPicker === 'muestra' && (
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.pickerHint}>{t('ensayos.picker.sampleFrom')}</Text>
-                  <TextInput style={styles.rangeInput} value={sampleFrom} onChangeText={setSampleFrom} keyboardType="number-pad" placeholder="—" placeholderTextColor={Colors.textMuted} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.pickerHint}>{t('ensayos.picker.sampleTo')}</Text>
-                  <TextInput style={styles.rangeInput} value={sampleTo} onChangeText={setSampleTo} keyboardType="number-pad" placeholder="—" placeholderTextColor={Colors.textMuted} />
-                </View>
-              </View>
-            )}
+            {/* Buscador estilo filtros de Excel (feedback QA) — filtra la lista
+                de opciones del picker (tipo / sector / muestra por código). */}
+            <View style={styles.pickerSearchRow}>
+              <Ionicons name="search" size={15} color={Colors.textMuted} />
+              <TextInput
+                style={styles.pickerSearchInput}
+                value={pickerSearch}
+                onChangeText={setPickerSearch}
+                placeholder="Buscar…"
+                placeholderTextColor={Colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {pickerSearch !== '' && (
+                <TouchableOpacity onPress={() => setPickerSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
             <ScrollView style={{ maxHeight: 380 }}>
               <TouchableOpacity
                 style={styles.pickerItem}
                 onPress={() => {
                   if (showFilterPicker === 'tipo') setFilterTemplateIds(new Set());
-                  else if (showFilterPicker === 'muestra') { setFilterSampleIds(new Set()); setSampleFrom(''); setSampleTo(''); }
+                  else if (showFilterPicker === 'muestra') setFilterSampleIds(new Set());
                   else setFilterSectorIds(new Set());
                 }}
               >
@@ -1190,7 +1192,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               </TouchableOpacity>
               {showFilterPicker === 'muestra' && (samplesLite.length === 0
                 ? <Text style={[styles.pickerHint, { padding: 12 }]}>{t('ensayos.picker.noSamples')}</Text>
-                : samplesLite.map(s => {
+                : samplesLite
+                  .filter(s => pickerSearch.trim() === '' || (s.code ?? '').toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+                  .map(s => {
                   const sel = filterSampleIds.has(s.id);
                   return (
                     <TouchableOpacity key={s.id} style={[styles.pickerItem, sel && styles.pickerItemActive]} onPress={() => setFilterSampleIds(prev => toggleInSet(prev, s.id))}>
@@ -1199,7 +1203,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
                     </TouchableOpacity>
                   );
                 }))}
-              {showFilterPicker === 'tipo' && templates.map(t => {
+              {showFilterPicker === 'tipo' && templates
+                .filter(tp => pickerSearch.trim() === '' || `${tp.idProtocolo ?? ''} ${tp.name ?? ''}`.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+                .map(t => {
                 const sel = filterTemplateIds.has(t.id);
                 return (
                   <TouchableOpacity
@@ -1216,7 +1222,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              {showFilterPicker === 'sector' && sectorsLite.map(s => {
+              {showFilterPicker === 'sector' && sectorsLite
+                .filter(s => pickerSearch.trim() === '' || (s.name ?? '').toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+                .map(s => {
                 const sel = filterSectorIds.has(s.id);
                 return (
                   <TouchableOpacity
@@ -1440,6 +1448,8 @@ const styles = StyleSheet.create({
   pickerCard: { width: '100%', maxWidth: 420, backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14 },
   pickerHint: { fontSize: 10.5, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
   rangeInput: { borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, color: Colors.textPrimary, backgroundColor: Colors.white },
+  pickerSearchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingHorizontal: 10, marginBottom: 8, backgroundColor: Colors.white },
+  pickerSearchInput: { flex: 1, paddingVertical: 8, fontSize: 14, color: Colors.textPrimary },
   filterToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
   filterToggleActive: { borderColor: Colors.primary },
   filterToggleText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },

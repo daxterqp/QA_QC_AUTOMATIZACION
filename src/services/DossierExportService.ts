@@ -401,6 +401,17 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 
 // ── Portada HTML ───────────────────────────────────────────────────────────────
 
+/** Footer de número de página para las páginas FIJAS (portada / resumen
+ *  estadístico / tabla resumen). Sin bloque de firma — solo el número, con el
+ *  mismo estilo del resto del documento. (Feedback QA: estas hojas salían sin
+ *  numeración mientras el "de Y" de las demás sí las contaba.) */
+function pageNumFooter(pageNum: number, totalPages: number): string {
+  return `
+  <div class="proto-footer" style="border-top:none;">
+    <div class="footer-right">Dosier de Calidad<br/>Página ${pageNum} de ${totalPages}</div>
+  </div>`;
+}
+
 function buildCoverPage(
   projectName: string,
   logoB64: string | null,
@@ -409,6 +420,7 @@ function buildCoverPage(
   generatedAt: string,
   signerName: string,
   signB64: string | null,
+  totalPages: number,
 ): string {
   const logoHtml = logoB64
     ? `<img src="${logoB64}" class="cover-logo" alt="Logo"/>`
@@ -461,6 +473,7 @@ function buildCoverPage(
       </div>
     </div>
   </div>
+  ${pageNumFooter(1, totalPages)}
 </div>`;
 }
 
@@ -522,6 +535,7 @@ function buildStatsPage(
   protocols: Protocol[],
   locations: Location[],
   projectStart: Date,
+  totalPages: number,
 ): string {
   const weeklySvg = buildWeeklyChartSvg(protocols, projectStart);
   const specialtySvg = buildSpecialtySvg(protocols, locations);
@@ -549,6 +563,7 @@ function buildStatsPage(
       <div class="legend-item"><span class="legend-dot" style="background:#c8d0db;"></span>Pendientes</div>
     </div>
   </div>` : ''}
+  ${pageNumFooter(2, totalPages)}
 </div>`;
 }
 
@@ -558,6 +573,7 @@ function buildSummaryTable(
   protocols: Protocol[],
   userMap: Map<string, User>,
   pageMap: Map<string, number>,
+  totalPages: number,
 ): string {
   const rows = protocols.map(p => {
     const filledName = p.filledById ? (userMap.get(p.filledById)?.fullName ?? '—') : '—';
@@ -598,6 +614,7 @@ function buildSummaryTable(
     </thead>
     <tbody>${rows}</tbody>
   </table>
+  ${pageNumFooter(3, totalPages)}
 </div>`;
 }
 
@@ -1253,8 +1270,8 @@ export async function exportDossierPdf(
   const generatedAt = fmtDateTime(Date.now());
 
   // ── 5. Ensamblar HTML ────────────────────────────────────────────────────
-  const coverPage = buildCoverPage(projectName, logoB64, approved, total, generatedAt, signerName, signB64);
-  const statsPage = buildStatsPage(protocols, locations, projectStart);
+  // (portada/estadístico se construyen DESPUÉS de calcular totalDocPages,
+  //  para poder numerarlas — feedback QA: salían sin "Página X de Y".)
 
   // Group stats by location_only (for section cover pages)
   const groupStats = new Map<string, { total: number; approved: number }>();
@@ -1320,7 +1337,9 @@ export async function exportDossierPdf(
     }
   }
 
-  const summaryPage = buildSummaryTable(protocols, userMap, pageMap);
+  const coverPage = buildCoverPage(projectName, logoB64, approved, total, generatedAt, signerName, signB64, totalDocPages);
+  const statsPage = buildStatsPage(protocols, locations, projectStart, totalDocPages);
+  const summaryPage = buildSummaryTable(protocols, userMap, pageMap, totalDocPages);
 
   let pageOffset = FIXED_PAGES + 1; // primera página de protocolos
   const protocolPagesHtml: string[] = [];
@@ -1763,7 +1782,7 @@ export async function exportSampleDossierPdf(
   // ── Render ──────────────────────────────────────────────────────────────────
   const today = fmtDate(Date.now());
   const totalEnsayos = samples.reduce((n, s) => n + (protocolsBySample.get(s.id)?.length ?? 0), 0);
-  const coverPage = buildCoverPage(projectName, logoB64, totalEnsayos, totalEnsayos, today, signerName, signB64);
+  const coverPage = buildCoverPage(projectName, logoB64, totalEnsayos, totalEnsayos, today, signerName, signB64, totalDocPages);
 
   let cursor = 2;   // tras la portada
   const pages: string[] = [];

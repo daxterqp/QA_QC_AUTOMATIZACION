@@ -781,22 +781,35 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         </View>
         )}
 
-        {/* Adjuntar evidencia fotográfica extra — solo jefe */}
+        {/* Adjuntar evidencia fotográfica extra — solo jefe.
+            Feedback QA: además del selector de archivos, botón de CÁMARA directa
+            (mismo flujo ya cableado que usa ProtocolFillScreen). */}
         {isJefe && (
           <View style={styles.extraPhotoSection}>
-            <TouchableOpacity
-              style={[styles.extraPhotoBtn, addingPhoto && styles.btnDisabled]}
-              onPress={handleAddExtraPhoto}
-              disabled={addingPhoto}
-            >
-              {addingPhoto
-                ? <ActivityIndicator color={Colors.primary} size="small" />
-                : <>
-                    <Ionicons name="camera-outline" size={16} color={Colors.primary} />
-                    <Text style={styles.extraPhotoBtnText}>{t('protoAudit.attachExtraPhoto')}</Text>
-                  </>
-              }
-            </TouchableOpacity>
+            <View style={styles.extraBtnsRow}>
+              <TouchableOpacity
+                style={[styles.extraPhotoBtn, { flex: 1 }, addingPhoto && styles.btnDisabled]}
+                onPress={handleAddExtraPhoto}
+                disabled={addingPhoto}
+              >
+                {addingPhoto
+                  ? <ActivityIndicator color={Colors.primary} size="small" />
+                  : <>
+                      <Ionicons name="cloud-upload-outline" size={16} color={Colors.primary} />
+                      <Text style={styles.extraPhotoBtnText}>{t('protoAudit.attachExtraPhoto')}</Text>
+                    </>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.extraCameraBtn}
+                onPress={() => navigation.navigate('Camera', {
+                  extraPhotoProtocolId: protocol!.id,
+                  projectId: (protocol as any).projectId,
+                })}
+              >
+                <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+              </TouchableOpacity>
+            </View>
             {extraPhotos.length > 0 && (
               <View style={styles.photosRow}>
                 {extraPhotos.map((uri, idx) => (
@@ -1164,6 +1177,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 16, justifyContent: 'center',
   },
   extraPhotoBtnText: { color: Colors.primary, fontWeight: '700', fontSize: 13 },
+  extraBtnsRow: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
+  extraCameraBtn: {
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14,
+    borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+  },
   btnDisabled: { opacity: 0.5 },
 
   // Modal de rechazo

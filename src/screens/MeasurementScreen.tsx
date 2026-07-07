@@ -10,7 +10,9 @@ import { WebView } from 'react-native-webview';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
-import { database, plansCollection, planMeasurementsCollection } from '@db/index';
+import { database, plansCollection, planMeasurementsCollection, projectsCollection } from '@db/index';
+import { downloadFromS3 } from '@services/S3Service';
+import { s3ProjectPrefix } from '@config/aws';
 import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import { supabase } from '@config/supabase';
 import { Q } from '@nozbe/watermelondb';
@@ -2074,20 +2076,53 @@ export default function MeasurementScreen({ navigation, route }: Props) {
     })();
   }, [routePlanId]);
 
-  // Load PDF (usa planId canónico)
+  // Load PDF (usa planId canónico para las MEDICIONES, pero el ARCHIVO puede
+  // venir de cualquier registro hermano del mismo plano — feedback QA: el
+  // canónico más antiguo podía tener el archivo ausente/corrupto → pdf.js
+  // reventaba con "Invalid PDF structure" mientras el visor sí funcionaba).
   useEffect(() => {
     (async () => {
       try {
         const plan = await plansCollection.find(planId);
-        if (!plan.fileUri) { setError(t('measurement.error.noFile')); setLoading(false); return; }
-        const info = await FileSystem.getInfoAsync(plan.fileUri);
-        if (!info.exists) { setError(t('measurement.error.fileNotFound')); setLoading(false); return; }
-        const b64 = await FileSystem.readAsStringAsync(plan.fileUri, { encoding: FileSystem.EncodingType.Base64 });
+        // 1. Candidatos de archivo: el canónico, el plan por el que entró el
+        //    usuario (recién visto en el visor) y cualquier hermano con archivo.
+        const siblings = await plansCollection
+          .query(Q.where('project_id', plan.projectId), Q.where('name', plan.name))
+          .fetch();
+        const ordered = [
+          plan,
+          ...siblings.filter((p: any) => p.id === routePlanId && p.id !== plan.id),
+          ...siblings.filter((p: any) => p.id !== routePlanId && p.id !== plan.id),
+        ];
+        let fileUri: string | null = null;
+        for (const cand of ordered as any[]) {
+          if (!cand.fileUri) continue;
+          const info = await FileSystem.getInfoAsync(cand.fileUri);
+          // Un PDF real jamás pesa <1KB: descarta archivos truncados/corruptos.
+          if (info.exists && (info.size ?? 0) > 1024) { fileUri = cand.fileUri; break; }
+        }
+        // 2. Sin archivo válido local → re-descargar de S3 (mismo patrón que el
+        //    botón de descarga del visor de planos).
+        if (!fileUri) {
+          try {
+            const project: any = await projectsCollection.find(plan.projectId);
+            const destDir = `${FileSystem.documentDirectory}plans/`;
+            await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
+            const localUri = `${destDir}${plan.name}.pdf`;
+            await downloadFromS3(`${s3ProjectPrefix(project.name)}/plans/${plan.name}.pdf`, localUri);
+            await database.write(async () => {
+              await plan.update((p: any) => { p.fileUri = localUri; });
+            });
+            fileUri = localUri;
+          } catch { /* sin red o sin archivo en nube: cae al error de abajo */ }
+        }
+        if (!fileUri) { setError(t('measurement.error.fileNotFound')); setLoading(false); return; }
+        const b64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
         setPdfBase64(b64);
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     })();
-  }, [planId]);
+  }, [planId, routePlanId]);
 
   const sendCmd = useCallback((cmd: any) => {
     webRef.current?.postMessage(JSON.stringify(cmd));
@@ -2480,7 +2515,13 @@ export default function MeasurementScreen({ navigation, route }: Props) {
         setSelectedElement(null);
       }
 
-      if (msg.type === 'error') setError(msg.message);
+      if (msg.type === 'error') {
+        // Errores crudos de pdf.js ("Invalid PDF structure") → mensaje amable.
+        const raw = String(msg.message ?? '');
+        setError(/invalid pdf|corrupt|structure/i.test(raw)
+          ? 'El archivo del plano parece dañado o incompleto. Abra el plano en el visor y vuelva a descargarlo, luego intente medir de nuevo.'
+          : raw);
+      }
 
     } catch {}
   }, []);

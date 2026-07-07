@@ -62,12 +62,24 @@ export default function LocationListScreen({ navigation, route }: Props) {
     return () => anim.stop();
   }, []);
 
-  // Sincronizar automáticamente al entrar al proyecto
+  // PERF (feedback QA: "las ubicaciones demoran mucho en cargar") — antes esto
+  // corría pullProjectFromCloud (push + pull + descargas) BLOQUEANTE en cada
+  // montaje, con skeleton hasta terminar. Ahora: lo LOCAL se pinta al instante
+  // (el observe de abajo) y la nube se baja UNA sola vez por sesión de pantalla
+  // en SEGUNDO PLANO — mismo patrón que EnsayosScreen/SamplesScreen. `syncing`
+  // solo se enciende si aún NO hay datos locales que mostrar (primera vez real).
+  const didCloudPullRef = useRef(false);
   useEffect(() => {
-    setSyncing(true);
+    if (didCloudPullRef.current) return;
+    didCloudPullRef.current = true;
+    let alive = true;
+    locationsCollection.query(Q.where('project_id', projectId)).fetchCount()
+      .then(n => { if (alive && n === 0) setSyncing(true); })
+      .catch(() => {});
     pullProjectFromCloud(projectId)
       .catch(() => {})
-      .finally(() => setSyncing(false));
+      .finally(() => { if (alive) setSyncing(false); });
+    return () => { alive = false; };
   }, [projectId]);
 
   // #7B — Pull-to-refresh: re-baja de la nube (la lista se actualiza sola por el observe).
