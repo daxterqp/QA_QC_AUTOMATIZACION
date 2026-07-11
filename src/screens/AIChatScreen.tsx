@@ -218,6 +218,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [pastSessions, setPastSessions] = useState<AIChatSession[]>([]);
   const [suggested, setSuggested] = useState<string[]>(AI_SUGGESTED_QUESTIONS);
   const listRef = useRef<FlatList<AIChatMessage>>(null);
@@ -370,16 +371,34 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const [voiceReply, setVoiceReply] = useState('');
   const voiceModeRef = useRef(false);
   const voiceBusyRef = useRef(false);
-  const voiceGlRef = useRef<WaterGLHandle>(null);
   const voiceSubsRef = useRef<{ remove: () => void }[]>([]);
   const voicePlayerRef = useRef<AudioPlayerLite | null>(null);
   const voiceFinishRef = useRef<(() => void) | null>(null);
   const fillerPlayerRef = useRef<AudioPlayerLite | null>(null);
-  const voiceRippleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fillerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Contador de errores reales consecutivos del reconocedor + ref de salida
   // (exitVoiceMode se declara más abajo; el listener lo usa vía ref).
   const voiceErrorsRef = useRef(0);
   const exitVoiceModeRef = useRef<() => void>(() => {});
+
+  // Franja de iluminación inferior: "respira" (pulso suave) mientras escucha
+  // o habla; queda fija y tenue al pensar. Sin GL — barato en batería/CPU.
+  const voiceGlowAnim = useRef(new Animated.Value(0.5)).current;
+  const voiceGlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const startVoiceGlow = useCallback((mode: 'listening' | 'speaking') => {
+    voiceGlowLoopRef.current?.stop();
+    const [lo, hi, dur] = mode === 'speaking' ? [0.55, 1, 420] : [0.35, 0.75, 900];
+    voiceGlowLoopRef.current = Animated.loop(Animated.sequence([
+      Animated.timing(voiceGlowAnim, { toValue: hi, duration: dur, useNativeDriver: true }),
+      Animated.timing(voiceGlowAnim, { toValue: lo, duration: dur, useNativeDriver: true }),
+    ]));
+    voiceGlowLoopRef.current.start();
+  }, [voiceGlowAnim]);
+  const stopVoiceGlow = useCallback(() => {
+    voiceGlowLoopRef.current?.stop();
+    voiceGlowLoopRef.current = null;
+    Animated.timing(voiceGlowAnim, { toValue: 0.4, duration: 300, useNativeDriver: true }).start();
+  }, [voiceGlowAnim]);
 
   const clearVoiceSubs = useCallback(() => {
     voiceSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
@@ -391,29 +410,28 @@ export default function AIChatScreen({ navigation, route }: Props) {
     fillerPlayerRef.current = null;
   }, []);
 
-  /** Muletilla mientras "piensa" (best-effort: si no hay TTS, silencio). */
-  const playFiller = useCallback(async () => {
-    const audio = loadExpoAudio();
-    if (!audio) return;
-    try {
-      const uri = await getFillerAudioUri(projectId);
-      if (!uri || !voiceModeRef.current || !voiceBusyRef.current) return;
-      stopFiller();
-      const player = audio.createAudioPlayer({ uri });
-      fillerPlayerRef.current = player;
-      player.play();
-    } catch { /* sin muletilla */ }
+  /** Muletilla SOLO si la respuesta tarda de verdad (feedback: sonaba en TODAS
+   *  las consultas, incómodo). Se arma un timer; si `send` resuelve antes,
+   *  se cancela y nunca suena — solo tapa consultas genuinamente largas. */
+  const armFillerTimer = useCallback(() => {
+    if (fillerTimerRef.current) clearTimeout(fillerTimerRef.current);
+    fillerTimerRef.current = setTimeout(async () => {
+      fillerTimerRef.current = null;
+      if (!voiceBusyRef.current || !voiceModeRef.current) return;
+      const audio = loadExpoAudio();
+      if (!audio) return;
+      try {
+        const uri = await getFillerAudioUri(projectId);
+        if (!uri || !voiceModeRef.current || !voiceBusyRef.current) return;
+        stopFiller();
+        const player = audio.createAudioPlayer({ uri });
+        fillerPlayerRef.current = player;
+        player.play();
+      } catch { /* sin muletilla */ }
+    }, 1300);
   }, [projectId, stopFiller]);
-
-  /** Ondas del círculo mientras FLOW habla. */
-  const startVoiceRipples = useCallback(() => {
-    if (voiceRippleTimerRef.current) clearInterval(voiceRippleTimerRef.current);
-    voiceRippleTimerRef.current = setInterval(() => {
-      voiceGlRef.current?.drop(0.35 + Math.random() * 0.3, 0.35 + Math.random() * 0.3, false);
-    }, 380);
-  }, []);
-  const stopVoiceRipples = useCallback(() => {
-    if (voiceRippleTimerRef.current) { clearInterval(voiceRippleTimerRef.current); voiceRippleTimerRef.current = null; }
+  const disarmFillerTimer = useCallback(() => {
+    if (fillerTimerRef.current) { clearTimeout(fillerTimerRef.current); fillerTimerRef.current = null; }
   }, []);
 
   /** Narra `text` y espera a que TERMINE (el loop de voz necesita el fin). */
@@ -456,6 +474,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     clearVoiceSubs();
     setVoicePhase('listening');
     setVoiceTranscript('');
+    startVoiceGlow('listening');
     voiceSubsRef.current = [
       speech.addListener('result', e => {
         voiceErrorsRef.current = 0; // hay reconocimiento: resetear el contador
@@ -483,7 +502,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     ];
     try { speech.start({ lang: 'es-PE', interimResults: true, continuous: false }); }
     catch { /* el próximo end reintenta */ }
-  }, [clearVoiceSubs]);
+  }, [clearVoiceSubs, startVoiceGlow]);
 
   /** Frase final del usuario → pensar (muletilla) → responder → hablar → escuchar.
    *  `send` se declara MÁS ABAJO en el componente → se usa vía ref (sendRef)
@@ -498,24 +517,25 @@ export default function AIChatScreen({ navigation, route }: Props) {
       setVoiceTranscript(text);
       setVoicePhase('thinking');
       setVoiceReply('');
-      void playFiller(); // en paralelo: tapa el tiempo de respuesta
+      stopVoiceGlow(); // "pensando": franja tenue y fija, sin pulso
+      armFillerTimer(); // solo suena si la respuesta tarda de verdad (1.3s+)
       const aiMsg = await sendRef.current?.(text) ?? null;
+      disarmFillerTimer();
       stopFiller();
       if (!voiceModeRef.current) return;
       if (aiMsg) {
         setVoiceReply(aiMsg.text.startsWith('⚠') ? aiMsg.text.slice(1).trim() : aiMsg.text);
         if (!aiMsg.text.startsWith('⚠')) {
           setVoicePhase('speaking');
-          startVoiceRipples();
+          startVoiceGlow('speaking');
           await voicePlayNarration(aiMsg.text);
-          stopVoiceRipples();
         }
       }
     } finally {
       voiceBusyRef.current = false;
       if (voiceModeRef.current) voiceListen();
     }
-  }, [playFiller, stopFiller, voicePlayNarration, startVoiceRipples, stopVoiceRipples, voiceListen, clearVoiceSubs]);
+  }, [armFillerTimer, disarmFillerTimer, stopFiller, voicePlayNarration, startVoiceGlow, stopVoiceGlow, voiceListen, clearVoiceSubs]);
   // Ref para el listener (evita closure obsoleto dentro del reconocedor).
   const handleVoiceUtteranceRef = useRef(handleVoiceUtterance);
   useEffect(() => { handleVoiceUtteranceRef.current = handleVoiceUtterance; }, [handleVoiceUtterance]);
@@ -523,15 +543,18 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const exitVoiceMode = useCallback(() => {
     voiceModeRef.current = false;
     voiceErrorsRef.current = 0;
+    voiceBusyRef.current = false;
     try { loadSpeech()?.abort(); } catch { /* no activo */ }
     clearVoiceSubs();
+    disarmFillerTimer();
     stopFiller();
-    stopVoiceRipples();
+    stopVoiceGlow();
     voiceFinishRef.current?.();
     setVoiceMode(false);
+    setVoicePhase('listening');
     setVoiceTranscript('');
     setVoiceReply('');
-  }, [clearVoiceSubs, stopFiller, stopVoiceRipples]);
+  }, [clearVoiceSubs, disarmFillerTimer, stopFiller, stopVoiceGlow]);
   exitVoiceModeRef.current = exitVoiceMode;
 
   // stopMic/stopSpeech se declaran en otros bloques del componente → refs.
@@ -1201,28 +1224,55 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* v78 — SIN encabezado (saturaba el módulo): controles FLOTANTES ghost.
-          Volver a la izquierda; modo voz / manos libres / historial / nuevo
-          chat a la derecha. Funcionan sobre el agua Y sobre el chat blanco. */}
+      {/* v79 — SIN encabezado sólido: difuminado superior (mismo color que el
+          fondo de cada pantalla) + controles flotantes. Volver a la izquierda;
+          "Nueva conversación" siempre visible (reinicio rápido) + menú "⋮" con
+          Historial y Leer respuestas a la derecha. */}
+      <View style={[styles.headerFade, { height: insets.top + 64 }]} pointerEvents="none">
+        {(() => {
+          const fadeColor = (messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface;
+          return (
+            <>
+              <View style={[styles.headerFadeLayer, { opacity: 0.55, backgroundColor: fadeColor }]} />
+              <View style={[styles.headerFadeLayer, { opacity: 0.3, top: 10, backgroundColor: fadeColor }]} />
+              <View style={[styles.headerFadeLayer, { opacity: 0.12, top: 20, backgroundColor: fadeColor }]} />
+            </>
+          );
+        })()}
+      </View>
       <View style={[styles.floatBar, { top: insets.top + 8 }]} pointerEvents="box-none">
         <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
           <Ionicons name="chevron-back" size={20} color={Colors.white} />
         </TouchableOpacity>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={styles.floatBtn} onPress={enterVoiceMode} activeOpacity={0.8}>
-            <Ionicons name="pulse" size={18} color={Colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatBtn} onPress={toggleHandsFree} activeOpacity={0.8}>
-            <Ionicons name={handsFree ? 'headset' : 'headset-outline'} size={18} color={handsFree ? '#8fd3ff' : Colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatBtn} onPress={openHistory} activeOpacity={0.8}>
-            <Ionicons name="time-outline" size={18} color={Colors.white} />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.floatBtn} onPress={startNewSession} activeOpacity={0.8}>
             <Ionicons name="create-outline" size={18} color={Colors.white} />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.floatBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
+            <Ionicons name="ellipsis-vertical" size={18} color={Colors.white} />
+          </TouchableOpacity>
         </View>
       </View>
+
+      {/* Menú "⋮": Historial + Leer respuestas (reemplaza los botones sueltos). */}
+      <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
+        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)}>
+          <View style={[styles.menuCard, { top: insets.top + 52 }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); openHistory(); }} activeOpacity={0.7}>
+              <Ionicons name="time-outline" size={17} color={Colors.textPrimary} />
+              <Text style={styles.menuItemText}>Historial</Text>
+            </TouchableOpacity>
+            <View style={styles.menuDivider} />
+            <TouchableOpacity style={styles.menuItem} onPress={() => { toggleHandsFree(); }} activeOpacity={0.7}>
+              <Ionicons name={handsFree ? 'headset' : 'headset-outline'} size={17} color={handsFree ? Colors.primary : Colors.textPrimary} />
+              <Text style={styles.menuItemText}>Leer respuestas</Text>
+              <View style={[styles.menuToggle, handsFree && styles.menuToggleOn]}>
+                <View style={[styles.menuToggleKnob, handsFree && styles.menuToggleKnobOn]} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -1239,7 +1289,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
                 data={messages}
                 keyExtractor={m => m.id}
                 renderItem={renderMessage}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[styles.listContent, { paddingTop: insets.top + 56 }]}
                 onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
                 ListFooterComponent={sending && sendingSessionId === session?.id ? (
                   <View style={[styles.msgRow, styles.msgRowAI]}>
@@ -1325,25 +1375,41 @@ export default function AIChatScreen({ navigation, route }: Props) {
             // sería pisada por el próximo resultado del reconocedor.
             editable={!sending && !micActive}
           />
-          {/* Dictado por voz: toque para hablar, toque de nuevo para parar. */}
-          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+          {/* v79 — Mientras NO hay texto: mic (dictar al cuadro) + modo voz
+              (conversación continua), lado a lado. Al escribir, ambos se
+              esconden y solo queda enviar — igual que Claude. */}
+          {!input.trim() && (
+            <>
+              <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+                <TouchableOpacity
+                  style={[styles.micBtn, micActive && styles.micBtnActive]}
+                  onPress={startMic}
+                  disabled={sending}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
+                </TouchableOpacity>
+              </Animated.View>
+              <TouchableOpacity
+                style={styles.voiceModeBtn}
+                onPress={enterVoiceMode}
+                disabled={sending}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="radio" size={19} color={Colors.white} />
+              </TouchableOpacity>
+            </>
+          )}
+          {!!input.trim() && (
             <TouchableOpacity
-              style={[styles.micBtn, micActive && styles.micBtnActive]}
-              onPress={startMic}
+              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+              onPress={() => { stopMic(); send(input); }}
               disabled={sending}
               activeOpacity={0.8}
             >
-              <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
+              <Ionicons name="arrow-up" size={19} color={Colors.white} />
             </TouchableOpacity>
-          </Animated.View>
-          <TouchableOpacity
-            style={[styles.sendBtn, (!input.trim() || sending) && styles.sendBtnDisabled]}
-            onPress={() => { stopMic(); send(input); }}
-            disabled={!input.trim() || sending}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="arrow-up" size={19} color={Colors.white} />
-          </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -1354,33 +1420,33 @@ export default function AIChatScreen({ navigation, route }: Props) {
         style={[StyleSheet.absoluteFill, { backgroundColor: '#ffffff', opacity: whiteVeil, zIndex: 45 }]}
       />
 
-      {/* ══ v78 — MODO SOLO VOZ: pantalla inmersiva. El círculo de agua está
-          QUIETO al escuchar y VIVO (ondas) mientras FLOW habla. Todo queda
-          registrado en el chat de fondo. ══ */}
+      {/* ══ v79 — MODO SOLO VOZ: el chat queda VISIBLE completo (feedback del
+          usuario: "no es bueno para una app donde necesito visualizar datos").
+          Solo se ILUMINA la franja inferior — sin animaciones pesadas, un
+          degradado que respira según la fase (escuchar/pensar/hablar),
+          igual al modo voz de referencia que se mandó. ══ */}
       {voiceMode && (
-        <View style={[styles.voiceOverlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 26 }]}>
-          <Text style={styles.voiceBrand}>FLOW <Text style={styles.flowLogoIA}>IA</Text></Text>
-          <View style={styles.voiceCircleOuter}>
-            <View style={styles.voiceCircle}>
-              {glOk
-                ? <WaterRipplesGL ref={voiceGlRef} ambient={voicePhase === 'speaking'} onUnsupported={() => setGlOk(false)} />
-                : <View style={{ flex: 1, backgroundColor: '#27436e' }} />}
-            </View>
+        <View style={styles.voiceDock} pointerEvents="box-none">
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.voiceGlow,
+              {
+                opacity: voiceGlowAnim,
+                backgroundColor: voicePhase === 'speaking' ? 'rgba(66,143,255,0.9)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.75)' : 'rgba(94,170,255,0.85)',
+              },
+            ]}
+          />
+          <View style={[styles.voiceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <Text style={styles.voiceBarStatus} numberOfLines={1}>
+              {voicePhase === 'listening'
+                ? (voiceTranscript ? `"${voiceTranscript}"` : 'Escuchando…')
+                : voicePhase === 'thinking' ? 'Pensando…' : (voiceReply || 'Hablando…')}
+            </Text>
+            <TouchableOpacity style={styles.voiceCloseBtn} onPress={exitVoiceMode} activeOpacity={0.85}>
+              <Ionicons name="close" size={20} color={Colors.white} />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.voiceStatus}>
-            {voicePhase === 'listening' ? 'Escuchando…' : voicePhase === 'thinking' ? 'Un momento…' : 'FLOW está hablando'}
-          </Text>
-          <View style={styles.voiceCaptionBox}>
-            {voicePhase === 'listening' && !!voiceTranscript && (
-              <Text style={styles.voiceTranscript} numberOfLines={3}>“{voiceTranscript}”</Text>
-            )}
-            {voicePhase !== 'listening' && !!voiceReply && (
-              <Text style={styles.voiceReplyText} numberOfLines={7}>{voiceReply}</Text>
-            )}
-          </View>
-          <TouchableOpacity style={styles.voiceCloseBtn} onPress={exitVoiceMode} activeOpacity={0.85}>
-            <Ionicons name="close" size={26} color={Colors.white} />
-          </TouchableOpacity>
         </View>
       )}
 
@@ -1500,27 +1566,43 @@ const styles = StyleSheet.create({
   },
   sugCardText: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.white },
 
-  // v78 — Modo solo voz (overlay inmersivo)
-  voiceOverlay: {
-    ...StyleSheet.absoluteFillObject, zIndex: 90, elevation: 20,
-    backgroundColor: '#0b1830',
-    alignItems: 'center', justifyContent: 'space-between',
+  // v79 — Modo solo voz: chat visible + franja de iluminación inferior.
+  voiceDock: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 55, elevation: 15 },
+  voiceGlow: {
+    position: 'absolute', left: -20, right: -20, bottom: -40, height: 120,
+    borderTopLeftRadius: 60, borderTopRightRadius: 60,
+    shadowColor: '#4f9bff', shadowOpacity: 0.9, shadowRadius: 30, shadowOffset: { width: 0, height: -6 },
   },
-  voiceBrand: { fontSize: 22, fontWeight: '900', color: Colors.white, letterSpacing: 3, marginTop: 26 },
-  voiceCircleOuter: {
-    width: 258, height: 258, borderRadius: 129,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)',
+  voiceBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 16, paddingTop: 12,
+    backgroundColor: 'rgba(11,24,48,0.92)',
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+  },
+  voiceBarStatus: { flex: 1, fontSize: 13.5, fontWeight: '700', color: Colors.white },
+  voiceCloseBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center', justifyContent: 'center',
   },
-  voiceCircle: { width: 240, height: 240, borderRadius: 120, overflow: 'hidden' },
-  voiceStatus: { fontSize: 15, fontWeight: '800', color: '#bcd0ea', letterSpacing: 0.5 },
-  voiceCaptionBox: { minHeight: 120, paddingHorizontal: 30, justifyContent: 'flex-start', alignSelf: 'stretch' },
-  voiceTranscript: { fontSize: 15, color: Colors.white, textAlign: 'center', fontStyle: 'italic', lineHeight: 22 },
-  voiceReplyText: { fontSize: 14, color: '#dbe4f0', textAlign: 'center', lineHeight: 21 },
-  voiceCloseBtn: {
-    width: 54, height: 54, borderRadius: 27,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+
+  // v79 — Difuminado superior (sin encabezado sólido) + menú "⋮"
+  headerFade: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 40, elevation: 10 },
+  headerFadeLayer: { position: 'absolute', top: 0, left: 0, right: 0, height: 56, backgroundColor: Colors.navy },
+  menuOverlay: { flex: 1, backgroundColor: 'transparent' },
+  menuCard: {
+    position: 'absolute', right: 14, minWidth: 210,
+    backgroundColor: Colors.white, borderRadius: Radius.md, paddingVertical: 6, ...Shadow.card,
+  },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  menuItemText: { flex: 1, fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
+  menuDivider: { height: 1, backgroundColor: Colors.surface, marginHorizontal: 8 },
+  menuToggle: { width: 38, height: 22, borderRadius: 11, backgroundColor: Colors.border, padding: 2, justifyContent: 'center' },
+  menuToggleOn: { backgroundColor: Colors.primary },
+  menuToggleKnob: { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.white },
+  menuToggleKnobOn: { alignSelf: 'flex-end' },
+  voiceModeBtn: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.navy,
     alignItems: 'center', justifyContent: 'center',
   },
 
