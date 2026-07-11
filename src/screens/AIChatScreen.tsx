@@ -39,7 +39,7 @@ import {
   newSessionId, removePref, requestNarration, saveSession, sendChatMessage,
   sessionTitleFrom,
 } from '@services/AIAssistantService';
-import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
+import { AI_SUGGESTED_QUESTIONS, buildGreeting, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
 // ── expo-audio con require DIFERIDO ──────────────────────────────────────────
 // El módulo es NATIVO: un dev client construido antes de agregarlo no lo tiene.
@@ -157,6 +157,52 @@ function DropLogo({ size = 88 }: { size?: number }) {
   );
 }
 
+/** v80 — Difuminado fino SIN dependencias nativas nuevas: N capas con curva
+ *  cuadrática de opacidad (mucho más suave que 3 bandas planas — evita el
+ *  efecto "escalón" que se veía poco profesional). `edge`: por qué borde
+ *  entra el color sólido ('top' = arriba opaco→abajo transparente, 'bottom'
+ *  = al revés). */
+function FadeVeil({ height, color, edge, style }: {
+  height: number; color: string; edge: 'top' | 'bottom'; style?: object;
+}) {
+  const STEPS = 14;
+  const bands = Array.from({ length: STEPS }, (_, i) => {
+    const t = i / (STEPS - 1); // 0 = borde sólido, 1 = borde transparente
+    const opacity = (1 - t) ** 1.6; // curva cuadrática: cae rápido cerca del extremo transparente
+    const bandH = height / STEPS;
+    const pos = edge === 'top' ? i * bandH : height - (i + 1) * bandH;
+    return <View key={i} style={{ position: 'absolute', left: 0, right: 0, top: pos, height: bandH + 1, backgroundColor: color, opacity }} />;
+  });
+  return <View style={[{ height, overflow: 'hidden' }, style]} pointerEvents="none">{bands}</View>;
+}
+
+/** v80 — Ícono del modo voz: rayitas verticales (ecualizador), como el botón
+ *  de conversación por voz de Claude — distinto al mic de dictado. */
+function EqualizerIcon({ size = 19, color = '#fff' }: { size?: number; color?: string }) {
+  const bars = [0.45, 0.85, 1, 0.65, 0.4]; // alturas relativas de cada rayita
+  const w = size, h = size;
+  const barW = w / (bars.length * 1.8);
+  const gap = barW * 0.8;
+  const totalW = bars.length * barW + (bars.length - 1) * gap;
+  const startX = (w - totalW) / 2;
+  return (
+    <Svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      {bars.map((f, i) => {
+        const barH = h * 0.75 * f;
+        return (
+          <Path
+            key={i}
+            d={`M${(startX + i * (barW + gap)).toFixed(1)} ${((h - barH) / 2).toFixed(1)} v${barH.toFixed(1)}`}
+            stroke={color}
+            strokeWidth={barW}
+            strokeLinecap="round"
+          />
+        );
+      })}
+    </Svg>
+  );
+}
+
 /** Pulso de entrada del avatar (una onda al llegar cada respuesta). Solo anima
  *  mensajes FRESCOS (recién llegados) — al retomar una sesión no pulsa todo. */
 function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolean }) {
@@ -172,11 +218,6 @@ function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolea
 
 const ymdLocal = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-// Dimensiones del carrusel de sugerencias (v78): 3 tarjetas visibles.
-const SUG_H = 50;
-const SUG_GAP = 10;
-const CAROUSEL_H = SUG_H * 3 + SUG_GAP * 2;
 
 /** Indicador "escribiendo…" — 3 puntos con opacidad animada en cascada. */
 function TypingDots() {
@@ -650,31 +691,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
     return () => { alive = false; };
   }, [projectId]);
 
-  // ── v78 — Carrusel VERTICAL de preguntas sugeridas (bienvenida): tarjetas de
-  // ancho uniforme, alto de 3 visibles, auto-scroll lento ida-y-vuelta. Se
-  // pausa unos segundos si el usuario lo toca/arrastra. ──
-  const carouselRef = useRef<ScrollView>(null);
-  const carouselPosRef = useRef(0);
-  const carouselDirRef = useRef(1);
-  const carouselPauseUntilRef = useRef(0);
-
   // Arco de agua al mostrar la bienvenida (transición marca de la casa).
   const isEmptyChat = (session?.messages.length ?? 0) === 0;
-
-  useEffect(() => {
-    if (booting || !isEmptyChat) return;
-    const id = setInterval(() => {
-      if (Date.now() < carouselPauseUntilRef.current) return;
-      const max = Math.max(0, suggested.length * (SUG_H + SUG_GAP) - SUG_GAP - CAROUSEL_H);
-      if (max <= 0) return;
-      let pos = carouselPosRef.current + carouselDirRef.current * 0.5; // lento y fluido
-      if (pos >= max) { pos = max; carouselDirRef.current = -1; carouselPauseUntilRef.current = Date.now() + 1200; }
-      if (pos <= 0) { pos = 0; carouselDirRef.current = 1; carouselPauseUntilRef.current = Date.now() + 1200; }
-      carouselPosRef.current = pos;
-      carouselRef.current?.scrollTo({ y: pos, animated: false });
-    }, 28);
-    return () => clearInterval(id);
-  }, [booting, isEmptyChat, suggested]);
   useEffect(() => {
     if (!booting && isEmptyChat && glOk) {
       const t = setTimeout(() => glRef.current?.bigWave(), 450);
@@ -790,10 +808,16 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // Saludo formal SOLO en el primer intercambio de la sesión.
   const isFirstTurn = useMemo(() => !messages.some(m => m.role === 'assistant' && !isErrorMsg(m)), [messages]);
 
+  // v80 — Saludo variado (feedback: "Hola {nombre}, ¿por dónde empezamos?" era
+  // muy genérico). Fijo por sesión: cambia al iniciar una nueva conversación,
+  // no en cada re-render (Math.random en render rompería la referencia).
+  const [greeting, setGreeting] = useState(() => buildGreeting(firstName, new Date().getHours()));
+
   const startNewSession = useCallback(() => {
     stopSpeech();
+    setGreeting(buildGreeting(firstName, new Date().getHours()));
     setSession({ id: newSessionId(), titulo: 'Nueva conversación', createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
-  }, [stopSpeech]);
+  }, [stopSpeech, firstName]);
 
   // Al entrar: RETOMAR la última conversación guardada (abrir siempre en blanco
   // hacía sentir que "se perdía todo"). "Nueva conversación" sigue en el header.
@@ -1228,17 +1252,12 @@ export default function AIChatScreen({ navigation, route }: Props) {
           fondo de cada pantalla) + controles flotantes. Volver a la izquierda;
           "Nueva conversación" siempre visible (reinicio rápido) + menú "⋮" con
           Historial y Leer respuestas a la derecha. */}
-      <View style={[styles.headerFade, { height: insets.top + 64 }]} pointerEvents="none">
-        {(() => {
-          const fadeColor = (messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface;
-          return (
-            <>
-              <View style={[styles.headerFadeLayer, { opacity: 0.55, backgroundColor: fadeColor }]} />
-              <View style={[styles.headerFadeLayer, { opacity: 0.3, top: 10, backgroundColor: fadeColor }]} />
-              <View style={[styles.headerFadeLayer, { opacity: 0.12, top: 20, backgroundColor: fadeColor }]} />
-            </>
-          );
-        })()}
+      {/* v80 — Difuminado superior: OPACO al nivel de los botones flotantes
+          (insets.top + 44) y se desvanece por debajo de eso — antes se veía
+          semitransparente justo donde están los botones. */}
+      <View style={styles.headerFade} pointerEvents="none">
+        <View style={{ height: insets.top + 44, backgroundColor: (messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface }} />
+        <FadeVeil height={46} color={(messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface} edge="top" />
       </View>
       <View style={[styles.floatBar, { top: insets.top + 8 }]} pointerEvents="box-none">
         <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
@@ -1326,33 +1345,23 @@ export default function AIChatScreen({ navigation, route }: Props) {
                       FLOW <Text style={styles.flowLogoIA}>IA</Text>
                     </Text>
                     <Text style={styles.flowSlogan}>La inteligencia de su obra</Text>
-                    <Text style={[styles.emptyTitle, styles.emptyTitleDark]}>
-                      {firstName ? `Hola ${firstName}, ¿por dónde empezamos?` : 'Hola, ¿por dónde empezamos?'}
-                    </Text>
+                    <Text style={[styles.emptyTitle, styles.emptyTitleDark]}>{greeting}</Text>
                     {insight && <Text style={[styles.insightText, styles.insightTextDark]}>{insight}</Text>}
-                    <View style={styles.carouselBox}>
-                      <ScrollView
-                        ref={carouselRef}
-                        style={{ height: CAROUSEL_H }}
-                        showsVerticalScrollIndicator={false}
-                        nestedScrollEnabled
-                        onScrollBeginDrag={() => { carouselPauseUntilRef.current = Date.now() + 4000; }}
-                        onScroll={e => { carouselPosRef.current = e.nativeEvent.contentOffset.y; }}
-                        scrollEventThrottle={32}
-                      >
-                        {suggested.map(q => (
-                          <TouchableOpacity
-                            key={q}
-                            style={styles.sugCard}
-                            onPress={() => { carouselPauseUntilRef.current = Date.now() + 6000; send(q); }}
-                            disabled={sending}
-                            activeOpacity={0.75}
-                          >
-                            <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.white} />
-                            <Text style={styles.sugCardText} numberOfLines={1}>{q}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
+                    {/* v80 — 3 preguntas FIJAS (feedback: el carrusel quedaba
+                        complicado) — mismo ancho, sin scroll ni animación. */}
+                    <View style={styles.sugFixedWrap}>
+                      {suggested.slice(0, 3).map(q => (
+                        <TouchableOpacity
+                          key={q}
+                          style={styles.sugCard}
+                          onPress={() => send(q)}
+                          disabled={sending}
+                          activeOpacity={0.75}
+                        >
+                          <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.white} />
+                          <Text style={styles.sugCardText} numberOfLines={1}>{q}</Text>
+                        </TouchableOpacity>
+                      ))}
                     </View>
                   </View>
                 </View>
@@ -1361,13 +1370,21 @@ export default function AIChatScreen({ navigation, route }: Props) {
           </View>
         )}
 
+        {/* v80 — Difuminado inferior: franja PROPIA (fuera del área de scroll,
+            no superpuesta) que transiciona el chat hacia la barra de entrada
+            — nunca puede tapar texto porque no comparte espacio con los
+            mensajes, solo ocupa su propia altura entre la lista y la barra. */}
+        {messages.length > 0 && !welcomeLeaving && (
+          <FadeVeil height={22} color={Colors.white} edge="bottom" style={{ marginBottom: -1 }} />
+        )}
+
         {/* ── Barra de entrada ── */}
         <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <TextInput
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder={micActive ? 'Escuchando…' : 'Escriba su consulta…'}
+            placeholder={micActive ? 'Escuchando…' : '¿Cómo puedo ayudarle hoy?'}
             placeholderTextColor={micActive ? Colors.primary : Colors.textMuted}
             multiline
             maxLength={2000}
@@ -1375,32 +1392,20 @@ export default function AIChatScreen({ navigation, route }: Props) {
             // sería pisada por el próximo resultado del reconocedor.
             editable={!sending && !micActive}
           />
-          {/* v79 — Mientras NO hay texto: mic (dictar al cuadro) + modo voz
-              (conversación continua), lado a lado. Al escribir, ambos se
-              esconden y solo queda enviar — igual que Claude. */}
-          {!input.trim() && (
-            <>
-              <Animated.View style={{ transform: [{ scale: micPulse }] }}>
-                <TouchableOpacity
-                  style={[styles.micBtn, micActive && styles.micBtnActive]}
-                  onPress={startMic}
-                  disabled={sending}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
-                </TouchableOpacity>
-              </Animated.View>
-              <TouchableOpacity
-                style={styles.voiceModeBtn}
-                onPress={enterVoiceMode}
-                disabled={sending}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="radio" size={19} color={Colors.white} />
-              </TouchableOpacity>
-            </>
-          )}
-          {!!input.trim() && (
+          {/* v80 — El mic (dictar al cuadro) SIEMPRE está visible. Solo el
+              botón de MODO VOZ se reemplaza por enviar al escribir texto
+              (igual que Claude: dictado y envío son cosas distintas). */}
+          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+            <TouchableOpacity
+              style={[styles.micBtn, micActive && styles.micBtnActive]}
+              onPress={startMic}
+              disabled={sending}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
+            </TouchableOpacity>
+          </Animated.View>
+          {input.trim() ? (
             <TouchableOpacity
               style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
               onPress={() => { stopMic(); send(input); }}
@@ -1408,6 +1413,15 @@ export default function AIChatScreen({ navigation, route }: Props) {
               activeOpacity={0.8}
             >
               <Ionicons name="arrow-up" size={19} color={Colors.white} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.voiceModeBtn}
+              onPress={enterVoiceMode}
+              disabled={sending}
+              activeOpacity={0.8}
+            >
+              <EqualizerIcon size={19} color={Colors.white} />
             </TouchableOpacity>
           )}
         </View>
@@ -1555,10 +1569,10 @@ const styles = StyleSheet.create({
   insightText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
   insightTextDark: { color: '#bcd0ea' },
 
-  // Carrusel vertical de sugerencias (3 visibles, mismo ancho)
-  carouselBox: { width: '88%', marginTop: 16, height: CAROUSEL_H, overflow: 'hidden' },
+  // v80 — 3 preguntas fijas (sin carrusel), mismo ancho.
+  sugFixedWrap: { width: '88%', marginTop: 16, gap: 10 },
   sugCard: {
-    width: '100%', height: SUG_H, marginBottom: SUG_GAP,
+    width: '100%', height: 50,
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.12)',
@@ -1586,9 +1600,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
 
-  // v79 — Difuminado superior (sin encabezado sólido) + menú "⋮"
+  // v80 — Difuminado superior (sin encabezado sólido) + menú "⋮"
   headerFade: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 40, elevation: 10 },
-  headerFadeLayer: { position: 'absolute', top: 0, left: 0, right: 0, height: 56, backgroundColor: Colors.navy },
   menuOverlay: { flex: 1, backgroundColor: 'transparent' },
   menuCard: {
     position: 'absolute', right: 14, minWidth: 210,
@@ -1667,7 +1680,8 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     paddingHorizontal: 12, paddingTop: 10,
-    backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.border,
+    backgroundColor: Colors.white,
+    // v80 — sin borde duro: el FadeVeil de arriba ya crea la transición.
   },
   input: {
     flex: 1, minHeight: 40, maxHeight: 110,
