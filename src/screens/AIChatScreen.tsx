@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, SvgXml } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SharkLogo, SharkSpinner } from '@components/FlowSharkLogo';
 import { Q } from '@nozbe/watermelondb';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -134,46 +136,27 @@ function RichText({ text, style }: { text: string; style: StyleProp<TextStyle> }
   );
 }
 
-/** v78 — Logo de FLOW: gota SVG limpia (contorno + brillo interior), centrada
- *  en la parte superior de la bienvenida. */
-function DropLogo({ size = 88 }: { size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Path
-        d="M50 6 C50 6 19 44 19 65 a31 31 0 0 0 62 0 C81 44 50 6 50 6 Z"
-        fill="rgba(255,255,255,0.14)"
-        stroke="#ffffff"
-        strokeWidth={2.6}
-      />
-      <Path
-        d="M34 64 a16 16 0 0 0 11 17"
-        stroke="#ffffff"
-        strokeWidth={3.2}
-        strokeLinecap="round"
-        fill="none"
-        opacity={0.85}
-      />
-    </Svg>
-  );
+/** v81 — Difuminado REAL con expo-linear-gradient (los rebuilds ya no son
+ *  restricción — filosofía del proyecto). `edge`: por qué borde entra el color
+ *  sólido ('top' = arriba opaco→abajo transparente; 'bottom' = al revés). */
+function hexA(hex: string, alpha: number): string {
+  const a = Math.round(alpha * 255).toString(16).padStart(2, '0');
+  return `${hex}${a}`;
 }
-
-/** v80 — Difuminado fino SIN dependencias nativas nuevas: N capas con curva
- *  cuadrática de opacidad (mucho más suave que 3 bandas planas — evita el
- *  efecto "escalón" que se veía poco profesional). `edge`: por qué borde
- *  entra el color sólido ('top' = arriba opaco→abajo transparente, 'bottom'
- *  = al revés). */
 function FadeVeil({ height, color, edge, style }: {
   height: number; color: string; edge: 'top' | 'bottom'; style?: object;
 }) {
-  const STEPS = 14;
-  const bands = Array.from({ length: STEPS }, (_, i) => {
-    const t = i / (STEPS - 1); // 0 = borde sólido, 1 = borde transparente
-    const opacity = (1 - t) ** 1.6; // curva cuadrática: cae rápido cerca del extremo transparente
-    const bandH = height / STEPS;
-    const pos = edge === 'top' ? i * bandH : height - (i + 1) * bandH;
-    return <View key={i} style={{ position: 'absolute', left: 0, right: 0, top: pos, height: bandH + 1, backgroundColor: color, opacity }} />;
-  });
-  return <View style={[{ height, overflow: 'hidden' }, style]} pointerEvents="none">{bands}</View>;
+  const stops = edge === 'top'
+    ? [color, hexA(color, 0.72), hexA(color, 0.32), hexA(color, 0)]
+    : [hexA(color, 0), hexA(color, 0.32), hexA(color, 0.72), color];
+  return (
+    <LinearGradient
+      colors={stops as [string, string, ...string[]]}
+      locations={[0, 0.35, 0.7, 1]}
+      style={[{ height }, style]}
+      pointerEvents="none"
+    />
+  );
 }
 
 /** v80 — Ícono del modo voz: rayitas verticales (ecualizador), como el botón
@@ -1313,7 +1296,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
                 ListFooterComponent={sending && sendingSessionId === session?.id ? (
                   <View style={[styles.msgRow, styles.msgRowAI]}>
                     <View style={styles.avatar}><Ionicons name="water" size={13} color={Colors.white} /></View>
-                    <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
+                    {/* v81 — El tiburón de FLOW "nada en círculos" mientras carga. */}
+                    <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+                      <SharkSpinner size={26} color={Colors.navy} />
                       <TypingDots />
                     </View>
                   </View>
@@ -1340,7 +1325,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
                       nombre y carrusel vertical lento de sugerencias (3 visibles,
                       ida y vuelta). Sin párrafos que saturen. */}
                   <View style={[styles.emptyWrap, !glOk && { backgroundColor: Colors.navy }]}>
-                    <DropLogo size={86} />
+                    <SharkLogo size={120} color={Colors.white} />
                     <Text style={styles.flowLogoText}>
                       FLOW <Text style={styles.flowLogoIA}>IA</Text>
                     </Text>
@@ -1441,17 +1426,19 @@ export default function AIChatScreen({ navigation, route }: Props) {
           igual al modo voz de referencia que se mandó. ══ */}
       {voiceMode && (
         <View style={styles.voiceDock} pointerEvents="box-none">
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.voiceGlow,
-              {
-                opacity: voiceGlowAnim,
-                backgroundColor: voicePhase === 'speaking' ? 'rgba(66,143,255,0.9)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.75)' : 'rgba(94,170,255,0.85)',
-              },
-            ]}
-          />
+          <Animated.View pointerEvents="none" style={[styles.voiceGlow, { opacity: voiceGlowAnim }]}>
+            <LinearGradient
+              colors={[
+                'transparent',
+                voicePhase === 'speaking' ? 'rgba(66,143,255,0.55)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.4)' : 'rgba(94,170,255,0.5)',
+                voicePhase === 'speaking' ? 'rgba(66,143,255,0.95)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.8)' : 'rgba(94,170,255,0.9)',
+              ]}
+              locations={[0, 0.55, 1]}
+              style={{ flex: 1 }}
+            />
+          </Animated.View>
           <View style={[styles.voiceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            {voicePhase === 'thinking' && <SharkSpinner size={22} color={Colors.white} />}
             <Text style={styles.voiceBarStatus} numberOfLines={1}>
               {voicePhase === 'listening'
                 ? (voiceTranscript ? `"${voiceTranscript}"` : 'Escuchando…')
@@ -1583,9 +1570,8 @@ const styles = StyleSheet.create({
   // v79 — Modo solo voz: chat visible + franja de iluminación inferior.
   voiceDock: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 55, elevation: 15 },
   voiceGlow: {
-    position: 'absolute', left: -20, right: -20, bottom: -40, height: 120,
-    borderTopLeftRadius: 60, borderTopRightRadius: 60,
-    shadowColor: '#4f9bff', shadowOpacity: 0.9, shadowRadius: 30, shadowOffset: { width: 0, height: -6 },
+    position: 'absolute', left: 0, right: 0, bottom: 0, height: 130,
+    overflow: 'hidden',
   },
   voiceBar: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

@@ -31,6 +31,7 @@
     "expo-file-system": "~18.1.11",
     "expo-gl": "~15.1.7",
     "expo-intent-launcher": "~12.1.5",
+    "expo-linear-gradient": "~14.1.5",
     "expo-local-authentication": "~16.0.5",
     "expo-location": "~18.1.6",
     "expo-notifications": "~0.31.5",
