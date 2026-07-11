@@ -135,7 +135,15 @@ function program(gl: any, vs: string, fs: string) {
   return p;
 }
 
-const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>(({ onUnsupported }, ref) => {
+const WaterRipplesGL = forwardRef<WaterGLHandle, {
+  onUnsupported?: () => void;
+  /** v78 — false: SIN animación ambiente (dedos/dashes automáticos). El agua
+   *  queda QUIETA salvo drops()/bigWave() explícitos — lo usa el modo voz de
+   *  FLOW (círculo quieto al escuchar, vivo al hablar). Default true. */
+  ambient?: boolean;
+}>(({ onUnsupported, ambient = true }, ref) => {
+  const ambientRef = useRef(ambient);
+  useEffect(() => { ambientRef.current = ambient; }, [ambient]);
   const queue = useRef<number[]>([]);              // cola de impactos en triplets (x, y, intensidad)
   const lastUv = useRef({ x: 0.5, y: 0.5 });
   // Corta el loop de requestAnimationFrame al DESMONTAR: sin esto cada montaje
@@ -299,6 +307,8 @@ const WaterRipplesGL = forwardRef<WaterGLHandle, { onUnsupported?: () => void }>
           // Twin: puntos sostenidos re-emitidos cada frame.
           for (const f of em) { push(f.x, f.y, f.str); f.x += f.vx; f.y += f.vy; f.life--; }
           emittersRef.current = em.filter(f => f.life > 0);
+        } else if (!ambientRef.current) {
+          // v78 — modo quieto: sin animación ambiente (solo drops explícitos).
         } else {
           // Dos dedos en la base que recorren TODA la pantalla (no solo su mitad), con
           // velocidad MUY variable (dos armónicos) → más creíble; el der. un poco más lento.

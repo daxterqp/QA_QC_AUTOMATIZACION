@@ -121,6 +121,35 @@ export async function deleteNarrationFile(uri: string): Promise<void> {
   try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* cache: el SO purga */ }
 }
 
+// ── Muletillas del MODO VOZ (v78) ────────────────────────────────────────────
+// Mientras FLOW "piensa" (el LLM responde), se reproduce una muletilla natural
+// para que no haya tiempos muertos. Se generan UNA vez con el TTS y quedan
+// cacheadas en documentDirectory (no en cache: el SO no debe purgarlas).
+
+const FILLER_TEXTS = [
+  'Claro, un segundo… lo estoy revisando en los datos de la obra.',
+  'Déjeme verificarlo, un momento por favor.',
+  'Entendido, ya lo estoy buscando…',
+];
+
+/** MP3 local de una muletilla al azar (null si no hay TTS disponible). */
+export async function getFillerAudioUri(projectId: string): Promise<string | null> {
+  const idx = Math.floor(Math.random() * FILLER_TEXTS.length);
+  const path = `${FileSystem.documentDirectory}flow_filler_${idx}.mp3`;
+  try {
+    const info = await FileSystem.getInfoAsync(path);
+    if (info.exists && (info.size ?? 0) > 1024) return path;
+  } catch { /* generar abajo */ }
+  try {
+    const tmp = await requestNarration(projectId, FILLER_TEXTS[idx]);
+    await FileSystem.copyAsync({ from: tmp, to: path });
+    deleteNarrationFile(tmp);
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 // ── Preferencias del usuario (LOCALES, por proyecto) ─────────────────────────
 // FLOW las "recuerda" vía la tool recordar_preferencia: el server la intercepta
 // como acción silenciosa, el móvil la guarda aquí y la reenvía en cada request.

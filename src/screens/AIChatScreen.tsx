@@ -12,19 +12,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal,
   KeyboardAvoidingView, Platform, Animated, ScrollView, Alert, useWindowDimensions,
-  ActivityIndicator, Share, type StyleProp, type TextStyle,
+  ActivityIndicator, Share, AppState, type StyleProp, type TextStyle,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { SvgXml } from 'react-native-svg';
+import Svg, { Path, SvgXml } from 'react-native-svg';
 import { Q } from '@nozbe/watermelondb';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useAuth } from '@context/AuthContext';
-import AppHeader from '@components/AppHeader';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import {
   database, nonConformitiesCollection, projectSectorsCollection, protocolsCollection,
@@ -36,8 +35,9 @@ import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
 import {
   type AIChatMessage, type AIChatSession, type AIEnsayoLink, addPref,
-  deleteNarrationFile, deleteSession, loadPrefs, loadSessions, newSessionId,
-  removePref, requestNarration, saveSession, sendChatMessage, sessionTitleFrom,
+  deleteNarrationFile, deleteSession, getFillerAudioUri, loadPrefs, loadSessions,
+  newSessionId, removePref, requestNarration, saveSession, sendChatMessage,
+  sessionTitleFrom,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
@@ -134,6 +134,29 @@ function RichText({ text, style }: { text: string; style: StyleProp<TextStyle> }
   );
 }
 
+/** v78 — Logo de FLOW: gota SVG limpia (contorno + brillo interior), centrada
+ *  en la parte superior de la bienvenida. */
+function DropLogo({ size = 88 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 100 100">
+      <Path
+        d="M50 6 C50 6 19 44 19 65 a31 31 0 0 0 62 0 C81 44 50 6 50 6 Z"
+        fill="rgba(255,255,255,0.14)"
+        stroke="#ffffff"
+        strokeWidth={2.6}
+      />
+      <Path
+        d="M34 64 a16 16 0 0 0 11 17"
+        stroke="#ffffff"
+        strokeWidth={3.2}
+        strokeLinecap="round"
+        fill="none"
+        opacity={0.85}
+      />
+    </Svg>
+  );
+}
+
 /** Pulso de entrada del avatar (una onda al llegar cada respuesta). Solo anima
  *  mensajes FRESCOS (recién llegados) — al retomar una sesión no pulsa todo. */
 function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolean }) {
@@ -149,6 +172,11 @@ function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolea
 
 const ymdLocal = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Dimensiones del carrusel de sugerencias (v78): 3 tarjetas visibles.
+const SUG_H = 50;
+const SUG_GAP = 10;
+const CAROUSEL_H = SUG_H * 3 + SUG_GAP * 2;
 
 /** Indicador "escribiendo…" — 3 puntos con opacidad animada en cascada. */
 function TypingDots() {
@@ -234,7 +262,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   // Transición suave bienvenida → chat (feedback QA: "muy brusco"): la
   // bienvenida queda como overlay que se DESVANECE sobre la lista.
-  const welcomeFade = useRef(new Animated.Value(1)).current;
+  // v78 — Velo blanco de la transición bienvenida→chat (0=transparente).
+  const whiteVeil = useRef(new Animated.Value(0)).current;
   const [welcomeLeaving, setWelcomeLeaving] = useState(false);
 
   // ── Dictado por voz (E4): micrófono del sistema, es-PE, resultados en vivo ──
@@ -330,6 +359,213 @@ export default function AIChatScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booting, autoMicParam]);
 
+  // ══ MODO SOLO VOZ (v78) — conversación natural inmersiva ══════════════════
+  // Pantalla overlay tipo asistente: círculo de agua (quieta al escuchar, viva
+  // al hablar), loop escuchar→pensar→hablar→escuchar. Todo queda registrado
+  // como chat normal (send() de siempre). Muletillas cacheadas tapan el tiempo
+  // de respuesta del modelo. Regla: escribe→se le responde por texto; habla→voz.
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<'listening' | 'thinking' | 'speaking'>('listening');
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceReply, setVoiceReply] = useState('');
+  const voiceModeRef = useRef(false);
+  const voiceBusyRef = useRef(false);
+  const voiceGlRef = useRef<WaterGLHandle>(null);
+  const voiceSubsRef = useRef<{ remove: () => void }[]>([]);
+  const voicePlayerRef = useRef<AudioPlayerLite | null>(null);
+  const voiceFinishRef = useRef<(() => void) | null>(null);
+  const fillerPlayerRef = useRef<AudioPlayerLite | null>(null);
+  const voiceRippleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Contador de errores reales consecutivos del reconocedor + ref de salida
+  // (exitVoiceMode se declara más abajo; el listener lo usa vía ref).
+  const voiceErrorsRef = useRef(0);
+  const exitVoiceModeRef = useRef<() => void>(() => {});
+
+  const clearVoiceSubs = useCallback(() => {
+    voiceSubsRef.current.forEach(s => { try { s.remove(); } catch { /* ya removido */ } });
+    voiceSubsRef.current = [];
+  }, []);
+
+  const stopFiller = useCallback(() => {
+    try { fillerPlayerRef.current?.remove(); } catch { /* ya liberado */ }
+    fillerPlayerRef.current = null;
+  }, []);
+
+  /** Muletilla mientras "piensa" (best-effort: si no hay TTS, silencio). */
+  const playFiller = useCallback(async () => {
+    const audio = loadExpoAudio();
+    if (!audio) return;
+    try {
+      const uri = await getFillerAudioUri(projectId);
+      if (!uri || !voiceModeRef.current || !voiceBusyRef.current) return;
+      stopFiller();
+      const player = audio.createAudioPlayer({ uri });
+      fillerPlayerRef.current = player;
+      player.play();
+    } catch { /* sin muletilla */ }
+  }, [projectId, stopFiller]);
+
+  /** Ondas del círculo mientras FLOW habla. */
+  const startVoiceRipples = useCallback(() => {
+    if (voiceRippleTimerRef.current) clearInterval(voiceRippleTimerRef.current);
+    voiceRippleTimerRef.current = setInterval(() => {
+      voiceGlRef.current?.drop(0.35 + Math.random() * 0.3, 0.35 + Math.random() * 0.3, false);
+    }, 380);
+  }, []);
+  const stopVoiceRipples = useCallback(() => {
+    if (voiceRippleTimerRef.current) { clearInterval(voiceRippleTimerRef.current); voiceRippleTimerRef.current = null; }
+  }, []);
+
+  /** Narra `text` y espera a que TERMINE (el loop de voz necesita el fin). */
+  const voicePlayNarration = useCallback(async (text: string): Promise<void> => {
+    const audio = loadExpoAudio();
+    if (!audio) return;
+    try {
+      const uri = await requestNarration(projectId, text);
+      if (!voiceModeRef.current) { deleteNarrationFile(uri); return; }
+      stopFiller();
+      await audio.setAudioModeAsync(TTS_AUDIO_MODE).catch(() => {});
+      await new Promise<void>(resolve => {
+        const player = audio.createAudioPlayer({ uri });
+        voicePlayerRef.current = player;
+        let done = false;
+        let sub: { remove: () => void } | null = null;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          try { sub?.remove(); } catch { /* ya removido */ }
+          try { player.remove(); } catch { /* ya liberado */ }
+          deleteNarrationFile(uri);
+          voicePlayerRef.current = null;
+          voiceFinishRef.current = null;
+          resolve();
+        };
+        voiceFinishRef.current = finish; // corte inmediato al salir del modo voz
+        sub = player.addListener('playbackStatusUpdate', s => { if (s?.didJustFinish) finish(); });
+        player.play();
+        setTimeout(finish, 150_000); // seguridad (didJustFinish puede no llegar)
+      });
+    } catch { /* sin voz: la respuesta igual quedó en el chat */ }
+  }, [projectId, stopFiller]);
+
+  /** (Re)abre el reconocedor en modo conversación. */
+  const voiceListen = useCallback(() => {
+    if (!voiceModeRef.current || voiceBusyRef.current) return;
+    const speech = loadSpeech();
+    if (!speech) { setVoiceMode(false); voiceModeRef.current = false; return; }
+    clearVoiceSubs();
+    setVoicePhase('listening');
+    setVoiceTranscript('');
+    voiceSubsRef.current = [
+      speech.addListener('result', e => {
+        voiceErrorsRef.current = 0; // hay reconocimiento: resetear el contador
+        const txt = String(e?.results?.[0]?.transcript ?? '');
+        if (txt) setVoiceTranscript(txt);
+        if (e?.isFinal && txt.trim()) void handleVoiceUtteranceRef.current(txt.trim());
+      }),
+      speech.addListener('end', () => {
+        // Silencio sin frase final → reabrir mientras siga el modo voz.
+        if (voiceModeRef.current && !voiceBusyRef.current) {
+          try { speech.start({ lang: 'es-PE', interimResults: true, continuous: false }); } catch { /* reintenta al próximo end */ }
+        }
+      }),
+      speech.addListener('error', e => {
+        const code = String(e?.error ?? '');
+        if (code === 'no-speech' || code === 'aborted' || !voiceModeRef.current) return;
+        // Errores REALES consecutivos (permiso revocado, servicio caído): sin
+        // este corte el 'end' reabriría en bucle infinito gastando batería.
+        voiceErrorsRef.current += 1;
+        if (voiceErrorsRef.current >= 3) {
+          exitVoiceModeRef.current();
+          Alert.alert('Modo voz', 'El reconocimiento de voz no está disponible en este momento. Puede seguir escribiendo con normalidad.');
+        }
+      }),
+    ];
+    try { speech.start({ lang: 'es-PE', interimResults: true, continuous: false }); }
+    catch { /* el próximo end reintenta */ }
+  }, [clearVoiceSubs]);
+
+  /** Frase final del usuario → pensar (muletilla) → responder → hablar → escuchar.
+   *  `send` se declara MÁS ABAJO en el componente → se usa vía ref (sendRef)
+   *  para no romper el orden de declaración. */
+  const sendRef = useRef<((text: string) => Promise<AIChatMessage | null>) | null>(null);
+  const handleVoiceUtterance = useCallback(async (text: string) => {
+    if (voiceBusyRef.current || !voiceModeRef.current) return;
+    voiceBusyRef.current = true;
+    try {
+      try { loadSpeech()?.abort(); } catch { /* no activo */ }
+      clearVoiceSubs();
+      setVoiceTranscript(text);
+      setVoicePhase('thinking');
+      setVoiceReply('');
+      void playFiller(); // en paralelo: tapa el tiempo de respuesta
+      const aiMsg = await sendRef.current?.(text) ?? null;
+      stopFiller();
+      if (!voiceModeRef.current) return;
+      if (aiMsg) {
+        setVoiceReply(aiMsg.text.startsWith('⚠') ? aiMsg.text.slice(1).trim() : aiMsg.text);
+        if (!aiMsg.text.startsWith('⚠')) {
+          setVoicePhase('speaking');
+          startVoiceRipples();
+          await voicePlayNarration(aiMsg.text);
+          stopVoiceRipples();
+        }
+      }
+    } finally {
+      voiceBusyRef.current = false;
+      if (voiceModeRef.current) voiceListen();
+    }
+  }, [playFiller, stopFiller, voicePlayNarration, startVoiceRipples, stopVoiceRipples, voiceListen, clearVoiceSubs]);
+  // Ref para el listener (evita closure obsoleto dentro del reconocedor).
+  const handleVoiceUtteranceRef = useRef(handleVoiceUtterance);
+  useEffect(() => { handleVoiceUtteranceRef.current = handleVoiceUtterance; }, [handleVoiceUtterance]);
+
+  const exitVoiceMode = useCallback(() => {
+    voiceModeRef.current = false;
+    voiceErrorsRef.current = 0;
+    try { loadSpeech()?.abort(); } catch { /* no activo */ }
+    clearVoiceSubs();
+    stopFiller();
+    stopVoiceRipples();
+    voiceFinishRef.current?.();
+    setVoiceMode(false);
+    setVoiceTranscript('');
+    setVoiceReply('');
+  }, [clearVoiceSubs, stopFiller, stopVoiceRipples]);
+  exitVoiceModeRef.current = exitVoiceMode;
+
+  // stopMic/stopSpeech se declaran en otros bloques del componente → refs.
+  const stopMicRef = useRef<(abort?: boolean) => void>(() => {});
+  const stopSpeechRef = useRef<() => void>(() => {});
+  const enterVoiceMode = useCallback(async () => {
+    const speech = loadSpeech();
+    if (!speech) {
+      Alert.alert('Función no disponible', 'El modo voz requiere reinstalar la aplicación (nuevo módulo de voz).');
+      return;
+    }
+    try {
+      const perm = await speech.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Micrófono', 'Sin permiso de micrófono no se puede usar el modo voz.');
+        return;
+      }
+    } catch { return; }
+    stopMicRef.current(true);   // apagar dictado del input si estaba activo
+    stopSpeechRef.current();    // cortar narración en curso
+    voiceModeRef.current = true;
+    setVoiceMode(true);
+    setTimeout(() => voiceListen(), 350);
+  }, [voiceListen]);
+
+  // Apagar el modo voz al salir de la pantalla / backgroundear.
+  useEffect(() => () => { exitVoiceMode(); }, [exitVoiceMode]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => {
+      if (s !== 'active' && voiceModeRef.current) exitVoiceMode();
+    });
+    return () => sub.remove();
+  }, [exitVoiceMode]);
+
   // ── Modo manos libres (E2): narra sola cada respuesta nueva ──
   const [handsFree, setHandsFree] = useState(false);
   const handsFreeRef = useRef(false);
@@ -391,8 +627,31 @@ export default function AIChatScreen({ navigation, route }: Props) {
     return () => { alive = false; };
   }, [projectId]);
 
+  // ── v78 — Carrusel VERTICAL de preguntas sugeridas (bienvenida): tarjetas de
+  // ancho uniforme, alto de 3 visibles, auto-scroll lento ida-y-vuelta. Se
+  // pausa unos segundos si el usuario lo toca/arrastra. ──
+  const carouselRef = useRef<ScrollView>(null);
+  const carouselPosRef = useRef(0);
+  const carouselDirRef = useRef(1);
+  const carouselPauseUntilRef = useRef(0);
+
   // Arco de agua al mostrar la bienvenida (transición marca de la casa).
   const isEmptyChat = (session?.messages.length ?? 0) === 0;
+
+  useEffect(() => {
+    if (booting || !isEmptyChat) return;
+    const id = setInterval(() => {
+      if (Date.now() < carouselPauseUntilRef.current) return;
+      const max = Math.max(0, suggested.length * (SUG_H + SUG_GAP) - SUG_GAP - CAROUSEL_H);
+      if (max <= 0) return;
+      let pos = carouselPosRef.current + carouselDirRef.current * 0.5; // lento y fluido
+      if (pos >= max) { pos = max; carouselDirRef.current = -1; carouselPauseUntilRef.current = Date.now() + 1200; }
+      if (pos <= 0) { pos = 0; carouselDirRef.current = 1; carouselPauseUntilRef.current = Date.now() + 1200; }
+      carouselPosRef.current = pos;
+      carouselRef.current?.scrollTo({ y: pos, animated: false });
+    }, 28);
+    return () => clearInterval(id);
+  }, [booting, isEmptyChat, suggested]);
   useEffect(() => {
     if (!booting && isEmptyChat && glOk) {
       const t = setTimeout(() => glRef.current?.bigWave(), 450);
@@ -425,6 +684,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
     if (audioUriRef.current) { deleteNarrationFile(audioUriRef.current); audioUriRef.current = null; }
     setSpeakingId(null);
   }, []);
+  // Refs para el modo voz (declarado ANTES que estos bloques en el componente).
+  stopSpeechRef.current = stopSpeech;
+  stopMicRef.current = stopMic;
 
   // Liberar el reproductor (e invalidar narraciones en vuelo) al salir.
   useEffect(() => stopSpeech, [stopSpeech]);
@@ -580,9 +842,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const sendingRef = useRef(false);
   const [sendingSessionId, setSendingSessionId] = useState<string | null>(null);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string): Promise<AIChatMessage | null> => {
     const msg = text.trim();
-    if (!msg || sendingRef.current || !session) return;
+    if (!msg || sendingRef.current || !session) return null;
     sendingRef.current = true;
     setInput('');
     setSending(true);
@@ -590,13 +852,15 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
     const stamp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const userMsg: AIChatMessage = { id: `u-${stamp()}`, role: 'user', text: msg, at: Date.now() };
-    // Primer mensaje de la sesión → desvanecer la bienvenida sobre el chat
-    // (crossfade) en vez del corte seco.
+    // Primer mensaje de la sesión → TRANSICIÓN de marca (v78): el barrido de
+    // olas del login + un velo que pasa de transparente a BLANCO, se desmonta
+    // la bienvenida bajo el velo y el blanco se desvanece revelando el chat.
     if (session.messages.length === 0) {
       setWelcomeLeaving(true);
-      Animated.timing(welcomeFade, { toValue: 0, duration: 450, useNativeDriver: true }).start(() => {
+      glRef.current?.bigWave();
+      Animated.timing(whiteVeil, { toValue: 1, duration: 620, delay: 280, useNativeDriver: true }).start(() => {
         setWelcomeLeaving(false);
-        welcomeFade.setValue(1); // lista para la próxima bienvenida (nueva conversación)
+        Animated.timing(whiteVeil, { toValue: 0, duration: 300, useNativeDriver: true }).start();
       });
     }
     const base: AIChatSession = {
@@ -646,26 +910,31 @@ export default function AIChatScreen({ navigation, route }: Props) {
       };
       applyResult(aiMsg);
       // Manos libres: narrar sola la respuesta nueva (E2) — SOLO si la pantalla
-      // sigue montada Y el usuario sigue en ESTA conversación (sin esto, la
-      // narración arrancaba tras salir del chat o sobre otra sesión).
-      if (handsFreeRef.current && res.reply) {
+      // sigue montada Y el usuario sigue en ESTA conversación. En MODO VOZ la
+      // narración la maneja el propio loop de voz (no duplicar).
+      if (handsFreeRef.current && res.reply && !voiceModeRef.current) {
         setTimeout(() => {
           if (!mountedRef.current || sessionIdRef.current !== base.id) return;
           toggleSpeech(aiMsg);
         }, 250);
       }
+      return aiMsg;
     } catch (e) {
-      applyResult({
+      const errMsg: AIChatMessage = {
         id: `e-${stamp()}`, role: 'assistant',
         text: `⚠ ${e instanceof Error ? e.message : 'No pude responder. Intente de nuevo.'}`,
         at: Date.now(),
-      });
+      };
+      applyResult(errMsg);
+      return errMsg;
     } finally {
       sendingRef.current = false;
       setSending(false);
       setSendingSessionId(null);
     }
-  }, [projectId, session, isFirstTurn, welcomeFade, toggleSpeech]);
+  }, [projectId, session, isFirstTurn, whiteVeil, toggleSpeech]);
+  // El loop del modo voz llama a send vía ref (send se declara aquí, el loop arriba).
+  sendRef.current = send;
 
   // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
@@ -932,25 +1201,28 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <AppHeader
-        title="FLOW IA"
-        subtitle={projectName}
-        onBack={() => navigation.goBack()}
-        rightContent={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-            {/* Manos libres: FLOW narra sola cada respuesta (campo con guantes). */}
-            <TouchableOpacity onPress={toggleHandsFree} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name={handsFree ? 'headset' : 'headset-outline'} size={20} color={handsFree ? '#8fd3ff' : Colors.white} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={openHistory} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="time-outline" size={21} color={Colors.white} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={startNewSession} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="create-outline" size={21} color={Colors.white} />
-            </TouchableOpacity>
-          </View>
-        }
-      />
+      {/* v78 — SIN encabezado (saturaba el módulo): controles FLOTANTES ghost.
+          Volver a la izquierda; modo voz / manos libres / historial / nuevo
+          chat a la derecha. Funcionan sobre el agua Y sobre el chat blanco. */}
+      <View style={[styles.floatBar, { top: insets.top + 8 }]} pointerEvents="box-none">
+        <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+          <Ionicons name="chevron-back" size={20} color={Colors.white} />
+        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.floatBtn} onPress={enterVoiceMode} activeOpacity={0.8}>
+            <Ionicons name="pulse" size={18} color={Colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.floatBtn} onPress={toggleHandsFree} activeOpacity={0.8}>
+            <Ionicons name={handsFree ? 'headset' : 'headset-outline'} size={18} color={handsFree ? '#8fd3ff' : Colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.floatBtn} onPress={openHistory} activeOpacity={0.8}>
+            <Ionicons name="time-outline" size={18} color={Colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.floatBtn} onPress={startNewSession} activeOpacity={0.8}>
+            <Ionicons name="create-outline" size={18} color={Colors.white} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -983,8 +1255,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
                   Es un OVERLAY que se desvanece al primer mensaje (crossfade
                   sobre la lista) y se desmonta al conversar (batería). ── */}
             {(messages.length === 0 || welcomeLeaving) && (
-              <Animated.View
-                style={[StyleSheet.absoluteFill, { opacity: welcomeFade }]}
+              <View
+                style={StyleSheet.absoluteFill}
                 pointerEvents={welcomeLeaving ? 'none' : 'auto'}
               >
                 <View
@@ -995,35 +1267,46 @@ export default function AIChatScreen({ navigation, route }: Props) {
                   onMoveShouldSetResponderCapture={(e) => { onWaterMove(e); return false; }}
                 >
                   {glOk && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
-                  <ScrollView contentContainerStyle={styles.emptyWrap}>
-                    <View style={[styles.emptyBadge, glOk && styles.emptyBadgeDark]}>
-                      <Ionicons name="water" size={30} color={glOk ? Colors.white : Colors.primary} />
-                    </View>
-                    <Text style={[styles.flowLogoText, !glOk && { color: Colors.navy }]}>
+                  {/* v78 — Bienvenida LIMPIA: gota SVG arriba-centro, saludo con
+                      nombre y carrusel vertical lento de sugerencias (3 visibles,
+                      ida y vuelta). Sin párrafos que saturen. */}
+                  <View style={[styles.emptyWrap, !glOk && { backgroundColor: Colors.navy }]}>
+                    <DropLogo size={86} />
+                    <Text style={styles.flowLogoText}>
                       FLOW <Text style={styles.flowLogoIA}>IA</Text>
                     </Text>
-                    <Text style={[styles.flowSlogan, !glOk && { color: Colors.textSecondary }]}>La inteligencia de su obra</Text>
-                    <Text style={[styles.emptyTitle, glOk && styles.emptyTitleDark]}>
+                    <Text style={styles.flowSlogan}>La inteligencia de su obra</Text>
+                    <Text style={[styles.emptyTitle, styles.emptyTitleDark]}>
                       {firstName ? `Hola ${firstName}, ¿por dónde empezamos?` : 'Hola, ¿por dónde empezamos?'}
                     </Text>
-                    <Text style={[styles.emptyText, glOk && styles.emptyTextDark]}>
-                      Pregúntele en lenguaje natural por los ensayos, sectores y avance de{' '}
-                      <Text style={{ fontWeight: '800' }}>{projectName}</Text>.
-                    </Text>
-                    {insight && (
-                      <Text style={[styles.insightText, glOk && styles.insightTextDark]}>{insight}</Text>
-                    )}
-                    <View style={styles.chipsWrap}>
-                      {suggested.map(q => (
-                        <TouchableOpacity key={q} style={[styles.chip, glOk && styles.chipDark]} onPress={() => send(q)} disabled={sending} activeOpacity={0.75}>
-                          <Ionicons name="chatbubble-ellipses-outline" size={13} color={glOk ? Colors.white : Colors.primary} />
-                          <Text style={[styles.chipText, glOk && styles.chipTextDark]}>{q}</Text>
-                        </TouchableOpacity>
-                      ))}
+                    {insight && <Text style={[styles.insightText, styles.insightTextDark]}>{insight}</Text>}
+                    <View style={styles.carouselBox}>
+                      <ScrollView
+                        ref={carouselRef}
+                        style={{ height: CAROUSEL_H }}
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                        onScrollBeginDrag={() => { carouselPauseUntilRef.current = Date.now() + 4000; }}
+                        onScroll={e => { carouselPosRef.current = e.nativeEvent.contentOffset.y; }}
+                        scrollEventThrottle={32}
+                      >
+                        {suggested.map(q => (
+                          <TouchableOpacity
+                            key={q}
+                            style={styles.sugCard}
+                            onPress={() => { carouselPauseUntilRef.current = Date.now() + 6000; send(q); }}
+                            disabled={sending}
+                            activeOpacity={0.75}
+                          >
+                            <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.white} />
+                            <Text style={styles.sugCardText} numberOfLines={1}>{q}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
                     </View>
-                  </ScrollView>
+                  </View>
                 </View>
-              </Animated.View>
+              </View>
             )}
           </View>
         )}
@@ -1063,6 +1346,43 @@ export default function AIChatScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* v78 — Velo blanco de la transición bienvenida→chat (sobre todo menos
+          los controles flotantes y el modo voz). */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: '#ffffff', opacity: whiteVeil, zIndex: 45 }]}
+      />
+
+      {/* ══ v78 — MODO SOLO VOZ: pantalla inmersiva. El círculo de agua está
+          QUIETO al escuchar y VIVO (ondas) mientras FLOW habla. Todo queda
+          registrado en el chat de fondo. ══ */}
+      {voiceMode && (
+        <View style={[styles.voiceOverlay, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 26 }]}>
+          <Text style={styles.voiceBrand}>FLOW <Text style={styles.flowLogoIA}>IA</Text></Text>
+          <View style={styles.voiceCircleOuter}>
+            <View style={styles.voiceCircle}>
+              {glOk
+                ? <WaterRipplesGL ref={voiceGlRef} ambient={voicePhase === 'speaking'} onUnsupported={() => setGlOk(false)} />
+                : <View style={{ flex: 1, backgroundColor: '#27436e' }} />}
+            </View>
+          </View>
+          <Text style={styles.voiceStatus}>
+            {voicePhase === 'listening' ? 'Escuchando…' : voicePhase === 'thinking' ? 'Un momento…' : 'FLOW está hablando'}
+          </Text>
+          <View style={styles.voiceCaptionBox}>
+            {voicePhase === 'listening' && !!voiceTranscript && (
+              <Text style={styles.voiceTranscript} numberOfLines={3}>“{voiceTranscript}”</Text>
+            )}
+            {voicePhase !== 'listening' && !!voiceReply && (
+              <Text style={styles.voiceReplyText} numberOfLines={7}>{voiceReply}</Text>
+            )}
+          </View>
+          <TouchableOpacity style={styles.voiceCloseBtn} onPress={exitVoiceMode} activeOpacity={0.85}>
+            <Ionicons name="close" size={26} color={Colors.white} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ── Modal: historial de conversaciones (LOCAL) ── */}
       <Modal visible={showHistory} transparent animationType="fade" onRequestClose={() => setShowHistory(false)}>
@@ -1148,33 +1468,61 @@ export default function AIChatScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
 
-  // Estado inicial
-  emptyWrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  flowLogoText: { fontSize: 34, fontWeight: '900', color: Colors.white, letterSpacing: 4 },
+  // v78 — Controles flotantes (reemplazan al encabezado completo).
+  floatBar: {
+    position: 'absolute', left: 12, right: 12, zIndex: 60, elevation: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  floatBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(14,33,61,0.42)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Estado inicial (bienvenida limpia v78)
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
+  flowLogoText: { fontSize: 34, fontWeight: '900', color: Colors.white, letterSpacing: 4, marginTop: 4 },
   flowLogoIA: { fontSize: 20, fontWeight: '800', color: '#9fc3ee', letterSpacing: 2 },
   flowSlogan: { fontSize: 12, fontWeight: '700', color: '#bcd0ea', letterSpacing: 1.5, textTransform: 'uppercase', marginTop: -6 },
-  emptyBadge: {
-    width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.primary + '14',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 2,
-    borderWidth: 1.5, borderColor: Colors.primary + '33',
-  },
-  emptyTitle: { fontSize: 19, fontWeight: '900', color: Colors.navy },
-  emptyText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19, maxWidth: 320 },
-  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 14 },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: Colors.white, borderWidth: 1.2, borderColor: Colors.primary + '55',
-    borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, ...Shadow.subtle,
-  },
-  chipText: { fontSize: 12.5, fontWeight: '700', color: Colors.primary },
-  // Variante OSCURA de la bienvenida (sobre el agua GL navy del login).
-  emptyBadgeDark: { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.38)' },
+  emptyTitle: { fontSize: 19, fontWeight: '900', color: Colors.navy, marginTop: 10 },
   emptyTitleDark: { color: Colors.white },
-  emptyTextDark: { color: '#d8e1ef' },
-  chipDark: { backgroundColor: 'rgba(255,255,255,0.13)', borderColor: 'rgba(255,255,255,0.42)' },
-  chipTextDark: { color: Colors.white },
   insightText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
   insightTextDark: { color: '#bcd0ea' },
+
+  // Carrusel vertical de sugerencias (3 visibles, mismo ancho)
+  carouselBox: { width: '88%', marginTop: 16, height: CAROUSEL_H, overflow: 'hidden' },
+  sugCard: {
+    width: '100%', height: SUG_H, marginBottom: SUG_GAP,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.34)',
+  },
+  sugCardText: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.white },
+
+  // v78 — Modo solo voz (overlay inmersivo)
+  voiceOverlay: {
+    ...StyleSheet.absoluteFillObject, zIndex: 90, elevation: 20,
+    backgroundColor: '#0b1830',
+    alignItems: 'center', justifyContent: 'space-between',
+  },
+  voiceBrand: { fontSize: 22, fontWeight: '900', color: Colors.white, letterSpacing: 3, marginTop: 26 },
+  voiceCircleOuter: {
+    width: 258, height: 258, borderRadius: 129,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  voiceCircle: { width: 240, height: 240, borderRadius: 120, overflow: 'hidden' },
+  voiceStatus: { fontSize: 15, fontWeight: '800', color: '#bcd0ea', letterSpacing: 0.5 },
+  voiceCaptionBox: { minHeight: 120, paddingHorizontal: 30, justifyContent: 'flex-start', alignSelf: 'stretch' },
+  voiceTranscript: { fontSize: 15, color: Colors.white, textAlign: 'center', fontStyle: 'italic', lineHeight: 22 },
+  voiceReplyText: { fontSize: 14, color: '#dbe4f0', textAlign: 'center', lineHeight: 21 },
+  voiceCloseBtn: {
+    width: 54, height: 54, borderRadius: 27,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   // Mensajes
   listContent: { padding: 14, gap: 10, paddingBottom: 18 },
