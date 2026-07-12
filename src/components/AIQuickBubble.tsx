@@ -10,7 +10,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, PanResponder, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
+import { SharkLogo } from './FlowSharkLogo';
 import { projectsCollection } from '@db/index';
 import { parseFeatureFlagsJson } from '@utils/featureFlags';
 import { Colors, Shadow } from '../theme/colors';
@@ -40,8 +40,8 @@ export function AIQuickBubble({ route, navigate }: Props) {
   const [visibleFor, setVisibleFor] = useState<{ projectId: string; projectName: string } | null>(null);
 
   const win = Dimensions.get('window');
-  const pos = useRef(new Animated.ValueXY({ x: win.width - SIZE - MARGIN, y: win.height * 0.62 })).current;
-  const posRaw = useRef({ x: win.width - SIZE - MARGIN, y: win.height * 0.62 });
+  const pos = useRef(new Animated.ValueXY({ x: win.width - SIZE - MARGIN, y: win.height * 0.74 })).current;
+  const posRaw = useRef({ x: win.width - SIZE - MARGIN, y: win.height * 0.74 });
   const dragTotal = useRef(0);
 
   // Posición persistida (una sola carga).
@@ -113,8 +113,8 @@ export function AIQuickBubble({ route, navigate }: Props) {
         if (moved <= 6) {
           const target = targetRef.current;
           if (!target) return;
-          // Tap: abrir a FLOW. LONG-press (≥450ms): abrir DICTANDO (autoMic).
-          const longPress = Date.now() - grantAtRef.current >= 450;
+          // Tap: abrir a FLOW. LONG-press (≥280ms): abrir DICTANDO (autoMic).
+          const longPress = Date.now() - grantAtRef.current >= 280;
           navigate('AIChat', {
             projectId: target.projectId,
             projectName: target.projectName,
@@ -151,7 +151,7 @@ export function AIQuickBubble({ route, navigate }: Props) {
       style={[styles.bubble, { transform: pos.getTranslateTransform() }]}
       {...panResponder.panHandlers}
     >
-      <Ionicons name="water" size={24} color={Colors.white} />
+      <SharkLogo size={40} color={Colors.white} />
     </Animated.View>
   );
 }
@@ -160,7 +160,7 @@ function clampPos(x: number, y: number): { x: number; y: number } {
   const { width, height } = Dimensions.get('window');
   return {
     x: Math.min(Math.max(x, MARGIN), width - SIZE - MARGIN),
-    y: Math.min(Math.max(y, 60), height - SIZE - 90),
+    y: Math.min(Math.max(y, 60), height - SIZE - 30),
   };
 }
 

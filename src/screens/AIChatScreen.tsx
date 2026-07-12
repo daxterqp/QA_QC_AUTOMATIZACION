@@ -1297,10 +1297,14 @@ export default function AIChatScreen({ navigation, route }: Props) {
       {/* v80 — Difuminado superior: OPACO al nivel de los botones flotantes
           (insets.top + 44) y se desvanece por debajo de eso — antes se veía
           semitransparente justo donde están los botones. */}
-      <View style={styles.headerFade} pointerEvents="none">
-        <View style={{ height: insets.top + 44, backgroundColor: (messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface }} />
-        <FadeVeil height={46} color={(messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface} edge="top" />
-      </View>
+      {/* v83 — El difuminado solo existe EN CONVERSACIÓN (los mensajes se
+          desvanecen bajo los botones); la bienvenida navy queda limpia. */}
+      {messages.length > 0 && !welcomeLeaving && (
+        <View style={styles.headerFade} pointerEvents="none">
+          <View style={{ height: insets.top + 44, backgroundColor: Colors.surface }} />
+          <FadeVeil height={46} color={Colors.surface} edge="top" />
+        </View>
+      )}
       {/* v82 — Sin burbuja: solo el ícono, blanco sobre la bienvenida navy y
           navy sobre el chat claro (el difuminado de atrás da el contraste). */}
       {(() => {
@@ -1391,14 +1395,13 @@ export default function AIChatScreen({ navigation, route }: Props) {
                       nombre y carrusel vertical lento de sugerencias (3 visibles,
                       ida y vuelta). Sin párrafos que saturen. */}
                   <View style={[styles.emptyWrap, !glOk && { backgroundColor: Colors.navy }]}>
-                    {/* v82 — Lockup horizontal como la referencia: tiburón +
-                        FLOW al costado, todo centrado. */}
+                    {/* v83 — Bienvenida mínima: solo el logo grande y, al
+                        costado, el saludo (sin "FLOW" ni slogan — pantalla
+                        limpia, feedback del usuario). */}
                     <View style={styles.logoLockup}>
-                      <SharkLogo size={84} color={Colors.white} />
-                      <Text style={styles.flowLogoText}>FLOW</Text>
+                      <SharkLogo size={110} color={Colors.white} />
+                      <Text style={styles.lockupGreeting}>{greeting}</Text>
                     </View>
-                    <Text style={styles.flowSlogan}>La inteligencia de su obra</Text>
-                    <Text style={[styles.emptyTitle, styles.emptyTitleDark]}>{greeting}</Text>
                     {insight && <Text style={[styles.insightText, styles.insightTextDark]}>{insight}</Text>}
                     {/* v80 — 3 preguntas FIJAS (feedback: el carrusel quedaba
                         complicado) — mismo ancho, sin scroll ni animación. */}
@@ -1412,7 +1415,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
                           activeOpacity={0.75}
                         >
                           <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.white} />
-                          <Text style={styles.sugCardText} numberOfLines={1}>{q}</Text>
+                          <Text style={styles.sugCardText} numberOfLines={2}>{q}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
@@ -1620,11 +1623,8 @@ const styles = StyleSheet.create({
 
   // Estado inicial (bienvenida v82: lockup horizontal + Montserrat)
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  logoLockup: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  flowLogoText: { fontFamily: FF_XBOLD, fontSize: 42, color: Colors.white, letterSpacing: 5 },
-  flowSlogan: { fontFamily: FF_SEMI, fontSize: 11.5, color: '#bcd0ea', letterSpacing: 2, textTransform: 'uppercase', marginTop: -2 },
-  emptyTitle: { fontFamily: FF_BOLD, fontSize: 18, color: Colors.navy, marginTop: 12, textAlign: 'center', paddingHorizontal: 10 },
-  emptyTitleDark: { color: Colors.white },
+  logoLockup: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 26 },
+  lockupGreeting: { flexShrink: 1, fontFamily: FF_BOLD, fontSize: 19, lineHeight: 26, color: Colors.white },
   insightText: { fontFamily: FF_SEMI, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   insightTextDark: { color: '#bcd0ea' },
 

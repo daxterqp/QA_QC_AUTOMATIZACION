@@ -34,24 +34,28 @@ interface GreetingBucket { saludo: string; frases: string[] }
 const GREETING_BUCKETS: GreetingBucket[] = [
   { // madrugada/mañana (0-11h)
     saludo: 'Buenos días',
-    frases: ['¿comenzamos el día con calidad?', '¿verificamos el avance?', '¿por dónde empezamos?', '¿revisamos la calidad de hoy?'],
+    frases: ['¿empezamos con calidad?', '¿verificamos el avance?', '¿por dónde empezamos?', '¿revisamos la obra?'],
   },
   { // tarde (12-18h)
     saludo: 'Buenas tardes',
-    frases: ['¿cómo va la obra?', '¿revisamos la calidad?', '¿verificamos el avance del día?', '¿por dónde seguimos?'],
+    frases: ['¿cómo va la obra?', '¿revisamos la calidad?', '¿verificamos el avance?', '¿por dónde seguimos?'],
   },
   { // noche (19-23h)
     saludo: 'Buenas noches',
-    frases: ['¿cerramos el día revisando los ensayos?', '¿un vistazo antes de terminar?', '¿revisamos cómo quedó todo hoy?'],
+    frases: ['¿un vistazo antes de terminar?', '¿cerramos el día?', '¿revisamos cómo quedó hoy?'],
   },
 ];
 
-/** Saludo cálido de la bienvenida, variado según la hora de Lima y con el
- *  nombre del usuario. `seed` opcional fija la variante (p.ej. por sesión) —
- *  sin seed, rota al azar cada vez que se muestra. */
+/** Saludo de la bienvenida, variado según la hora y con el nombre del usuario.
+ *  Feedback v83: pocas palabras con el mismo impacto — si el conjunto queda
+ *  largo, se OMITE el "Buenos días/..." y va directo "{nombre}, {frase}".
+ *  `seed` opcional fija la variante; sin seed, rota al azar. */
 export function buildGreeting(firstName: string | null, hour: number, seed?: number): string {
   const bucket = hour < 12 ? GREETING_BUCKETS[0] : hour < 19 ? GREETING_BUCKETS[1] : GREETING_BUCKETS[2];
   const idx = seed != null ? seed % bucket.frases.length : Math.floor(Math.random() * bucket.frases.length);
   const frase = bucket.frases[idx];
-  return firstName ? `${bucket.saludo}, ${firstName}. ${frase[0].toUpperCase()}${frase.slice(1)}` : `${bucket.saludo}. ${frase[0].toUpperCase()}${frase.slice(1)}`;
+  const cap = `${frase[0].toUpperCase()}${frase.slice(1)}`;
+  if (!firstName) return `${bucket.saludo}. ${cap}`;
+  const largo = bucket.saludo.length + firstName.length + frase.length > 40;
+  return largo ? `${firstName}, ${frase}` : `${bucket.saludo}, ${firstName}. ${cap}`;
 }
