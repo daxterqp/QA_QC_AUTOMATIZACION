@@ -187,15 +187,28 @@ export async function pullSummaryRows(projectId: string): Promise<void> {
     const cursorRaw = await AsyncStorage.getItem(cursorKey(projectId));
     const cursor = cursorRaw ? Number(cursorRaw) || 0 : 0;
     // Solapamiento de 2 min: cierra huecos por desfase de reloj entre dispositivos.
-    const since = Math.max(0, cursor - 120_000);
-    const { data, error } = await supabase
-      .from('protocol_summary_rows')
-      .select('*')
-      .eq('project_id', projectId)
-      .gt('updated_at', since)
-      .order('updated_at', { ascending: true }); // determinista: el cursor avanza al máximo realmente leído
-    if (error) { console.warn('[summary] pull falló (¿corriste v38?):', error.message); return; }
-    const remote = (data ?? []) as any[];
+    let since = Math.max(0, cursor - 120_000);
+    // v86 — Bucle de páginas: PostgREST corta en 1000 filas por request. Con el
+    // order por updated_at el cursor avanza igual, pero la PRIMERA carga de un
+    // proyecto grande necesitaba N pulls separados para ponerse al día — ahora
+    // se agota en esta misma llamada (el upsert por protocol_id es idempotente).
+    const remote: any[] = [];
+    for (;;) {
+      const { data, error } = await supabase
+        .from('protocol_summary_rows')
+        .select('*')
+        .eq('project_id', projectId)
+        .gt('updated_at', since)
+        .order('updated_at', { ascending: true }); // determinista: el cursor avanza al máximo realmente leído
+      if (error) { console.warn('[summary] pull falló (¿corriste v38?):', error.message); break; }
+      const page = (data ?? []) as any[];
+      remote.push(...page);
+      if (page.length < 1000) break;
+      const last = page[page.length - 1];
+      const lastTs = typeof last?.updated_at === 'number' ? last.updated_at : 0;
+      if (lastTs <= since) break; // sin avance posible (timestamps repetidos): evitar bucle infinito
+      since = lastTs;
+    }
     if (remote.length === 0) return;
 
     // Index local existente por protocol_id.

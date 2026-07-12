@@ -9,6 +9,7 @@
  *   const result = await syncProject(projectId);
  */
 
+import { Platform, ToastAndroid } from 'react-native';
 import { Q } from '@nozbe/watermelondb';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '@config/supabase';
@@ -175,6 +176,96 @@ async function safeBatchWrite(prepares: any[]): Promise<void> {
   }
 }
 
+// ── v86 — Fetch remoto PAGINADO ──────────────────────────────────────────────
+// PostgREST devuelve MÁXIMO 1000 filas por request aunque no se pida .limit():
+// un select "sin límite" sobre un proyecto grande (>1000 protocolos/items)
+// bajaba solo la primera página EN SILENCIO y la limpieza de huérfanos podía
+// destruir localmente datos sanos que sí existían en la nube. Todo fetch de
+// pull pasa por aquí: order('id') (paginación estable) + range() hasta agotar.
+const PULL_PAGE = 1000;
+
+/** select paginado con .eq(col, val). LANZA en el primer error (el caller
+ *  decide si marca la tabla como fallida o aborta). */
+async function fetchAllPaged(table: string, col: string, val: string, select = '*'): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += PULL_PAGE) {
+    const { data, error } = await supabase.from(table).select(select)
+      .eq(col, val).order('id', { ascending: true }).range(from, from + PULL_PAGE - 1);
+    if (error) throw new Error(`[pull:${table}] ${error.message}`);
+    out.push(...((data ?? []) as any[]));
+    if (!data || data.length < PULL_PAGE) break;
+  }
+  return out;
+}
+
+/** select paginado con .in(col, ids) — trocea también los ids (con miles de
+ *  ids la URL del request revienta) y pagina cada tramo. */
+async function fetchInPaged(table: string, col: string, ids: string[], select = '*'): Promise<any[]> {
+  const out: any[] = [];
+  for (let c = 0; c < ids.length; c += 100) {
+    const batch = ids.slice(c, c + 100);
+    for (let from = 0; ; from += PULL_PAGE) {
+      const { data, error } = await supabase.from(table).select(select)
+        .in(col, batch).order('id', { ascending: true }).range(from, from + PULL_PAGE - 1);
+      if (error) throw new Error(`[pull:${table}] ${error.message}`);
+      out.push(...((data ?? []) as any[]));
+      if (!data || data.length < PULL_PAGE) break;
+    }
+  }
+  return out;
+}
+
+/** updated_at tolerante (number local, ISO string remoto). */
+const rowMs = (v: any): number => {
+  if (typeof v === 'number') return v;
+  if (v == null) return 0;
+  const t = new Date(v).getTime();
+  return isFinite(t) ? t : 0;
+};
+
+/** v86 — Marca registros como synced PERSISTIENDO en SQLite. Mutar _raw dentro
+ *  de database.write NO persiste (solo toca el caché de instancias en memoria):
+ *  al reiniciar la app las filas seguían 'created' y se re-subían en masa.
+ *  prepareUpdate resetea _status a 'updated' ANTES de ejecutar el callback,
+ *  así que asignar 'synced' DENTRO del callback gana (el mismo patrón probado
+ *  de prepareOverride); updated_at se preserva para no alterar el LWW. */
+async function markSyncedPersistent(recs: any[]): Promise<void> {
+  if (recs.length === 0) return;
+  try {
+    await database.write(async () => {
+      await database.batch(recs.map((rec: any) => {
+        const keepUpdatedAt = rec._raw.updated_at;
+        return rec.prepareUpdate((r: any) => {
+          if (keepUpdatedAt != null) r._raw.updated_at = keepUpdatedAt;
+          r._raw._status = 'synced';
+          r._raw._changed = '';
+        });
+      }));
+    });
+  } catch { /* best-effort: la marca no debe romper el push */ }
+}
+
+// ── v86 — Errores del sync masivo VISIBLES ───────────────────────────────────
+// Casi todas las pantallas disparan push/pull en background y tragaban
+// result.errors: si RLS rechazaba una tabla o fallaba un lote, el usuario
+// creía que todo subió. Un toast throttled (60s) avisa sin ser invasivo;
+// el detalle sigue en el log y en el SyncResult para quien lo consuma.
+let _lastSyncErrorToastAt = 0;
+function notifySyncErrors(errors: string[]): void {
+  if (errors.length === 0) return;
+  const now = Date.now();
+  if (now - _lastSyncErrorToastAt < 60_000) return;
+  _lastSyncErrorToastAt = now;
+  try {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(
+        `Sincronización incompleta (${errors.length} error${errors.length > 1 ? 'es' : ''}). Sus datos locales están a salvo; se reintentará.`,
+        ToastAndroid.LONG,
+      );
+    }
+  } catch { /* UI no disponible (headless) */ }
+}
+
 function prepareOverride(collection: any, remoteRows: any[], localRows: any[]): any[] {
   const existingMap: Record<string, any> = {};
   for (const l of localRows) existingMap[l.id] = l;
@@ -196,6 +287,12 @@ function prepareOverride(collection: any, remoteRows: any[], localRows: any[]): 
         })
       );
     } else {
+      // v86 — No-op skip: si la fila local ya está synced con el MISMO
+      // updated_at, re-escribirla genera miles de writes SQLite + cascada de
+      // observables (UI congelada post-pull) sin cambiar nada. Todo editor
+      // (web y móvil) bumpea updated_at, así que iguales = misma fila.
+      if (local._raw._status === 'synced' && !local._raw._changed
+          && rowMs(local._raw.updated_at) === rowMs(remote.updated_at)) continue;
       prepares.push(
         local.prepareUpdate((rec: any) => {
           Object.assign(rec._raw, remote);
@@ -235,13 +332,6 @@ function prepareFreshOverride(collection: any, remoteRows: any[], localRows: any
   const existingMap: Record<string, any> = {};
   for (const l of localRows) existingMap[l.id] = l;
 
-  const toMs = (v: any): number => {
-    if (typeof v === 'number') return v;
-    if (v == null) return 0;
-    const t = new Date(v).getTime();
-    return isFinite(t) ? t : 0;
-  };
-
   const prepares: any[] = [];
   for (const remoteRaw of remoteRows) {
     const remote = filterToLocalSchema(collection, remoteRaw);
@@ -257,9 +347,12 @@ function prepareFreshOverride(collection: any, remoteRows: any[], localRows: any
       );
       continue;
     }
-    const localU = toMs(local._raw.updated_at);
-    const remoteU = toMs(remote.updated_at);
+    const localU = rowMs(local._raw.updated_at);
+    const remoteU = rowMs(remote.updated_at);
     if (localU > remoteU) continue;   // local más fresco → lo sube el próximo push
+    // v86 — No-op skip: misma fila (synced, mismo updated_at, sin cambios
+    // locales) → nada que aplicar. Ver nota en prepareOverride.
+    if (localU === remoteU && local._raw._status === 'synced' && !local._raw._changed) continue;
     prepares.push(
       local.prepareUpdate((rec: any) => {
         Object.assign(rec._raw, remote);
@@ -333,11 +426,11 @@ async function filterByFreshness(
 
   try {
     if (projectFilter) {
-      const { data } = await supabase
-        .from(table)
-        .select('id, updated_at')
-        .eq(projectFilter.col, projectFilter.val);
-      for (const r of (data ?? []) as { id: string; updated_at: number | string }[]) {
+      // v86 — Paginado: sin range(), PostgREST cortaba en 1000 filas y las
+      // restantes parecían "borradas en remoto" (skipDeletedOnRemote las
+      // excluía del push PARA SIEMPRE) o "sin contraparte" (se re-subían).
+      const data = await fetchAllPaged(table, projectFilter.col, projectFilter.val, 'id, updated_at');
+      for (const r of data as { id: string; updated_at: number | string }[]) {
         remoteMap[r.id] = typeof r.updated_at === 'number' ? r.updated_at : new Date(r.updated_at).getTime();
         remoteSet.add(r.id);
       }
@@ -353,9 +446,12 @@ async function filterByFreshness(
       }
     }
   } catch (e) {
-    console.warn(`[freshness:${table}] error consultando remoto, se sube todo:`, e);
-    // Si falla la consulta remota, devolvemos todo (comportamiento conservador = subir).
-    return localRows;
+    // v86 — Antes se subía TODO: las copias 'synced' VIEJAS de este celular
+    // podían PISAR en la nube ediciones más nuevas de la web tras un fallo
+    // transitorio de esta consulta. Conservador de verdad = subir SOLO lo que
+    // tiene cambios locales reales (created/updated); lo synced no se toca.
+    console.warn(`[freshness:${table}] error consultando remoto — se suben solo filas con cambios locales:`, e);
+    return localRows.filter((r: any) => r._raw?._status !== 'synced');
   }
 
   return localRows.filter((r: any) => {
@@ -578,8 +674,9 @@ export async function pushSampleStrict(sampleId: string): Promise<void> {
  *  para no perder muestras creadas localmente que aún no se pushearon). Propaga
  *  deletes remotos sobre filas locales ya `synced`. */
 export async function pullSamples(projectId: string): Promise<void> {
-  const { data, error } = await supabase.from('samples').select('*').eq('project_id', projectId);
-  if (error || !data) return;
+  let data: any[];
+  try { data = await fetchAllPaged('samples', 'project_id', projectId); }
+  catch { return; } // fetch fallido → NO limpiar huérfanos con datos parciales
   const local = await samplesCollection.query(Q.where('project_id', projectId)).fetch();
   const remoteIds = new Set<string>(data.map((r: any) => r.id));
   const prepares: any[] = prepareFreshOverride(samplesCollection, data, local);
@@ -663,8 +760,9 @@ export async function deleteTopoCargaStrict(cargaId: string): Promise<void> {
 /** Bajada de cargas topográficas + override fresco + propagación de deletes remotos
  *  (igual que pullSamples). filterToLocalSchema stringifica rows_json/columns_json. */
 export async function pullTopoCargas(projectId: string): Promise<void> {
-  const { data, error } = await supabase.from('topo_cargas').select('*').eq('project_id', projectId);
-  if (error || !data) return;
+  let data: any[];
+  try { data = await fetchAllPaged('topo_cargas', 'project_id', projectId); }
+  catch { return; } // fetch fallido → NO limpiar huérfanos con datos parciales
   // v44 — Anti-zombie: excluir cargas con DELETE_TOPO_CARGA pendiente en cola (el
   // delete aún no se pusheó → la fila sigue en la nube; no re-crearla local).
   let pendingDeleteIds = new Set<string>();
@@ -1580,16 +1678,16 @@ async function pullProject(projectId: string): Promise<number> {
   // sobre una tabla fallida: un [] por error NO significa "no hay remotos", y
   // tratar todo lo local como huérfano borraría datos sanos del dispositivo.
   const fetchFailed = new Set<string>();
+  // v86 — Paginados: sin range(), PostgREST corta en 1000 filas EN SILENCIO y
+  // el orphan-cleanup trataba las filas 1001+ como "borradas en la web".
   const fetchAll = async (table: string, col: string, val: string) => {
-    const { data, error } = await supabase.from(table).select('*').eq(col, val);
-    if (error) { console.warn(`[pull:${table}] ${error.message}`); fetchFailed.add(table); return []; }
-    return data ?? [];
+    try { return await fetchAllPaged(table, col, val); }
+    catch (e) { console.warn(String((e as Error)?.message ?? e)); fetchFailed.add(table); return []; }
   };
   const fetchIn = async (table: string, col: string, ids: string[]) => {
     if (ids.length === 0) return [];
-    const { data, error } = await supabase.from(table).select('*').in(col, ids);
-    if (error) { console.warn(`[pull:${table}] ${error.message}`); fetchFailed.add(table); return []; }
-    return data ?? [];
+    try { return await fetchInPaged(table, col, ids); }
+    catch (e) { console.warn(String((e as Error)?.message ?? e)); fetchFailed.add(table); return []; }
   };
 
   const { data: remoteProject, error: projErr } = await supabase
@@ -2004,6 +2102,7 @@ export async function syncProject(projectId: string): Promise<SyncResult> {
     errors.push(`Pull: ${e.message}`);
   }
 
+  notifySyncErrors(errors); // v86 — visibles aunque el caller los ignore
   return { pushed, pulled, errors };
 }
 
@@ -2022,6 +2121,7 @@ export async function pushProjectToSupabase(projectId: string): Promise<SyncResu
     errors.push(`Push: ${e.message}`);
   }
 
+  notifySyncErrors(errors); // v86 — visibles aunque el caller los ignore
   return { pushed, pulled: 0, errors };
 }
 
@@ -2138,6 +2238,7 @@ export function pullProjectFromCloud(projectId: string): Promise<SyncResult> {
     } catch (e: any) {
       errors.push(`Pull: ${e.message}`);
     }
+    notifySyncErrors(errors); // v86 — visibles aunque el caller los ignore
     return { pushed: 0, pulled, errors };
   })();
 
@@ -2219,47 +2320,10 @@ export async function syncAllUsers(): Promise<void> {
 /**
  * Sube un usuario individual a Supabase (llamar después de crear/modificar un usuario).
  */
-/**
- * En reinstalación: busca en Supabase todos los proyectos del usuario
- * (por user_project_access y por created_by_id) y los descarga localmente.
- */
-export async function restoreUserProjectsFromCloud(userId: string, role?: string): Promise<void> {
-  try {
-    const projectIds = new Set<string>();
-
-    if (role === 'CREATOR') {
-      // CREATOR ve todos los proyectos
-      const { data, error } = await supabase.from('projects').select('id');
-      console.log('[restore] CREATOR query → data:', JSON.stringify(data), 'error:', JSON.stringify(error));
-      for (const p of data ?? []) projectIds.add(p.id);
-    } else {
-      // Otros roles: proyectos por acceso o por creación
-      const [accessRes, createdRes] = await Promise.all([
-        supabase.from('user_project_access').select('project_id').eq('user_id', userId),
-        supabase.from('projects').select('id').eq('created_by_id', userId),
-      ]);
-      for (const a of accessRes.data ?? []) projectIds.add(a.project_id);
-      for (const p of createdRes.data ?? []) projectIds.add(p.id);
-    }
-
-    // Borrar localmente proyectos que ya no existen en Supabase
-    const localProjects = await projectsCollection.query().fetch();
-    const toDeleteLocally = localProjects.filter((p) => !projectIds.has(p.id));
-    if (toDeleteLocally.length > 0) {
-      console.log(`[restore] borrando ${toDeleteLocally.length} proyectos obsoletos localmente`);
-      await database.write(async () => {
-        for (const p of toDeleteLocally) {
-          await p.destroyPermanently();
-        }
-      });
-    }
-
-    // Pulls secuenciales para evitar deadlock en WatermelonDB async mode
-    for (const id of Array.from(projectIds)) {
-      await pullProjectFromCloud(id).catch(() => {});
-    }
-  } catch { /* sin conectividad */ }
-}
+// v86 — restoreUserProjectsFromCloud ELIMINADA: no tenía callers y ante un
+// select fallido borraba TODOS los proyectos locales (patrón vetado de
+// borrado masivo por datos parciales). Si se necesita restaurar tras una
+// reinstalación, usar pullProjectFromCloud por proyecto (sin borrar nada).
 
 export async function pushUserToSupabase(userId: string): Promise<void> {
   try {
@@ -2289,14 +2353,9 @@ async function _pushStrict(
     .from(table)
     .upsert([toRow((rec as any)._raw)], { onConflict: 'id' });
   if (error) throw new Error(`[${contextLabel}] ${error.message}`);
-  // B7 — Tras upsert OK, marcar como synced mutando _raw directamente.
-  // No usamos prepareUpdate porque WMDB lo reseteo a "updated" y reencolaría.
-  try {
-    await database.write(async () => {
-      (rec as any)._raw._status = 'synced';
-      (rec as any)._raw._changed = '';
-    });
-  } catch { /* ignorar — la marca es best-effort */ }
+  // v86 — markSyncedPersistent: la mutación directa de _raw NO persistía en
+  // SQLite y tras cada reinicio la fila volvía 'created' (re-subidas masivas).
+  await markSyncedPersistent([rec]);
 }
 
 export async function pushActivityStrict(id: string)            { return _pushStrict('activities', activitiesCollection, id, 'pushActivityStrict'); }
@@ -2352,13 +2411,7 @@ export async function pushWorkSessionFullStrict(sessionId: string): Promise<void
       }
       throw new Error(`[pushWorkSessionFullStrict:create] ${error.message}`);
     }
-    // B7 — Marcar synced mutando _raw directo (evita el reseteo a "updated").
-    try {
-      await database.write(async () => {
-        raw._status = 'synced';
-        raw._changed = '';
-      });
-    } catch { /* ignorar */ }
+    await markSyncedPersistent([session]); // v86 — persistente (ver helper)
   } else if (changedFields.length > 0) {
     const partial: Record<string, any> = { updated_at: raw.updated_at ?? Date.now() };
     for (const f of changedFields) {
@@ -2376,13 +2429,7 @@ export async function pushWorkSessionFullStrict(sessionId: string): Promise<void
       }
       throw new Error(`[pushWorkSessionFullStrict:update] ${error.message}`);
     }
-    // B7 — Marcar synced mutando _raw directo.
-    try {
-      await database.write(async () => {
-        raw._status = 'synced';
-        raw._changed = '';
-      });
-    } catch { /* ignorar */ }
+    await markSyncedPersistent([session]); // v86 — persistente (ver helper)
   } else {
     // Fix D4: fallback a upsert full si _changed se perdio por pull intermedio.
     // status !== 'created' y changedFields vacio: el local podria diferir del
@@ -2398,12 +2445,7 @@ export async function pushWorkSessionFullStrict(sessionId: string): Promise<void
       }
       throw new Error(`[pushWorkSessionFullStrict:fallback] ${error.message}`);
     }
-    try {
-      await database.write(async () => {
-        raw._status = 'synced';
-        raw._changed = '';
-      });
-    } catch { /* ignorar */ }
+    await markSyncedPersistent([session]); // v86 — persistente (ver helper)
   }
 }
 
@@ -2443,17 +2485,10 @@ export async function pushWorkSessionGpsBatchStrict(sessionId: string): Promise<
       .upsert(chunk, { onConflict: 'id' });
     if (error) throw new Error(`[pushWorkSessionGpsBatchStrict:${i}] ${error.message}`);
   }
-  // Marcar como synced para no re-enviar.
-  // B5 — NO usar prepareUpdate aquí: prepareUpdate sobrescribe _status a
-  // "updated" automáticamente, anulando nuestra marca de "synced". Mutamos
-  // _raw directamente dentro del write para evitarlo.
-  // Fix D3: itera snapshot capturado, NO re-query.
-  await database.write(async () => {
-    for (const p of pending) {
-      (p as any)._raw._status = 'synced';
-      (p as any)._raw._changed = '';
-    }
-  });
+  // v86 — Marcar synced PERSISTENTE (la mutación directa de _raw no llegaba a
+  // SQLite: tras reiniciar, los 30k puntos se re-subían enteros otra vez).
+  // Fix D3 se conserva: itera el snapshot capturado, NO re-query.
+  await markSyncedPersistent(pending);
 }
 
 // ─── Delete helpers ──────────────────────────────────────────────────────────
@@ -2471,8 +2506,9 @@ export async function deleteWorkSessionStrict(id: string)       { return _delete
 // ─── Pull helpers ────────────────────────────────────────────────────────────
 
 async function _pullByProject(table: string, collection: any, projectId: string): Promise<void> {
-  const { data, error } = await supabase.from(table).select('*').eq('project_id', projectId);
-  if (error || !data) return;
+  let data: any[];
+  try { data = await fetchAllPaged(table, 'project_id', projectId); }
+  catch { return; } // fetch fallido → NO limpiar huérfanos con datos parciales
   const local = await collection.query(Q.where('project_id', projectId)).fetch();
   const remoteIds = new Set<string>(data.map((r: any) => r.id));
   const prepares: any[] = prepareOverride(collection, data, local);

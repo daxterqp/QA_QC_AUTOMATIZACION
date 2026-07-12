@@ -247,7 +247,10 @@ export default function EnsayosScreen({ navigation, route }: Props) {
   const [managing, setManaging] = useState(false);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    // v86 — Sin setLoading(true) aquí: el estado inicial ya es true (primera
+    // carga) y en cada re-focus (volver de un ensayo) los datos son locales e
+    // instantáneos — borrar la lista para mostrar un spinner se percibía como
+    // recarga lenta en el bucle llenar→volver→llenar.
     try {
       const [tmpls, allProtos, sectors, proj, smps] = await Promise.all([
         protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
@@ -1043,6 +1046,7 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       ) : (
         <SectionList
           sections={pagedSections as any}
+          keyboardShouldPersistTaps="handled"
           keyExtractor={(item: any) => item.id}
           ListHeaderComponent={renderListHeader()}
           renderSectionHeader={({ section }: any) => renderGroupHeader(section.group, section.items, section.isOpen, section.groupIdx)}

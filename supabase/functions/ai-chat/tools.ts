@@ -233,7 +233,24 @@ function columnsFromConfig(raw: any): { key: string; label: string; kind: string
 
 const FIXED_KEYS = new Set(['project_name', 'sector_name', 'location_name', 'protocol_code', 'ensayo_date', 'realizado_por', 'aprobado_por', 'estado', 'fecha_aprobacion']);
 
-async function loadCatalog(supabase: SupabaseClient, projectId: string): Promise<Catalog> {
+// v86 — Catálogo con CACHE corto (TTL 15s) por proyecto: un turno del modelo
+// encadena varias tools (catalogo → serie → grafico → accion) y cada una
+// re-consultaba el catálogo entero (3 queries + posible N+1 por plantilla) —
+// hasta 6-10 ejecuciones por respuesta. El catálogo no cambia en los ~10s de
+// un turno y es idéntico para todo usuario CON acceso (RLS es por proyecto),
+// así que la clave es solo projectId. Ante error no se cachea (reintenta).
+const _catalogCache = new Map<string, { at: number; promise: Promise<Catalog> }>();
+
+function loadCatalog(supabase: SupabaseClient, projectId: string): Promise<Catalog> {
+  const hit = _catalogCache.get(projectId);
+  if (hit && Date.now() - hit.at < 15_000) return hit.promise;
+  const promise = loadCatalogFresh(supabase, projectId);
+  _catalogCache.set(projectId, { at: Date.now(), promise });
+  promise.catch(() => { _catalogCache.delete(projectId); });
+  return promise;
+}
+
+async function loadCatalogFresh(supabase: SupabaseClient, projectId: string): Promise<Catalog> {
   const [secQ, tplQ, locQ] = await Promise.all([
     supabase.from('project_sectors').select('id, name').eq('project_id', projectId).order('name'),
     supabase.from('protocol_templates').select('id, id_protocolo, name, summary_config_json, is_hidden').eq('project_id', projectId),

@@ -679,7 +679,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // ── Preferencias de FLOW (E3): gestión desde el modal de historial ──
   const [prefs, setPrefs] = useState<string[]>([]);
   useEffect(() => { loadPrefs(projectId).then(setPrefs).catch(() => {}); }, [projectId]);
-  // Insight local del día (cero tokens: sale de la base local del celular).
+  // v86 — Briefing local del día (cero tokens, funciona SIN señal): además de
+  // hoy/ayer, cuenta pendientes de aprobación y NC abiertas, y arma chips
+  // ACCIONABLES según el rol — abrir FLOW cada mañana ya vale por sí solo.
   const [insight, setInsight] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -688,18 +690,38 @@ export default function AIChatScreen({ navigation, route }: Props) {
         const now = new Date();
         const hoy = ymdLocal(now);
         const ayer = ymdLocal(new Date(now.getTime() - 86_400_000));
-        const [nHoy, nAyer] = await Promise.all([
+        const [nHoy, nAyer, nPend, nNc, sectors] = await Promise.all([
           protocolsCollection.query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')), Q.where('ensayo_date', hoy)).fetchCount(),
           protocolsCollection.query(Q.where('project_id', projectId), Q.where('status', Q.notEq('DRAFT')), Q.where('ensayo_date', ayer)).fetchCount(),
+          protocolsCollection.query(Q.where('project_id', projectId), Q.where('status', 'SUBMITTED')).fetchCount(),
+          nonConformitiesCollection.query(Q.where('project_id', projectId), Q.where('status', 'OPEN')).fetchCount().catch(() => 0),
+          projectSectorsCollection.query(Q.where('project_id', projectId)).fetch().catch(() => [] as any[]),
         ]);
         if (!alive) return;
-        if (nHoy > 0 || nAyer > 0) {
-          setInsight(`Hoy: ${nHoy} ensayo${nHoy === 1 ? '' : 's'} registrado${nHoy === 1 ? '' : 's'} · Ayer: ${nAyer}`);
+        // Briefing (hasta 2 líneas).
+        const lineas: string[] = [];
+        if (nHoy > 0 || nAyer > 0) lineas.push(`Hoy: ${nHoy} ensayo${nHoy === 1 ? '' : 's'} · Ayer: ${nAyer}`);
+        const alertas: string[] = [];
+        if (nPend > 0) alertas.push(`${nPend} por aprobar`);
+        if (nNc > 0) alertas.push(`${nNc} NC abierta${nNc === 1 ? '' : 's'}`);
+        if (alertas.length) lineas.push(alertas.join(' · '));
+        if (lineas.length) setInsight(lineas.join('\n'));
+        // Chips accionables por ROL + estado real (los inteligentes van primero;
+        // solo se muestran 3, así que desplazan a los genéricos cuando aplican).
+        const rol = String((currentUser as any)?.role ?? '');
+        const smart: string[] = [];
+        if (['CREATOR', 'RESIDENT', 'SUPERVISOR'].includes(rol) && nPend > 0) {
+          smart.push(nPend === 1 ? '¿Vemos el ensayo pendiente de aprobación?' : `¿Vemos los ${nPend} ensayos pendientes de aprobación?`);
         }
+        if (nNc > 0) smart.push(nNc === 1 ? '¿Cómo va la no conformidad abierta?' : '¿Cómo van las no conformidades abiertas?');
+        if (rol === 'OPERATOR') smart.push('Quiero crear un ensayo donde estoy');
+        const first = [...(sectors as any[])].sort((a, b) => (a.sortOrder ?? 1e9) - (b.sortOrder ?? 1e9))[0];
+        const base = buildSuggestedQuestions(first?.name);
+        setSuggested([...smart, ...base.filter(q => !smart.includes(q))]);
       } catch { /* sin insight */ }
     })();
     return () => { alive = false; };
-  }, [projectId]);
+  }, [projectId, currentUser]);
 
   // Arco de agua al mostrar la bienvenida (transición marca de la casa).
   const isEmptyChat = (session?.messages.length ?? 0) === 0;
@@ -797,19 +819,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
     repairCloudSummaryOnce(projectId).catch(() => {});
   }, [projectId]);
 
-  // Chips dinámicos: la pregunta de ejemplo usa el PRIMER sector real del
-  // proyecto (base local) para que la consulta siempre tenga sentido.
-  useEffect(() => {
-    let alive = true;
-    projectSectorsCollection.query(Q.where('project_id', projectId)).fetch()
-      .then(sectors => {
-        if (!alive || sectors.length === 0) return;
-        const first = [...sectors].sort((a, b) => (a.sortOrder ?? 1e9) - (b.sortOrder ?? 1e9))[0];
-        setSuggested(buildSuggestedQuestions(first?.name));
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [projectId]);
+  // v86 — Los chips dinámicos ahora se arman junto con el briefing local
+  // (efecto de arriba): rol + pendientes + NC + primer sector real.
 
   const messages = session?.messages ?? [];
   // Las burbujas de error ("⚠ …") NO son respuestas reales del asistente:
@@ -1649,7 +1660,7 @@ const styles = StyleSheet.create({
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
   logoLockup: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 26 },
   lockupGreeting: { flexShrink: 1, fontFamily: FF_BOLD, fontSize: 19, lineHeight: 26, color: Colors.white },
-  insightText: { fontFamily: FF_SEMI, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  insightText: { fontFamily: FF_SEMI, fontSize: 12, color: Colors.textSecondary, marginTop: 2, textAlign: 'center', lineHeight: 17 },
   insightTextDark: { color: '#bcd0ea' },
 
   // v80 — 3 preguntas fijas (sin carrusel), mismo ancho.

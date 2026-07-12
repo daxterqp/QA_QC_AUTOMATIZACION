@@ -963,6 +963,9 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       {/* Lista de items */}
       <FlatList
         ref={mainListRef}
+        // v86 — Con el teclado abierto, el primer tap sobre Sí/No/cámara/Enviar
+        // solo cerraba el teclado y se perdía (doble toque, peor con guantes).
+        keyboardShouldPersistTaps="handled"
         onScroll={(e) => { scrollOffsetRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={32}
         data={numericMode ? [] : listData}
