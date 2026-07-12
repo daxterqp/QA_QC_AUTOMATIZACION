@@ -13,6 +13,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { fetchAllPages } from '@lib/pagedFetch';
 import { mergeFeatureFlags, type Protocol, type ProjectSector, type ProtocolTemplate, type ProtocolTemplateItem } from '@/types';
 import {
   buildProtocolCode, nextSeq, validateMask, todayEnsayoDate, parseEnsayoDate, pickMask, type SeqResetScope,
@@ -34,10 +35,14 @@ export function useEnsayosData(projectId: string) {
   return useQuery({
     queryKey: ['ensayos-data', projectId],
     queryFn: async (): Promise<EnsayosData> => {
-      const [protosRes, tmplsRes, sectorsRes] = await Promise.all([
-        supabase.from('protocols')
+      // v88 — protocols PAGINADO: PostgREST corta en 1000 filas en silencio y
+      // un proyecto grande mostraba la lista incompleta.
+      const [protos, tmplsRes, sectorsRes] = await Promise.all([
+        fetchAllPages<Protocol>((f, t) => supabase.from('protocols')
           .select('id, project_id, location_id, template_id, protocol_number, location_reference, status, protocol_code, ensayo_date, ensayo_time, sector_id, created_at')
-          .eq('project_id', projectId),
+          .eq('project_id', projectId)
+          .order('id', { ascending: true })
+          .range(f, t)),
         supabase.from('protocol_templates')
           .select('id, project_id, id_protocolo, name, is_hidden')
           .eq('project_id', projectId)
@@ -49,7 +54,7 @@ export function useEnsayosData(projectId: string) {
       const sectors = ((sectorsRes.data ?? []) as (ProjectSector & { sort_order?: number | null })[])
         .sort((a, b) => ((a.sort_order ?? 9999) - (b.sort_order ?? 9999)) || a.name.localeCompare(b.name));
       return {
-        protocols: (protosRes.data ?? []) as Protocol[],
+        protocols: protos,
         templates: (tmplsRes.data ?? []) as ProtocolTemplate[],
         sectors,
       };
@@ -93,12 +98,27 @@ function isCodeUniqueViolation(err: { code?: string; message?: string; details?:
 }
 
 async function fetchProjectCodes(projectId: string): Promise<string[]> {
-  const { data } = await supabase
-    .from('protocols')
-    .select('protocol_code')
-    .eq('project_id', projectId)
-    .not('protocol_code', 'is', null);
-  return ((data ?? []) as { protocol_code: string | null }[]).map(r => r.protocol_code!).filter(Boolean);
+  // v88 — PAGINADO (el seq se calculaba sobre las primeras 1000 filas) e
+  // incluye los códigos de la PAPELERA (paridad v43.2 del móvil: un código
+  // recién borrado no debe reusarse mientras la copia viva en recycle_bin).
+  type CodeRow = { protocol_code: string | null };
+  const [live, recycled] = await Promise.all([
+    fetchAllPages<CodeRow>((f, t) => supabase
+      .from('protocols')
+      .select('protocol_code')
+      .eq('project_id', projectId)
+      .not('protocol_code', 'is', null)
+      .order('id', { ascending: true })
+      .range(f, t)),
+    fetchAllPages<CodeRow>((f, t) => supabase
+      .from('recycle_bin')
+      .select('protocol_code')
+      .eq('project_id', projectId)
+      .not('protocol_code', 'is', null)
+      .order('id', { ascending: true })
+      .range(f, t)).catch(() => [] as CodeRow[]), // papelera best-effort
+  ]);
+  return [...live, ...recycled].map(r => r.protocol_code!).filter(Boolean);
 }
 
 export async function createEnsayoInstances(args: CreateEnsayosArgs): Promise<CreateEnsayosResult> {

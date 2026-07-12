@@ -1,5 +1,6 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { fetchAllPages } from '@lib/pagedFetch';
 import type { ProtocolItem, Evidence } from '@/types';
 
 const supabase = createClient();
@@ -14,14 +15,16 @@ const PRELOAD_GC = 30 * 60 * 1000;    // 30 min
 
 /** Núcleo del preload (reutilizado por el hook y por el prefetch al hover). */
 async function fetchProjectPreload(projectId: string): Promise<PreloadedProjectData> {
-      // 1. Get all protocol IDs for this project (non-draft)
-      const { data: protocols } = await supabase
+      // 1. Get all protocol IDs for this project (non-draft) — v88 PAGINADO
+      const protocols = await fetchAllPages<{ id: string }>((f, t) => supabase
         .from('protocols')
         .select('id')
         .eq('project_id', projectId)
-        .in('status', ['SUBMITTED', 'APPROVED', 'REJECTED']);
+        .in('status', ['SUBMITTED', 'APPROVED', 'REJECTED'])
+        .order('id', { ascending: true })
+        .range(f, t)).catch(() => [] as { id: string }[]);
 
-      const protocolIds = (protocols ?? []).map((p: { id: string }) => p.id);
+      const protocolIds = protocols.map((p: { id: string }) => p.id);
       if (protocolIds.length === 0) return { itemsByProtocol: {}, evidencesByProtocol: {} };
 
       // 2. Batch-load ALL protocol items for all protocols
@@ -29,12 +32,16 @@ async function fetchProjectPreload(projectId: string): Promise<PreloadedProjectD
       const allItems: ProtocolItem[] = [];
       for (let i = 0; i < protocolIds.length; i += CHUNK) {
         const batch = protocolIds.slice(i, i + CHUNK);
-        const { data } = await supabase
+        // v88 — PAGINADO: 50 protocolos × ~100 items superan el cap de 1000 y
+        // el export del dossier salía con fichas VACÍAS en silencio.
+        const data = await fetchAllPages<ProtocolItem>((f, t) => supabase
           .from('protocol_items')
           .select('*')
           .in('protocol_id', batch)
-          .order('created_at', { ascending: true });
-        if (data) allItems.push(...(data as ProtocolItem[]));
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(f, t)).catch(() => [] as ProtocolItem[]);
+        allItems.push(...data);
       }
 
       // 3. Batch-load ALL evidences for all items
@@ -42,11 +49,13 @@ async function fetchProjectPreload(projectId: string): Promise<PreloadedProjectD
       const allEvidences: Evidence[] = [];
       for (let i = 0; i < allItemIds.length; i += CHUNK) {
         const batch = allItemIds.slice(i, i + CHUNK);
-        const { data } = await supabase
+        const data = await fetchAllPages<Evidence>((f, t) => supabase
           .from('evidences')
           .select('*')
-          .in('protocol_item_id', batch);
-        if (data) allEvidences.push(...(data as Evidence[]));
+          .in('protocol_item_id', batch)
+          .order('id', { ascending: true })
+          .range(f, t)).catch(() => [] as Evidence[]);
+        allEvidences.push(...data);
       }
 
       // 4. Index by protocol_id

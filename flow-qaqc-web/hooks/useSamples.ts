@@ -5,6 +5,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { fetchAllPages } from '@lib/pagedFetch';
 import { buildSampleCode, nextSampleSeq, todaySampleDate } from '@lib/sampleCode';
 import type { Sample, Protocol } from '@/types';
 
@@ -22,7 +23,7 @@ export function useSamples(projectId: string) {
     queryKey: ['samples', projectId],
     queryFn: async (): Promise<SamplesData> => {
       const [smpRes, protoRes] = await Promise.all([
-        supabase.from('samples').select('*').eq('project_id', projectId).order('seq', { ascending: true }),
+        fetchAllPages((f, t) => supabase.from('samples').select('*').eq('project_id', projectId).order('seq', { ascending: true }).order('id', { ascending: true }).range(f, t)).then(rows => ({ data: rows, error: null })),
         supabase.from('protocols').select('sample_id').eq('project_id', projectId).not('sample_id', 'is', null),
       ]);
       const countBySample: Record<string, number> = {};
@@ -81,7 +82,8 @@ export function useCreateSample(projectId: string) {
       // Retry ante colisión del índice único samples_code_uniq_per_project (otro
       // dispositivo tomó el seq): re-lee los seqs, re-secuencia y reintenta (máx 5).
       for (let attempt = 0; attempt < 5; attempt++) {
-        const { data: existing } = await supabase.from('samples').select('seq').eq('project_id', projectId);
+        // v88 — PAGINADO: el próximo seq se calculaba sobre las primeras 1000.
+        const existing = await fetchAllPages<{ seq: number | null }>((f, t) => supabase.from('samples').select('seq').eq('project_id', projectId).order('id', { ascending: true }).range(f, t)).catch(() => [] as { seq: number | null }[]);
         const seq = nextSampleSeq(((existing ?? []) as { seq: number | null }[]).map(r => r.seq));
         const row = {
           id: crypto.randomUUID(),

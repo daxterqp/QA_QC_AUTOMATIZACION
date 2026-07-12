@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { fetchAllPages } from '@lib/pagedFetch';
 import type { Protocol, ProtocolItem, Evidence, Location, User } from '@/types';
 import type { PreloadedProjectData } from '@hooks/useProjectPreload';
 
@@ -33,15 +34,16 @@ export function useDossierProtocols(projectId: string) {
   return useQuery({
     queryKey: ['dossier-protocols', projectId],
     queryFn: async (): Promise<DossierProtocol[]> => {
-      const { data: protocols, error } = await supabase
+      // v88 — PAGINADO: sin range(), un dossier con >1000 ensayos salía
+      // INCOMPLETO en silencio (cap de PostgREST).
+      const ps = await fetchAllPages<Protocol>((f, t) => supabase
         .from('protocols')
         .select('*')
         .eq('project_id', projectId)
         .in('status', ['SUBMITTED', 'APPROVED', 'REJECTED'])
-        .order('protocol_number', { ascending: true });
-      if (error) throw error;
-
-      const ps = (protocols ?? []) as Protocol[];
+        .order('protocol_number', { ascending: true })
+        .order('id', { ascending: true })
+        .range(f, t));
       if (ps.length === 0) return [];
 
       // Batch-load locations and users
@@ -197,9 +199,12 @@ export async function fetchDossierProtocolFull(
       const CHUNK = 50;
       for (let i = 0; i < itemIds.length; i += CHUNK) {
         const batch = itemIds.slice(i, i + CHUNK);
-        const { data: evs } = await supabase
-          .from('evidences').select('*').in('protocol_item_id', batch);
-        if (evs) evidences.push(...(evs as Evidence[]));
+        // v88 — paginado también dentro del lote (50 items con muchas fotos
+        // pueden superar las 1000 evidencias del cap de PostgREST).
+        const evs = await fetchAllPages<Evidence>((f, t) => supabase
+          .from('evidences').select('*').in('protocol_item_id', batch)
+          .order('id', { ascending: true }).range(f, t)).catch(() => [] as Evidence[]);
+        evidences.push(...evs);
       }
     }
   }

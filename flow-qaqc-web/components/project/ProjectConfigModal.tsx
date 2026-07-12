@@ -14,7 +14,7 @@
  */
 
 import { useState } from 'react';
-import { X, Settings, Info, FileText, Timer, Map } from 'lucide-react';
+import { X, Settings, Info, FileText, Timer, Map, Sparkles } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
@@ -244,6 +244,63 @@ export function ProjectConfigModal({
                 { value: 'in_list_reassignable', label: 'Dentro de la lista — código flexible (renumera)' },
               ]}
             />
+          </Section>
+
+          {/* ── v88 — Asistente IA "FLOW" (el chat vive SOLO en el celular;
+              desde la PC el Creador lo activa, elige modelo y escribe la
+              descripción de la obra que FLOW usa como contexto). ── */}
+          <Section icon={<Sparkles size={14} />} title="Asistente IA — FLOW (móvil)" tone="primary">
+            <Check
+              label="Asistente de IA"
+              description="Chat inteligente del proyecto en el celular: consultas en lenguaje natural sobre ensayos, sectores y avance, con gráficos y voz."
+              value={!!flags.module_ai_assistant}
+              onToggle={() => toggleFlag('module_ai_assistant')}
+              emphasis
+            />
+            <div className={cn(
+              'flex flex-col gap-1.5 ml-4 pl-3 border-l-2 border-border transition-opacity',
+              flags.module_ai_assistant ? 'opacity-100' : 'opacity-40 pointer-events-none',
+            )}>
+              <SelectField label="Proveedor de IA"
+                helper="El mapeo proveedor+nivel al modelo real es del servidor; requiere su API key en secretos."
+                value={flags.ai_provider ?? 'claude'}
+                onChange={v => setFlag('ai_provider', v as any)}
+                options={[
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'gemini', label: 'Gemini' },
+                ]}
+                disabled={!flags.module_ai_assistant} />
+              <SelectField label="Nivel del modelo"
+                value={flags.ai_model_tier ?? 'economico'}
+                onChange={v => setFlag('ai_model_tier', v as any)}
+                options={[
+                  { value: 'economico', label: 'Económico' },
+                  { value: 'potente', label: 'Potente' },
+                  { value: 'maximo', label: 'Máximo' },
+                ]}
+                disabled={!flags.module_ai_assistant} />
+              <Check label="Botón rápido de FLOW"
+                description="Burbuja flotante arrastrable para abrir el asistente desde cualquier pantalla del proyecto (celular)."
+                value={flags.ai_quick_button !== false}
+                onToggle={() => setFlag('ai_quick_button', !(flags.ai_quick_button !== false))}
+                disabled={!flags.module_ai_assistant} />
+              <div className="px-2.5 py-2 bg-surface rounded border border-border">
+                <label className="block text-xs font-bold text-textPrimary mb-1">
+                  Descripción del proyecto (para FLOW)
+                </label>
+                <textarea
+                  value={flags.ai_project_description ?? ''}
+                  onChange={e => setFlag('ai_project_description', e.target.value.slice(0, 600))}
+                  disabled={!flags.module_ai_assistant}
+                  rows={4}
+                  placeholder="Ej.: Edificio multifamiliar de 12 pisos + 2 sótanos, 4 departamentos por piso. Estructuras de concreto armado; acabados desde el piso 3."
+                  className="w-full text-xs border border-border rounded px-2 py-1.5 resize-y focus:outline-none focus:border-primary"
+                />
+                <p className="text-[10px] text-textMuted mt-1">
+                  FLOW usa este texto como fuente de verdad del contexto de la obra (tipo de proyecto, pisos/tramos, detalles clave). Vacío → interpreta desde el nombre del proyecto, las ubicaciones (P1/Piso 1…) y los sectores.
+                </p>
+              </div>
+            </div>
           </Section>
 
           {/* ── 2. Módulo de Trazabilidad ──────────────────────────── */}

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
+import { fetchAllPages } from '@lib/pagedFetch';
 import type { Protocol, Location, PlanAnnotation, DashboardNote, User } from '@/types';
 
 const supabase = createClient();
@@ -10,13 +11,15 @@ export function useHistoricalProtocols(projectId: string) {
   return useQuery({
     queryKey: ['historical-protocols', projectId],
     queryFn: async (): Promise<Protocol[]> => {
-      const { data, error } = await supabase
+      // v88 — PAGINADO (cap 1000 de PostgREST); orden secundario por id para
+      // que la paginación sea estable ante created_at repetidos.
+      return await fetchAllPages<Protocol>((f, t) => supabase
         .from('protocols')
         .select('*')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as Protocol[];
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(f, t));
     },
     enabled: !!projectId,
   });

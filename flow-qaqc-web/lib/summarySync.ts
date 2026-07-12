@@ -78,21 +78,32 @@ export async function syncSummary(pid: string): Promise<SummaryRowData[]> {
   const cache = load(pid);
   // Solapamiento de 2 min: re-trae lo recientísimo para cerrar huecos por desfase
   // de reloj entre dispositivos (barato; son pocas filas). El merge es idempotente.
-  const since = Math.max(0, cache.cursor - 120_000);
-  const { data, error } = await supabase
-    .from('protocol_summary_rows')
-    .select('*')
-    .eq('project_id', pid)
-    .gt('updated_at', since)
-    .order('updated_at', { ascending: true }); // determinista: el cursor avanza al máximo realmente leído
-  if (error) {
-    console.warn('[summary] sync falló (¿corriste v38?):', error.message);
-    return Object.values(cache.rows);
-  }
+  let since = Math.max(0, cache.cursor - 120_000);
   let maxC = cache.cursor;
-  for (const r of (data ?? []) as SummaryRowData[]) {
-    cache.rows[r.protocol_id] = r;
-    if (typeof r.updated_at === 'number' && r.updated_at > maxC) maxC = r.updated_at;
+  // v88 — Bucle de páginas: PostgREST corta en 1000 filas; con el order por
+  // updated_at el cursor avanza y se sigue pidiendo hasta agotar en ESTA
+  // pasada (antes la primera carga de un proyecto grande quedaba a medias).
+  for (;;) {
+    const { data, error } = await supabase
+      .from('protocol_summary_rows')
+      .select('*')
+      .eq('project_id', pid)
+      .gt('updated_at', since)
+      .order('updated_at', { ascending: true }); // determinista: el cursor avanza al máximo realmente leído
+    if (error) {
+      console.warn('[summary] sync falló (¿corriste v38?):', error.message);
+      return Object.values(cache.rows);
+    }
+    const page = (data ?? []) as SummaryRowData[];
+    for (const r of page) {
+      cache.rows[r.protocol_id] = r;
+      if (typeof r.updated_at === 'number' && r.updated_at > maxC) maxC = r.updated_at;
+    }
+    if (page.length < 1000) break;
+    const last = page[page.length - 1];
+    const lastTs = typeof last?.updated_at === 'number' ? last.updated_at : 0;
+    if (lastTs <= since) break; // sin avance (timestamps repetidos): evitar bucle infinito
+    since = lastTs;
   }
   cache.cursor = maxC;
   save(pid, cache);

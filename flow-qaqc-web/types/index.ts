@@ -100,6 +100,9 @@ export interface ProjectFeatureFlags {
   module_email_reports?: boolean;
   /** v75 — Módulo Asistente de IA (chat del proyecto, solo móvil por ahora). Default OFF. */
   module_ai_assistant?: boolean;
+  /** v87 — Descripción de la obra escrita por el Creador: FLOW (móvil) la usa
+   *  como fuente de verdad del contexto del proyecto. */
+  ai_project_description?: string;
   /** v75 — Nivel de modelo del Asistente IA (mapeo a modelo real es server-side). Default 'economico'. */
   ai_model_tier?: 'economico' | 'potente' | 'maximo';
   /** v76 — Proveedor de IA del asistente (mapeo a modelo real es server-side). Default 'claude'. */
@@ -168,6 +171,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_summary_tables: false,
   module_email_reports: false,
   module_ai_assistant: false,
+  ai_project_description: '',
   ai_model_tier: 'economico',
   ai_provider: 'claude',
   ai_quick_button: true,
