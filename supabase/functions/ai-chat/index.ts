@@ -100,6 +100,15 @@ Deno.serve(async (req: Request) => {
         .map(p => p.slice(0, 140))
       : [];
 
+    // Ubicación GPS del usuario (opcional, viene del móvil) — saneada.
+    const rawLoc: unknown = body?.ubicacion;
+    // deno-lint-ignore no-explicit-any
+    const locAny = rawLoc as any;
+    const ubicacion = (locAny && typeof locAny.lat === "number" && typeof locAny.lng === "number"
+      && Math.abs(locAny.lat) <= 90 && Math.abs(locAny.lng) <= 180)
+      ? { lat: locAny.lat, lng: locAny.lng, precisionM: typeof locAny.precisionM === "number" ? Math.round(locAny.precisionM) : null }
+      : null;
+
     // ── Acceso al proyecto + proveedor/tier (RLS: sin acceso, viene vacío) ──
     const { data: proj } = await supabase.from("projects")
       .select("id, name, feature_flags").eq("id", projectId).maybeSingle();
@@ -122,11 +131,36 @@ Deno.serve(async (req: Request) => {
       return json({ error: `${secretName} no configurada (supabase secrets set). Cambie el proveedor de IA del proyecto o configure la clave.` }, 500);
     }
 
+    // ── Radiografía del proyecto: qué HAY cargado y qué NO (v84) ──
+    // Conteos head baratos en paralelo → el system prompt le dice a la IA de
+    // antemano "no hay sectores / no hay muestras / etc." para que no los
+    // busque a ciegas ni se confunda.
+    const head = (table: string) =>
+      supabase.from(table).select("id", { count: "exact", head: true }).eq("project_id", projectId);
+    const [cSect, cSectGeo, cTipos, cEns, cMues, cNcs, cUbic] = await Promise.all([
+      head("project_sectors"),
+      head("project_sectors").not("points_json", "is", null),
+      head("protocol_templates"),
+      head("protocols").in("status", ["SUBMITTED", "APPROVED", "REJECTED"]),
+      head("samples"),
+      head("non_conformities"),
+      head("locations"),
+    ]);
+    const snapshot = {
+      sectores: cSect.count ?? 0,
+      sectoresConGeometria: cSectGeo.count ?? 0,
+      tiposDeEnsayo: cTipos.count ?? 0,
+      ensayos: cEns.count ?? 0,
+      muestras: cMues.count ?? 0,
+      noConformidades: cNcs.count ?? 0,
+      ubicaciones: cUbic.count ?? 0,
+    };
+
     // ── Tools con projectId cerrado en closure ──
-    const tools = buildTools(supabase, projectId);
+    const tools = buildTools(supabase, projectId, ubicacion);
     const system = buildSystemPrompt({
       userName, userRole: profile?.role ?? null, projectName: String(proj.name ?? "el proyecto"), isFirstTurn,
-      preferencias,
+      preferencias, snapshot, tieneUbicacion: !!ubicacion,
     });
 
     const args = {

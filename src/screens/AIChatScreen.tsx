@@ -1173,6 +1173,8 @@ export default function AIChatScreen({ navigation, route }: Props) {
   }, [projectId, projectName, navigation, markActionDone, openEnsayo, currentUser]);
 
   const lastMsgId = messages.length ? messages[messages.length - 1].id : null;
+  /** true mientras se ve la bienvenida navy (incluida su salida animada). */
+  const onWelcome = messages.length === 0 || welcomeLeaving;
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
@@ -1185,7 +1187,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         {!isUser && (
           <PulseIn fresh={Date.now() - item.at < 4000}>
             <View style={styles.avatar}>
-              <SharkLogo size={16} color={Colors.white} />
+              <SharkLogo size={22} color={Colors.white} />
             </View>
           </PulseIn>
         )}
@@ -1367,7 +1369,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
                   <View style={[styles.msgRow, styles.msgRowAI]}>
                     {/* v82 — El tiburón gira DENTRO del círculo del avatar
                         mientras FLOW carga (no dentro del mensaje). */}
-                    <View style={styles.avatar}><SharkSpinner size={16} color={Colors.white} /></View>
+                    <View style={styles.avatar}><SharkSpinner size={22} color={Colors.white} /></View>
                     <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
                       <TypingDots />
                     </View>
@@ -1435,13 +1437,16 @@ export default function AIChatScreen({ navigation, route }: Props) {
         )}
 
         {/* ── Barra de entrada ── */}
-        <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        {/* v84 — En la bienvenida la barra se integra al navy: fondo navy y
+            cuadro/botones translucidos, mismo estilo que los chips de arriba
+            (y que el login). En conversación mantiene el blanco. */}
+        <View style={[styles.inputBar, onWelcome && styles.inputBarWelcome, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, onWelcome && styles.inputWelcome]}
             value={input}
             onChangeText={setInput}
             placeholder={micActive ? 'Escuchando…' : '¿Cómo puedo ayudarle hoy?'}
-            placeholderTextColor={micActive ? Colors.primary : Colors.textMuted}
+            placeholderTextColor={micActive ? Colors.primary : onWelcome ? '#b9cbe4' : Colors.textMuted}
             multiline
             maxLength={2000}
             // Mientras dicta, el teclado queda bloqueado: una edición manual
@@ -1453,19 +1458,19 @@ export default function AIChatScreen({ navigation, route }: Props) {
               (igual que Claude: dictado y envío son cosas distintas). */}
           <Animated.View style={{ transform: [{ scale: micPulse }] }}>
             <TouchableOpacity
-              style={[styles.micBtn, micActive && styles.micBtnActive]}
+              style={[styles.micBtn, onWelcome && styles.chipBtnWelcome, micActive && styles.micBtnActive]}
               onPress={startMic}
               disabled={sending}
               activeOpacity={0.8}
             >
-              <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
+              <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive || onWelcome ? Colors.white : Colors.primary} />
             </TouchableOpacity>
           </Animated.View>
           {/* v82 — Mientras FLOW responde: CUADRADO de stop (detiene el
               procesamiento). Con texto: enviar. Sin texto: modo voz. */}
           {sending ? (
             <TouchableOpacity
-              style={styles.stopBtn}
+              style={[styles.stopBtn, onWelcome && styles.chipBtnWelcome]}
               onPress={cancelGeneration}
               activeOpacity={0.8}
             >
@@ -1481,7 +1486,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={styles.voiceModeBtn}
+              style={[styles.voiceModeBtn, onWelcome && styles.chipBtnWelcome]}
               onPress={enterVoiceMode}
               activeOpacity={0.8}
             >
@@ -1631,7 +1636,7 @@ const styles = StyleSheet.create({
   // v80 — 3 preguntas fijas (sin carrusel), mismo ancho.
   sugFixedWrap: { width: '88%', marginTop: 16, gap: 10 },
   sugCard: {
-    width: '100%', height: 50,
+    width: '100%', minHeight: 50, paddingVertical: 8,
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.12)',
@@ -1735,6 +1740,9 @@ const styles = StyleSheet.create({
   typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.textSecondary },
 
   // Input
+  inputBarWelcome: { backgroundColor: Colors.navy },
+  inputWelcome: { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.34)', color: Colors.white },
+  chipBtnWelcome: { backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.34)' },
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     paddingHorizontal: 12, paddingTop: 10,

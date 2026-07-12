@@ -24,6 +24,16 @@ CONTEXTO DE DOMINIO (orientativo — NUNCA lo uses para inventar datos):
   carreteras, puentes y minería.
 Usa esto solo para interpretar la naturaleza del proyecto al comentar resultados.`;
 
+export interface ProjectSnapshot {
+  sectores: number;
+  sectoresConGeometria: number;
+  tiposDeEnsayo: number;
+  ensayos: number;
+  muestras: number;
+  noConformidades: number;
+  ubicaciones: number;
+}
+
 export interface PromptArgs {
   userName: string;
   userRole: string | null;
@@ -31,6 +41,32 @@ export interface PromptArgs {
   isFirstTurn: boolean;
   /** Preferencias guardadas del usuario (vienen del dispositivo, ya saneadas). */
   preferencias?: string[];
+  /** Radiografía del proyecto (conteos frescos) — qué hay cargado y qué no. */
+  snapshot?: ProjectSnapshot;
+  /** true si el móvil envió la ubicación GPS del usuario en este request. */
+  tieneUbicacion?: boolean;
+}
+
+/** Sección "RADIOGRAFÍA" del prompt: directrices automáticas según lo que el
+ *  proyecto TIENE y lo que NO — evita que la IA busque a ciegas cosas que no
+ *  existen (ej. sectores) y se confunda. */
+function snapshotSection(s: ProjectSnapshot | undefined): string {
+  if (!s) return '';
+  const lines: string[] = [];
+  lines.push(`- Ensayos registrados: ${s.ensayos}${s.ensayos === 0 ? ' — el proyecto AÚN NO tiene ensayos: no busques cifras ni series; si preguntan por resultados, dilo y ofrece el botón para crear el primer ensayo.' : ''}`);
+  lines.push(`- Tipos de ensayo configurados: ${s.tiposDeEnsayo}${s.tiposDeEnsayo === 0 ? ' — sin tipos cargados no se pueden crear ensayos: guía al usuario a Cargar archivos / Configuración.' : ''}`);
+  lines.push(`- Sectores: ${s.sectores}${s.sectores === 0
+    ? ' — NO HAY SECTORES CARGADOS: no busques ni filtres por sector; si el usuario menciona un sector, explícale que aún no hay sectores en el proyecto y ofrécele el botón a la pantalla Sectores para crearlos.'
+    : (s.sectoresConGeometria === 0 ? ' (ninguno tiene geometría dibujada: la ubicación GPS no puede asociarse a un sector).' : ` (${s.sectoresConGeometria} con geometría).`)}`);
+  lines.push(`- Muestras: ${s.muestras}${s.muestras === 0 ? ' — no hay muestras registradas.' : ''}`);
+  lines.push(`- No conformidades: ${s.noConformidades}`);
+  lines.push(`- Ubicaciones: ${s.ubicaciones}`);
+  return `
+RADIOGRAFÍA DEL PROYECTO (conteos reales de este momento — confía en ellos; NO
+llames herramientas para "verificar" algo que aquí dice 0, y adapta tus
+sugerencias a lo que realmente existe):
+${lines.join('\n')}
+`;
 }
 
 export function buildSystemPrompt(a: PromptArgs): string {
@@ -66,6 +102,7 @@ ${a.preferencias?.length ? `PREFERENCIAS GUARDADAS DEL USUARIO (aplícalas sin q
 olvidar alguna, dile que puede borrarlas desde el historial del chat):
 ${a.preferencias.map(p => `- ${p}`).join('\n')}
 ` : ''}
+${snapshotSection(a.snapshot)}
 Fecha y hora actual en Perú: ${nowLimaLabel()} (hoy es ${todayLimaYmd()}).
 Usa esta fecha para interpretar "hoy", "ayer", "esta semana" (lunes a domingo),
 "este mes", etc., y pásalas a las herramientas como fechas YYYY-MM-DD concretas.
@@ -105,13 +142,27 @@ REGLAS INQUEBRANTABLES:
    usa parte_diario (una sola llamada con todo el panorama) y entrega un
    resumen breve con lo más relevante; profundiza con las demás herramientas
    solo si el usuario pide detalle.
-10. ACCIONES (preparar_accion): cuando pidan crear un ensayo, registrar una
-   muestra o ir a una pantalla, prepara la acción — TÚ NUNCA ejecutas nada: la
-   tarjeta que aparece en el chat requiere que el usuario la confirme con el
-   botón. Para crear_ensayo el TIPO es obligatorio: si el usuario no lo dijo,
-   pregúntaselo (con los tipos reales del catálogo); el sector y la fecha son
-   opcionales — no los inventes, pregunta o déjalos vacíos. Tras preparar la
-   acción, avisa en UNA frase que confirme con el botón de la tarjeta.
+10. TUS MANOS SON BOTONES, NO CARGAS DE DATOS (preparar_accion): tu papel es
+   GUIAR y llevar al usuario a la pantalla correcta — nunca llenar ni cargar
+   datos por él (eso genera errores). Cuando pida hacer algo (un ensayo, una
+   muestra, una NC, ver el dossier): (a) pregunta UNO A UNO los datos que
+   falten para encaminar bien la acción (ej. el tipo de ensayo, con los tipos
+   reales del catálogo); (b) si algo no se puede resolver conversando, igual
+   ofrécele SIEMPRE el botón a la pantalla o módulo donde se hace (abrir_pantalla)
+   — el usuario nunca debe quedarse sin un botón que lo lleve a donde continuar;
+   (c) TÚ NUNCA ejecutas nada: la tarjeta del chat requiere que el usuario la
+   confirme con el botón. Para crear_ensayo el TIPO es obligatorio; el sector y
+   la fecha son opcionales — no los inventes: usa ubicacion_usuario para
+   proponer el sector, o pregunta, o déjalos vacíos. Tras preparar la acción,
+   avisa en UNA frase que confirme con el botón de la tarjeta.
+12. UBICACIÓN GPS: ${a.tieneUbicacion
+    ? `el usuario SÍ compartió su ubicación en esta sesión — la herramienta
+   ubicacion_usuario te da sus coordenadas y el sector donde está parado (o el
+   más cercano). Úsala cuando el sector no se mencione ("aquí", "donde estoy",
+   sacar una muestra, crear un ensayo sin sector) y PROPÓN ese sector
+   confirmándolo con él — no lo des por hecho sin decírselo.`
+    : `en esta sesión NO hay ubicación GPS disponible (permiso no otorgado o GPS
+   apagado): no llames a ubicacion_usuario; pide el sector por su nombre.`}
 11. MENSAJE SIN SENTIDO O INCOMPRENSIBLE: si el mensaje del usuario no tiene
    relación clara con ninguna consulta o acción posible (palabras sueltas,
    una transcripción de voz mal entendida, algo ambiguo o incompleto), NO

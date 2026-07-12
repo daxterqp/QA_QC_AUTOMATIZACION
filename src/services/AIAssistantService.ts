@@ -11,7 +11,49 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
 import { supabase } from '@config/supabase';
+
+// ── Ubicación GPS del usuario (v84) ──────────────────────────────────────────
+// Viaja con cada request: el server la usa (tool ubicacion_usuario) para saber
+// en qué sector está parado el usuario cuando pide algo "aquí"/"donde estoy".
+// Best-effort SIEMPRE: sin permiso, sin fix o timeout → null y el chat sigue.
+
+interface UserLocationPayload { lat: number; lng: number; precisionM: number | null }
+
+let locCache: { at: number; loc: UserLocationPayload | null } | null = null;
+
+async function getLocationSafe(): Promise<UserLocationPayload | null> {
+  // Cache 90s: no re-fijar GPS en cada mensaje de la conversación.
+  if (locCache && Date.now() - locCache.at < 90_000) return locCache.loc;
+  try {
+    let perm = await Location.getForegroundPermissionsAsync();
+    if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
+    if (!perm.granted) {
+      locCache = { at: Date.now(), loc: null };
+      return null;
+    }
+    // Último fix conocido (instantáneo) si es fresco; si no, fix real acotado
+    // a 5 s — la respuesta del chat no puede quedar rehén del GPS.
+    const known = await Location.getLastKnownPositionAsync({ maxAge: 120_000 }).catch(() => null);
+    const pos = known ?? await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+    ]);
+    const loc = pos
+      ? {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          precisionM: typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null,
+        }
+      : null;
+    locCache = { at: Date.now(), loc };
+    return loc;
+  } catch {
+    locCache = { at: Date.now(), loc: null };
+    return null;
+  }
+}
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
@@ -66,7 +108,10 @@ export async function sendChatMessage(args: {
 }): Promise<AIChatReply> {
   // Preferencias LOCALES del usuario (E3): viajan en cada request y el server
   // las inyecta al system prompt ("siempre por sector", etc.).
-  const preferencias = await loadPrefs(args.projectId).catch(() => [] as string[]);
+  const [preferencias, ubicacion] = await Promise.all([
+    loadPrefs(args.projectId).catch(() => [] as string[]),
+    getLocationSafe(),
+  ]);
   const { data, error } = await supabase.functions.invoke('ai-chat', {
     body: {
       projectId: args.projectId,
@@ -74,6 +119,7 @@ export async function sendChatMessage(args: {
       history: args.history.slice(-8),
       isFirstTurn: args.isFirstTurn,
       ...(preferencias.length ? { preferencias } : {}),
+      ...(ubicacion ? { ubicacion } : {}),
     },
   });
   if (error) {

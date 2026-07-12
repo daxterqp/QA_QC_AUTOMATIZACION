@@ -88,6 +88,77 @@ function resolveByName<T extends { nombre: string }>(items: T[], query: string):
   return { candidatos: contains };
 }
 
+// ── v84 — Ubicación GPS → sector (mirror de CoordinateSystem.ts del móvil:
+// pointInPolygon ray-casting + findSectorByPointWithTolerance) ───────────────
+
+interface LatLng { lat: number; lng: number }
+
+const M_PER_DEG_LAT = 111_320;
+
+function pointInPolygon(point: LatLng, polygon: LatLng[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  const x = point.lng, y = point.lat;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lng, yi = polygon[i].lat;
+    const xj = polygon[j].lng, yj = polygon[j].lat;
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function pointSegDistanceM(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** Dentro de un sector → distancia 0; fuera → el más cercano por distancia al
+ *  borde, solo si queda dentro de `toleranceM`. */
+function sectorForPoint(
+  point: LatLng,
+  sectors: { id: string; name: string; points: LatLng[] | null }[],
+  toleranceM: number,
+): { id: string; name: string; distanceM: number } | null {
+  for (const s of sectors) {
+    if (!s.points || s.points.length < 3) continue;
+    if (pointInPolygon(point, s.points)) return { id: s.id, name: s.name, distanceM: 0 };
+  }
+  let best: { id: string; name: string; distanceM: number } | null = null;
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((point.lat * Math.PI) / 180);
+  for (const s of sectors) {
+    if (!s.points || s.points.length < 3) continue;
+    let dmin = Infinity;
+    const verts = s.points.map(v => ({ x: (v.lng - point.lng) * mPerDegLng, y: (v.lat - point.lat) * M_PER_DEG_LAT }));
+    for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+      const d = pointSegDistanceM(0, 0, verts[j].x, verts[j].y, verts[i].x, verts[i].y);
+      if (d < dmin) dmin = d;
+    }
+    if (!best || dmin < best.distanceM) best = { id: s.id, name: s.name, distanceM: dmin };
+  }
+  if (best && best.distanceM <= toleranceM) return best;
+  return null;
+}
+
+/** points_json de project_sectors: array de {lat,lng} (JSONB en la nube). */
+// deno-lint-ignore no-explicit-any
+function parseSectorPoints(raw: any): LatLng[] | null {
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(arr)) return null;
+    const pts = arr.filter((p) => typeof p?.lat === 'number' && typeof p?.lng === 'number')
+      .map((p) => ({ lat: p.lat, lng: p.lng }));
+    return pts.length >= 3 ? pts : null;
+  } catch { return null; }
+}
+
+/** Ubicación GPS del usuario tal como llega del móvil (ya saneada en index.ts). */
+export interface UserLocation { lat: number; lng: number; precisionM?: number | null }
+
 // ── Estadística mínima (mirror del patrón polyfit de SummaryTablesScreen) ───
 
 function linearSlopePerDay(points: { x: number; y: number }[]): number | null {
@@ -359,8 +430,48 @@ const COMMON_FILTER_PROPS = {
   estado: { type: 'string', enum: ['APPROVED', 'SUBMITTED', 'REJECTED'], description: 'Filtrar por estado (aprobado / en revisión / rechazado)' },
 };
 
-export function buildTools(supabase: SupabaseClient, projectId: string): ToolDef[] {
+export function buildTools(supabase: SupabaseClient, projectId: string, ubicacion?: UserLocation | null): ToolDef[] {
   return [
+    {
+      name: 'ubicacion_usuario',
+      description: 'Devuelve la ubicación GPS actual del usuario y, si el proyecto tiene sectores con geometría, EN QUÉ SECTOR está parado (o el más cercano, con su distancia en metros). Úsala cuando una acción o consulta necesite un sector y el usuario NO lo haya dicho (ej. "quiero sacar una muestra aquí", "crea un ensayo donde estoy") — propón ese sector y confírmalo con él. Si no hay ubicación disponible, pregunta el sector como siempre.',
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => {
+        if (!ubicacion) {
+          return { disponible: false, mensaje: 'El usuario no compartió su ubicación (GPS apagado o sin permiso). Pide el sector por su nombre.' };
+        }
+        const { data, error } = await supabase.from('project_sectors')
+          .select('id, name, points_json').eq('project_id', projectId);
+        if (error) throw new Error(error.message);
+        const sectors = (data ?? []).map((s) => ({
+          id: String(s.id), name: String(s.name ?? ''), points: parseSectorPoints(s.points_json),
+        }));
+        const conGeo = sectors.filter(s => s.points);
+        const base = {
+          disponible: true,
+          lat: ubicacion.lat, lng: ubicacion.lng,
+          precision_m: ubicacion.precisionM ?? null,
+        };
+        if (sectors.length === 0) {
+          return { ...base, sector: null, mensaje: 'El proyecto no tiene sectores cargados; no se puede ubicar al usuario dentro de uno.' };
+        }
+        if (conGeo.length === 0) {
+          return { ...base, sector: null, mensaje: 'Los sectores del proyecto no tienen geometría (polígonos) cargada; no se puede saber en cuál está el usuario.' };
+        }
+        // Tolerancia 100 m: fuera de eso, decir "no está en ningún sector".
+        const hit = sectorForPoint({ lat: ubicacion.lat, lng: ubicacion.lng }, conGeo, 100);
+        if (!hit) {
+          return { ...base, sector: null, mensaje: 'El usuario no está dentro (ni a menos de 100 m) de ningún sector con geometría.' };
+        }
+        return {
+          ...base,
+          sector: { id: hit.id, nombre: hit.name, distancia_m: Math.round(hit.distanceM) },
+          mensaje: hit.distanceM === 0
+            ? `El usuario está DENTRO del sector "${hit.name}".`
+            : `El usuario está a ~${Math.round(hit.distanceM)} m del sector "${hit.name}" (el más cercano).`,
+        };
+      },
+    },
     {
       name: 'catalogo_proyecto',
       description: 'Devuelve los catálogos reales del proyecto: sectores (id+nombre), tipos de ensayo (template_id, código, nombre y sus columnas de resultados con su key exacta), ubicaciones, rango de fechas con datos y total de ensayos registrados. Úsala PRIMERO cuando el usuario mencione un sector, tipo de ensayo o resultado por su nombre, para resolverlo a IDs/keys reales.',
