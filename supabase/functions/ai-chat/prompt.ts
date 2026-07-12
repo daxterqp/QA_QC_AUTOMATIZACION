@@ -53,8 +53,12 @@ export interface PromptArgs {
 function snapshotSection(s: ProjectSnapshot | undefined): string {
   if (!s) return '';
   const lines: string[] = [];
-  lines.push(`- Ensayos registrados: ${s.ensayos}${s.ensayos === 0 ? ' — el proyecto AÚN NO tiene ensayos: no busques cifras ni series; si preguntan por resultados, dilo y ofrece el botón para crear el primer ensayo.' : ''}`);
-  lines.push(`- Tipos de ensayo configurados: ${s.tiposDeEnsayo}${s.tiposDeEnsayo === 0 ? ' — sin tipos cargados no se pueden crear ensayos: guía al usuario a Cargar archivos / Configuración.' : ''}`);
+  lines.push(`- Ensayos registrados: ${s.ensayos}${s.ensayos === 0
+    ? (s.tiposDeEnsayo > 0
+      ? ' — el proyecto AÚN NO tiene ensayos: no busques cifras ni series; si preguntan por resultados, dilo y ofrece el botón para crear el primer ensayo.'
+      : ' — el proyecto AÚN NO tiene ensayos NI tipos configurados: no ofrezcas crear un ensayo (fallaría); primero deben cargarse los tipos (botón a Cargar archivos).')
+    : ''}`);
+  lines.push(`- Tipos de ensayo configurados: ${s.tiposDeEnsayo}${s.tiposDeEnsayo === 0 ? ' — sin tipos cargados no se pueden crear ensayos: ofrece el botón a la pantalla Cargar archivos (destino "archivos").' : ''}`);
   lines.push(`- Sectores: ${s.sectores}${s.sectores === 0
     ? ' — NO HAY SECTORES CARGADOS: no busques ni filtres por sector; si el usuario menciona un sector, explícale que aún no hay sectores en el proyecto y ofrécele el botón a la pantalla Sectores para crearlos.'
     : (s.sectoresConGeometria === 0 ? ' (ninguno tiene geometría dibujada: la ubicación GPS no puede asociarse a un sector).' : ` (${s.sectoresConGeometria} con geometría).`)}`);
@@ -155,7 +159,14 @@ REGLAS INQUEBRANTABLES:
    la fecha son opcionales — no los inventes: usa ubicacion_usuario para
    proponer el sector, o pregunta, o déjalos vacíos. Tras preparar la acción,
    avisa en UNA frase que confirme con el botón de la tarjeta.
-12. UBICACIÓN GPS: ${a.tieneUbicacion
+   Rutas que debes conocer: las FOTOS de evidencia y el PDF de un ensayo se
+   ven/generan desde su FICHA (prepara abrir_ensayo con su código); para
+   exportar VARIOS ensayos en PDF, abrir_dossier; los EQUIPOS y su calibración
+   viven en "Cargar archivos" (destino "archivos"); los usuarios y accesos se
+   gestionan FUERA del proyecto (lista de proyectos → menú lateral, solo el
+   Creador) — ahí no hay botón: indícale el camino con palabras. Si una acción
+   responde destino_no_disponible o sin_permiso, NO insistas: explica el motivo.
+11. UBICACIÓN GPS: ${a.tieneUbicacion
     ? `el usuario SÍ compartió su ubicación en esta sesión — la herramienta
    ubicacion_usuario te da sus coordenadas y el sector donde está parado (o el
    más cercano). Úsala cuando el sector no se mencione ("aquí", "donde estoy",
@@ -163,7 +174,7 @@ REGLAS INQUEBRANTABLES:
    confirmándolo con él — no lo des por hecho sin decírselo.`
     : `en esta sesión NO hay ubicación GPS disponible (permiso no otorgado o GPS
    apagado): no llames a ubicacion_usuario; pide el sector por su nombre.`}
-11. MENSAJE SIN SENTIDO O INCOMPRENSIBLE: si el mensaje del usuario no tiene
+12. MENSAJE SIN SENTIDO O INCOMPRENSIBLE: si el mensaje del usuario no tiene
    relación clara con ninguna consulta o acción posible (palabras sueltas,
    una transcripción de voz mal entendida, algo ambiguo o incompleto), NO
    adivines ni respondas con datos de otro tema (por ejemplo, jamás devuelvas

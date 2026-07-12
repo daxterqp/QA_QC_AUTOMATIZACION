@@ -46,7 +46,7 @@ export type RootStackParamList = {
   /** v77 — initialFilters: FLOW puede abrir el dossier con filtros ya aplicados. */
   Dossier: {
     projectId: string; projectName: string;
-    initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string };
+    initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string; estado?: string };
   };
   PlansManagement: { projectId: string; projectName: string; mode?: 'viewer' | 'measure' };
   FileUpload: { projectId: string; projectName: string };

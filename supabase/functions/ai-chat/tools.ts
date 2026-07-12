@@ -31,14 +31,45 @@ export const ACTION_KEY = '__action';
 export const LINKS_KEY = '__links';
 
 /** Pantallas del proyecto a las que Flo puede llevar al usuario. */
-const DESTINOS = ['ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos'] as const;
+const DESTINOS = ['ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos', 'archivos', 'ubicaciones'] as const;
 const DESTINO_LABEL: Record<string, string> = {
   ensayos: 'Ensayos', dossier: 'Dossier de protocolos', muestras: 'Muestras',
   mapa: 'Mapa del proyecto', sectores: 'Sectores', trazabilidad: 'Trazabilidad',
   tablas_resumen: 'Tablas Resumen', configuracion: 'Configuración del proyecto',
   papelera: 'Papelera de reciclaje', topografia: 'Datos topográficos',
   planos: 'Planos', contactos: 'Contactos',
+  archivos: 'Cargar archivos', ubicaciones: 'Ubicaciones / Puntos de control',
 };
+
+// ── v85 — Disponibilidad de destinos por FLAGS del proyecto y ROL ────────────
+// Mirror de los gates del menú del proyecto (ProjectMenuScreen): un botón del
+// chat jamás debe llevar a un módulo que el menú le oculta al usuario.
+// Flags: solo bloquea el false EXPLÍCITO (undefined = default del móvil = ON).
+const DESTINO_FLAG: Record<string, string> = {
+  mapa: 'map_enabled', sectores: 'map_enabled',
+  tablas_resumen: 'module_summary_tables', topografia: 'module_topo',
+  planos: 'module_plans', contactos: 'module_contacts',
+  trazabilidad: 'traceability_module', ubicaciones: 'module_protocols_by_location',
+};
+const DESTINO_ROLES: Record<string, string[]> = {
+  papelera: ['CREATOR', 'RESIDENT'],
+  topografia: ['CREATOR', 'RESIDENT'],
+  archivos: ['CREATOR', 'RESIDENT'],
+  configuracion: ['CREATOR'],
+};
+
+/** null si el destino está disponible; si no, el motivo (para el modelo). */
+function destinoNoDisponible(destino: string, acceso?: AccessCtx | null): string | null {
+  const flag = DESTINO_FLAG[destino];
+  if (flag && acceso?.flags && (acceso.flags as Record<string, unknown>)[flag] === false) {
+    return `El módulo "${DESTINO_LABEL[destino]}" está DESACTIVADO en este proyecto — no prepares el botón; dile al usuario que el Creador puede activarlo en Configuración.`;
+  }
+  const roles = DESTINO_ROLES[destino];
+  if (roles && !roles.includes(String(acceso?.userRole ?? ''))) {
+    return `La pantalla "${DESTINO_LABEL[destino]}" no está disponible para el rol del usuario — no prepares el botón; explícale quién puede (${roles.map(r => r === 'CREATOR' ? 'Creador' : 'Jefe de obra').join(' / ')}).`;
+  }
+  return null;
+}
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -159,6 +190,9 @@ function parseSectorPoints(raw: any): LatLng[] | null {
 /** Ubicación GPS del usuario tal como llega del móvil (ya saneada en index.ts). */
 export interface UserLocation { lat: number; lng: number; precisionM?: number | null }
 
+/** Rol y feature_flags del usuario/proyecto (para gatear destinos y acciones). */
+export interface AccessCtx { userRole?: string | null; flags?: Record<string, unknown> | null }
+
 // ── Estadística mínima (mirror del patrón polyfit de SummaryTablesScreen) ───
 
 function linearSlopePerDay(points: { x: number; y: number }[]): number | null {
@@ -237,6 +271,8 @@ interface CommonFilters {
   template_id?: string; tipo_nombre?: string;
   sector_id?: string; sector_nombre?: string;
   estado?: 'APPROVED' | 'SUBMITTED' | 'REJECTED';
+  /** Código de ensayo (igualdad case-insensitive) — v85: "¿quién aprobó el PRD-7?". */
+  codigo?: string;
 }
 
 /** Resuelve nombres → ids contra el catálogo. Devuelve error estructurado si es ambiguo. */
@@ -317,6 +353,12 @@ function protocolsQuery(supabase: SupabaseClient, projectId: string, f: CommonFi
   if (resolved.templateId) q = q.eq('template_id', resolved.templateId);
   if (resolved.sectorId) q = q.eq('sector_id', resolved.sectorId);
   if (f.estado) q = q.eq('status', f.estado);
+  if (typeof f.codigo === 'string' && f.codigo.trim()) {
+    // Igualdad case-insensitive con comodines neutralizados (mismo criterio
+    // que findByCode de preparar_accion).
+    const safe = f.codigo.trim().replace(/[%*]/g, '').replace(/_/g, '\\_');
+    if (safe) q = q.ilike('protocol_code', safe);
+  }
   return q;
 }
 
@@ -345,6 +387,38 @@ async function valueCoverageNote(supabase: SupabaseClient, projectId: string, f:
     }
   } catch { /* la advertencia es best-effort */ }
   return undefined;
+}
+
+/** v85 — Valida una column_key contra las columnas reales del catálogo: un
+ *  typo del modelo ('grado_compactacion' vs 'compactacion:A') producía "0
+ *  datos" indistinguible de "no hay datos" y respuestas falsas al usuario. */
+function columnaInvalida(cat: Catalog, templateId: string | undefined, key: string): Record<string, unknown> | null {
+  const tpl = templateId ? cat.tipos.find(t => t.template_id === templateId) : undefined;
+  const cols = tpl ? tpl.columnas : cat.tipos.flatMap(t => t.columnas);
+  // Sin columnas conocidas (resumen aún no sincronizado) no se puede validar:
+  // dejar pasar — el flujo normal reportará la cobertura.
+  if (cols.length === 0) return null;
+  if (cols.some(c => c.key === key)) return null;
+  const seen = new Set<string>();
+  const candidatas: { key: string; label: string }[] = [];
+  for (const c of cols) {
+    if (seen.has(c.key)) continue;
+    seen.add(c.key);
+    candidatas.push({ key: c.key, label: c.label });
+  }
+  return {
+    error: 'columna_inexistente',
+    consulta: key,
+    candidatas: candidatas.slice(0, 40),
+    mensaje: 'Esa column_key NO existe en el tipo de ensayo (no es que falten datos). Usa la key EXACTA de las candidatas.',
+  };
+}
+
+async function validarColumna(supabase: SupabaseClient, projectId: string, templateId: string | undefined, key: string): Promise<Record<string, unknown> | null> {
+  try {
+    const cat = await loadCatalog(supabase, projectId);
+    return columnaInvalida(cat, templateId, key);
+  } catch { return null; /* validación best-effort: nunca bloquear por sí misma */ }
 }
 
 // ── Helpers de fecha del parte diario (Lima) ─────────────────────────────────
@@ -430,7 +504,7 @@ const COMMON_FILTER_PROPS = {
   estado: { type: 'string', enum: ['APPROVED', 'SUBMITTED', 'REJECTED'], description: 'Filtrar por estado (aprobado / en revisión / rechazado)' },
 };
 
-export function buildTools(supabase: SupabaseClient, projectId: string, ubicacion?: UserLocation | null): ToolDef[] {
+export function buildTools(supabase: SupabaseClient, projectId: string, ubicacion?: UserLocation | null, acceso?: AccessCtx | null): ToolDef[] {
   return [
     {
       name: 'ubicacion_usuario',
@@ -546,11 +620,12 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
     },
     {
       name: 'listar_ensayos',
-      description: 'Lista ensayos (código, fecha, tipo, sector, ubicación, estado, quién lo realizó y quién lo aprobó), ordenados del más reciente al más antiguo. Máximo 20.',
+      description: 'Lista ensayos (código, fecha, tipo, sector, ubicación, estado, quién lo realizó y quién lo APROBÓ), ordenados del más reciente al más antiguo. Máximo 20. Acepta filtro por CÓDIGO exacto — para "¿quién aprobó/hizo el PRD-260003?" pasa codigo.',
       input_schema: {
         type: 'object',
         properties: {
           ...COMMON_FILTER_PROPS,
+          codigo: { type: 'string', description: 'Código exacto de UN ensayo (case-insensitive), ej. PRD-260003' },
           limite: { type: 'integer', minimum: 1, maximum: 20, description: 'Cuántos devolver (default 10)' },
         },
         additionalProperties: false,
@@ -607,10 +682,13 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         if (!res.templateId && !input.tipo_nombre) {
           return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre para la serie (una columna pertenece a un tipo de ensayo).' };
         }
+        const colErr = await validarColumna(supabase, projectId, res.templateId, input.column_key);
+        if (colErr) return colErr;
         const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const points: { fecha: string; valor: number }[] = [];
         for (const r of rows) {
-          if (!isYmd(r.ensayo_date)) continue; // fecha malformada → NaN en la tendencia
+          // isRealYmd: '2026-02-31' pasa la regex pero da NaN en la tendencia.
+          if (!isRealYmd(r.ensayo_date)) continue;
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ fecha: r.ensayo_date, valor: v });
         }
@@ -624,7 +702,10 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         const ys = points.map(p => p.valor);
         const xs0 = ymdToDays(points[0].fecha);
         const slope = linearSlopePerDay(points.map(p => ({ x: ymdToDays(p.fecha) - xs0, y: p.valor })));
-        const capped = points.length > 200 ? points.filter((_, i) => i % Math.ceil(points.length / 200) === 0) : points;
+        let capped = points.length > 200 ? points.filter((_, i) => i % Math.ceil(points.length / 200) === 0) : points;
+        // El downsample por módulo puede descartar el ÚLTIMO punto (el ensayo
+        // más reciente, justo el que el usuario mira) — conservarlo siempre.
+        if (capped[capped.length - 1] !== points[points.length - 1]) capped = [...capped, points[points.length - 1]];
         const advertencia = truncNote(rows.length, total) ?? cobertura;
         return {
           ...(advertencia ? { advertencia } : {}),
@@ -667,6 +748,8 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         }
         const res = await resolveFilters(supabase, projectId, input);
         if (!res.ok) return res.error;
+        const colErr = await validarColumna(supabase, projectId, res.templateId, input.column_key);
+        if (colErr) return colErr;
         const agg = (vals: number[]): number | null => {
           if (vals.length === 0) return null;
           switch (input.operacion ?? 'promedio') {
@@ -725,10 +808,14 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         if (!res.templateId && !input.tipo_nombre) {
           return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: una columna pertenece a un tipo de ensayo (sin él se mezclarían valores de tipos distintos).' };
         }
+        const colErr = await validarColumna(supabase, projectId, res.templateId, input.column_key);
+        if (colErr) return colErr;
         const { rows, total } = await fetchRows(supabase, projectId, input, res);
         const points: { x: string; y: number }[] = [];
         for (const r of rows) {
-          if (!isYmd(r.ensayo_date)) continue; // fecha malformada → NaN en el SVG
+          // isRealYmd: '2026-02-31' pasa la regex pero chart.ts la re-filtra y
+          // el SVG podía salir vacío con grafico_generado:true (mentira al modelo).
+          if (!isRealYmd(r.ensayo_date)) continue;
           const v = numValue(r.values_json, input.column_key);
           if (v != null) points.push({ x: r.ensayo_date, y: v });
         }
@@ -755,6 +842,11 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
           recorteNota = `El gráfico de barras y su resumen corresponden a los ÚLTIMOS 48 de ${points.length} datos — acota el rango de fechas para ver otros.`;
         } else if (estilo === 'linea' && points.length > 200) {
           plotPoints = points.filter((_, i) => i % Math.ceil(points.length / 200) === 0);
+          // Conservar SIEMPRE el punto más reciente (el downsample por módulo
+          // podía descartarlo y el gráfico terminaba antes que ultima_fecha).
+          if (plotPoints[plotPoints.length - 1] !== points[points.length - 1]) {
+            plotPoints = [...plotPoints, points[points.length - 1]];
+          }
         }
         const statsPoints = estilo === 'barras' ? plotPoints : points;
         const ys = statsPoints.map(p => p.y);
@@ -767,8 +859,10 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         const cobertura = truncNote(rows.length, total) ?? await valueCoverageNote(supabase, projectId, input, res, total);
         const advertencia = recorteNota ?? cobertura;
         return {
-          grafico_generado: true,
-          [CHART_SVG_KEY]: svg,   // index.ts lo extrae; NO viaja al modelo
+          // Patrón de comparar_sectores: clave condicional + flag honesto (un
+          // SVG vacío con grafico_generado:true hacía narrar un gráfico inexistente).
+          grafico_generado: !!svg,
+          ...(svg ? { [CHART_SVG_KEY]: svg } : {}),   // index.ts lo extrae; NO viaja al modelo
           ...(advertencia ? { advertencia } : {}),
           resumen: {
             n: statsPoints.length,
@@ -974,6 +1068,8 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
         if (!res.ok) return res.error;
         if (!res.templateId) return { error: 'falta_tipo', mensaje: 'Indica template_id o tipo_nombre: la comparación es de una columna de UN tipo de ensayo.' };
         const cat = await loadCatalog(supabase, projectId);
+        const colErr = columnaInvalida(cat, res.templateId, input.column_key);
+        if (colErr) return colErr;
         // Sectores objetivo: los pedidos (resueltos por nombre, DEDUP) o todos.
         let objetivo = cat.sectores;
         let notaSectores: string | undefined;
@@ -1008,6 +1104,13 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
             };
           })
           .filter(x => input.sectores?.length ? true : x.n > 0); // sin lista: solo sectores con datos
+        // Modo 'todos' también se acota a 12 (el SVG de barras recortaba a 48
+        // en silencio y con >12 las barras categóricas no se distinguen). El
+        // resumen y el gráfico quedan CONSISTENTES entre sí.
+        if (!input.sectores?.length && resultados.length > 12) {
+          notaSectores = `Se comparan los primeros 12 de ${resultados.length} sectores con datos (orden alfabético) — pide sectores específicos para ver otros.`;
+          resultados.splice(12);
+        }
         const conDatos = resultados.filter(x => x.promedio != null);
         if (conDatos.length === 0) {
           return { resultados, mensaje: 'Ningún sector tiene datos numéricos de esa columna en el rango.' };
@@ -1116,11 +1219,12 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
           descripcion: { type: 'string', description: 'Descripción de la no conformidad (crear_nc, mínimo 10 caracteres)' },
           desde: { type: 'string', description: 'Fecha inicial YYYY-MM-DD (abrir_dossier)' },
           hasta: { type: 'string', description: 'Fecha final YYYY-MM-DD (abrir_dossier)' },
+          estado: { type: 'string', enum: ['APPROVED', 'SUBMITTED', 'REJECTED'], description: 'Filtrar el dossier por estado (abrir_dossier), ej. "los rechazados"' },
         },
         required: ['tipo'],
         additionalProperties: false,
       },
-      execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string; codigo?: string; descripcion?: string; desde?: string; hasta?: string }) => {
+      execute: async (input: { tipo: string; destino?: string; template_id?: string; tipo_nombre?: string; sector_id?: string; sector_nombre?: string; fecha?: string; codigo?: string; descripcion?: string; desde?: string; hasta?: string; estado?: string }) => {
         // Helper: valida un código de ensayo contra protocols (fuente fresca).
         // ilike = igualdad case-insensitive (los códigos pueden incluir el
         // nombre del sector con minúsculas). Se neutralizan los comodines de
@@ -1147,6 +1251,9 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
           };
         }
         if (input.tipo === 'crear_nc') {
+          if (!['CREATOR', 'RESIDENT'].includes(String(acceso?.userRole ?? ''))) {
+            return { error: 'sin_permiso', mensaje: 'Solo el Creador o el Jefe de obra registran no conformidades (igual que en la app). Dile al usuario con amabilidad que lo canalice con su jefe de obra.' };
+          }
           if (!input.codigo?.trim()) return { error: 'falta_codigo', mensaje: 'Indica el código del ensayo al que se registrará la NC.' };
           const desc = (input.descripcion ?? '').trim();
           if (desc.length < 10) return { error: 'descripcion_corta', mensaje: 'La descripción de la no conformidad debe tener al menos 10 caracteres — pide al usuario el motivo.' };
@@ -1175,14 +1282,17 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
               return { error: 'sector_inexistente', consulta: input.sector_id, candidatos: cat.sectores.map(s => ({ id: s.id, nombre: s.nombre })) };
             }
           }
+          const estadoOk = input.estado && ['APPROVED', 'SUBMITTED', 'REJECTED'].includes(input.estado) ? input.estado : null;
           const partes: string[] = [];
           if (input.desde || input.hasta) partes.push(`${input.desde ?? '…'} → ${input.hasta ?? '…'}`);
+          if (estadoOk) partes.push(estadoOk === 'APPROVED' ? 'aprobados' : estadoOk === 'REJECTED' ? 'rechazados' : 'en revisión');
           const etiqueta = `Abrir Dossier${partes.length ? ` (${partes.join(', ')})` : ' filtrado'}`;
           return {
             [ACTION_KEY]: {
               kind: 'abrir_dossier',
               desde: input.desde ?? null, hasta: input.hasta ?? null,
               templateId: res.templateId ?? null, sectorId: res.sectorId ?? null,
+              estado: estadoOk,
               etiqueta,
             },
             tarjeta_mostrada: true,
@@ -1194,6 +1304,8 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
           if (!DESTINOS.includes(destino as typeof DESTINOS[number])) {
             return { error: 'destino_invalido', destinos_validos: DESTINOS };
           }
+          const bloqueo = destinoNoDisponible(destino, acceso);
+          if (bloqueo) return { error: 'destino_no_disponible', mensaje: bloqueo };
           return {
             [ACTION_KEY]: { kind: 'abrir_pantalla', destino, etiqueta: `Abrir ${DESTINO_LABEL[destino]}` },
             tarjeta_mostrada: true,

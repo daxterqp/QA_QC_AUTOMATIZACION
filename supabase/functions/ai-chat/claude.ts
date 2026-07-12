@@ -5,7 +5,7 @@
  * (claude-haiku-4-5 / claude-sonnet-5 / claude-opus-4-8) sin ramas.
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@0.110.0';
-import { type ChatArgs, type ChatResult, executeToolCall, MAX_TOKENS, MAX_TOOL_ITERATIONS } from './providers.ts';
+import { type ChatArgs, type ChatResult, executeToolCall, type InterceptState, MAX_TOKENS, MAX_TOOL_ITERATIONS, mergeLinks } from './providers.ts';
 
 export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
   // maxRetries: el SDK reintenta solo ante 429/5xx con backoff (feedback QA:
@@ -28,6 +28,7 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
   // deno-lint-ignore no-explicit-any
   let response: any = null;
 
+  const interceptState: InterceptState = { charts: 0, actions: 0 };
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
     try {
       response = await anthropic.messages.create({
@@ -35,13 +36,17 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
         max_tokens: MAX_TOKENS,
         system: a.system,
         tools: anthropicTools,
+        // Última vuelta permitida → sin tools: obliga respuesta en TEXTO
+        // (mirror del AUTO→NONE de gemini.ts — sin esto, un stop_reason
+        // 'tool_use' en la última iteración dejaría reply vacío).
+        ...(iter === MAX_TOOL_ITERATIONS ? { tool_choice: { type: 'none' as const } } : {}),
         messages,
       });
     } catch (e) {
       // Tras agotar los reintentos del SDK: mensaje amable, no el error crudo.
       // deno-lint-ignore no-explicit-any
       const status = (e as any)?.status;
-      if (status === 429 || status === 503 || status === 529) {
+      if (status === 429 || (typeof status === 'number' && status >= 500)) {
         throw new Error('El modelo de IA está saturado en este momento. Vuelva a intentarlo en unos segundos.');
       }
       throw e;
@@ -56,10 +61,10 @@ export async function runClaudeChat(a: ChatArgs): Promise<ChatResult> {
     const toolResults: any[] = [];
     for (const block of response.content) {
       if (block.type !== 'tool_use') continue;
-      const out = await executeToolCall(a.tools, block.name, block.input);
-      if (out.chartSvg) chartSvg = out.chartSvg; // si hay varios, gana el último
+      const out = await executeToolCall(a.tools, block.name, block.input, interceptState);
+      if (out.chartSvg) chartSvg = out.chartSvg; // si hay varios gana el último — la NOTA se lo dice al modelo
       if (out.action) action = out.action;
-      if (out.links) links = out.links;
+      links = mergeLinks(links, out.links);
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: out.resultStr, is_error: out.isError });
     }
     messages.push({ role: 'assistant', content: response.content });

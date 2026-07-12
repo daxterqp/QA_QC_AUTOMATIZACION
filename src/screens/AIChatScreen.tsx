@@ -48,7 +48,7 @@ import {
   type AIChatMessage, type AIChatSession, type AIEnsayoLink, addPref,
   deleteNarrationFile, deleteSession, getFillerAudioUri, loadPrefs, loadSessions,
   newSessionId, removePref, requestNarration, saveSession, sendChatMessage,
-  sessionTitleFrom,
+  sessionTitleFrom, warmUpAILocation,
 } from '@services/AIAssistantService';
 import { AI_SUGGESTED_QUESTIONS, buildGreeting, buildSuggestedQuestions } from '@utils/aiSuggestedQuestions';
 
@@ -106,8 +106,12 @@ const DESTINO_SCREEN: Record<string, { screen: string; params?: Record<string, u
   configuracion: { screen: 'ProjectConfig' },
   papelera: { screen: 'RecycleBin' },
   topografia: { screen: 'TopoCargas' },
-  planos: { screen: 'PlansManagement' },
+  // mode 'measure' = la misma variante que abre el menú del proyecto (sin el
+  // param, la pantalla caía a 'viewer': gestión/borrado en vez de medición).
+  planos: { screen: 'PlansManagement', params: { mode: 'measure' } },
   contactos: { screen: 'PhoneContacts' },
+  archivos: { screen: 'FileUpload' },
+  ubicaciones: { screen: 'LocationList' },
 };
 
 /** Config de audio para el TTS. La clave en Android es shouldRouteThroughEarpiece:
@@ -650,19 +654,27 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // ── Compartir respuestas (E1): texto vía Share nativo; gráfico como PNG ──
   const chartShotRefs = useRef<Map<string, View>>(new Map());
   const shareMessage = useCallback(async (item: AIChatMessage) => {
-    try {
-      if (item.chartSvg) {
-        const node = chartShotRefs.current.get(item.id);
-        if (node) {
+    // La captura del gráfico va en SU PROPIO try: si view-shot falla, se cae
+    // al share de texto (antes cualquier error moría en silencio).
+    if (item.chartSvg) {
+      const node = chartShotRefs.current.get(item.id);
+      if (node) {
+        try {
           const uri = await captureRef(node, { format: 'png', quality: 1, result: 'tmpfile' });
           const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
           await Sharing.shareAsync(fileUri, { mimeType: 'image/png', dialogTitle: 'Compartir gráfico' });
           return;
-        }
+        } catch { /* captura falló → compartir el texto abajo */ }
       }
+    }
+    try {
       await Share.share({ message: item.text });
     } catch { /* usuario canceló el share sheet */ }
   }, []);
+
+  // GPS de FLOW: el permiso se pide al ENTRAR al chat (no en medio del primer
+  // envío, que quedaba bloqueado esperando el diálogo del sistema).
+  useEffect(() => { void warmUpAILocation(); }, []);
 
   // ── Preferencias de FLOW (E3): gestión desde el modal de historial ──
   const [prefs, setPrefs] = useState<string[]>([]);
@@ -1014,7 +1026,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
     if (!prevUser) return;
     const trimmed: AIChatSession = { ...session, messages: session.messages.slice(0, idx), updatedAt: Date.now() };
     setSession(trimmed);
-    saveSession(projectId, trimmed).catch(() => {});
+    // NO persistir el recorte todavía: send() guarda al llegar el reemplazo
+    // (o el error). Si la app muere en vuelo, el disco conserva la respuesta
+    // original en vez de perderla sin reemplazo.
     void send(prevUser.text, { reuseSession: trimmed });
   }, [session, projectId, send]);
 
@@ -1091,6 +1105,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
             ...(action.hasta ? { hasta: action.hasta } : {}),
             ...(action.templateId ? { templateId: action.templateId } : {}),
             ...(action.sectorId ? { sectorId: action.sectorId } : {}),
+            ...(action.estado ? { estado: action.estado } : {}),
           },
         });
         return;
@@ -1163,7 +1178,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
         const newId = res.ids[0];
         if (newId) navigation.navigate('ProtocolFill', { protocolId: newId });
         else Alert.alert('Acción', 'No se pudo crear el ensayo. Intente desde la pantalla de Ensayos.');
+        return;
       }
+      // Kind desconocido: el server se actualiza independiente del APK — sin
+      // esto el botón quedaba vivo y mudo (tarjeta muerta).
+      Alert.alert('Acción no disponible', 'Esta acción requiere actualizar la aplicación.');
     } catch (e) {
       Alert.alert('Acción', e instanceof Error ? e.message : 'No se pudo ejecutar la acción.');
     } finally {
@@ -1181,7 +1200,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     const hasChart = !isUser && !!item.chartSvg;
     // Ancho del gráfico (viewBox 640×360): ancho de pantalla menos padding de la
     // lista (14×2), avatar+gap (33) y padding de la burbuja (12×2) — sin desborde.
-    const chartW = Math.min(winWidth - 28 - 33 - 24 - 2, 640);
+    const chartW = Math.min(0.92 * (winWidth - 28) - 26, winWidth - 28 - 33 - 24 - 2, 640);
     return (
       <View style={[styles.msgRow, isUser ? styles.msgRowUser : styles.msgRowAI]}>
         {!isUser && (

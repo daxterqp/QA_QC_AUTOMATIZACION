@@ -23,12 +23,23 @@ interface UserLocationPayload { lat: number; lng: number; precisionM: number | n
 
 let locCache: { at: number; loc: UserLocationPayload | null } | null = null;
 
+/** Llamar al ENTRAR al chat (no durante el envío): pide el permiso si hace
+ *  falta y precalienta un fix en el cache. Nunca lanza. */
+export async function warmUpAILocation(): Promise<void> {
+  try {
+    let perm = await Location.getForegroundPermissionsAsync();
+    if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
+    if (perm.granted) await getLocationSafe();
+  } catch { /* best-effort */ }
+}
+
 async function getLocationSafe(): Promise<UserLocationPayload | null> {
   // Cache 90s: no re-fijar GPS en cada mensaje de la conversación.
   if (locCache && Date.now() - locCache.at < 90_000) return locCache.loc;
   try {
-    let perm = await Location.getForegroundPermissionsAsync();
-    if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
+    // SOLO consulta el permiso — pedirlo aquí bloquearía el envío del mensaje
+    // hasta que el usuario responda el diálogo (warmUpAILocation lo pide).
+    const perm = await Location.getForegroundPermissionsAsync();
     if (!perm.granted) {
       locCache = { at: Date.now(), loc: null };
       return null;
@@ -77,7 +88,8 @@ export type AIAction =
   | { kind: 'crear_nc'; protocolId: string; codigo: string | null; descripcion: string; etiqueta: string }
   | {
       kind: 'abrir_dossier'; desde?: string | null; hasta?: string | null;
-      templateId?: string | null; sectorId?: string | null; etiqueta: string;
+      templateId?: string | null; sectorId?: string | null;
+      estado?: string | null; etiqueta: string;
     }
   /** Silenciosa: el móvil la guarda localmente SIN tarjeta (no es destructiva). */
   | { kind: 'recordar_preferencia'; texto: string; etiqueta: string };
@@ -278,6 +290,18 @@ const MAX_MSGS_PER_SESSION = 200;
 const MAX_STORE_BYTES = 1_500_000;
 const keyFor = (projectId: string) => `ai_chat_sessions:${projectId}`;
 
+/** Quita chartSvg de los mensajes dejando solo los últimos `keep` CON gráfico
+ *  (contar mensajes en vez de gráficos despojaba todo si el final era texto). */
+function stripCharts(s: AIChatSession, keep: number): AIChatSession {
+  let seen = 0;
+  const msgs = [...s.messages].reverse().map(m => {
+    if (!m.chartSvg) return m;
+    seen++;
+    return seen <= keep ? m : { ...m, chartSvg: undefined };
+  }).reverse();
+  return { ...s, messages: msgs };
+}
+
 const slimSession = (s: AIChatSession): AIChatSession =>
   s.messages.length > MAX_MSGS_PER_SESSION
     ? { ...s, messages: s.messages.slice(-MAX_MSGS_PER_SESSION) }
@@ -305,17 +329,21 @@ export async function saveSession(projectId: string, session: AIChatSession): Pr
       .slice(0, MAX_SESSIONS)
       .map(slimSession);
     let payload = JSON.stringify(next);
-    // Presupuesto de bytes: podar sesiones antiguas hasta caber.
+    // Presupuesto de bytes, del recorte más barato al más caro:
+    // 1) Despojar los GRÁFICOS de las sesiones antiguas (texto intacto) — un
+    //    SVG pesa 25-30KB; botar la sesión entera era perder conversaciones.
+    if (payload.length > MAX_STORE_BYTES && next.length > 1) {
+      next = next.map((s2, i) => i === 0 ? s2 : stripCharts(s2, 0));
+      payload = JSON.stringify(next);
+    }
+    // 2) Si aún no cabe: podar sesiones antiguas enteras.
     while (payload.length > MAX_STORE_BYTES && next.length > 1) {
       next = next.slice(0, next.length - 1);
       payload = JSON.stringify(next);
     }
+    // 3) Sesión única gigante: conservar solo los últimos 5 gráficos.
     if (payload.length > MAX_STORE_BYTES && next.length === 1) {
-      // Sesión única gigante: despojar los gráficos salvo los 5 más recientes.
-      const only = next[0];
-      const msgs = only.messages.map((m, i, arr) =>
-        m.chartSvg && i < arr.length - 5 ? { ...m, chartSvg: undefined } : m);
-      next = [{ ...only, messages: msgs }];
+      next = [stripCharts(next[0], 5)];
       payload = JSON.stringify(next);
     }
     await AsyncStorage.setItem(keyFor(projectId), payload);

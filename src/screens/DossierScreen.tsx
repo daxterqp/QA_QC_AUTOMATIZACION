@@ -39,7 +39,7 @@ interface Props {
   onOpenProtocol: (protocolId: string, status: string) => void;
   onPreviewPdf?: (pdfUri: string) => void;
   /** v77 — FLOW abre el dossier con filtros ya aplicados. */
-  initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string };
+  initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string; estado?: string };
 }
 
 interface DaySection {
@@ -90,7 +90,10 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   const [showFilters, setShowFilters] = useState(!!initialFilters);
   const [dateFromMs, setDateFromMs] = useState<number | null>(ymdToLocalMs(initialFilters?.desde));
   const [dateToMs, setDateToMs] = useState<number | null>(ymdToLocalMs(initialFilters?.hasta));
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(['APPROVED', 'SUBMITTED', 'REJECTED']));
+  const VALID_STATUS = ['APPROVED', 'SUBMITTED', 'REJECTED'];
+  const seedStatus = (estado?: string) =>
+    new Set(estado && VALID_STATUS.includes(estado) ? [estado] : VALID_STATUS);
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(seedStatus(initialFilters?.estado));
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(initialFilters?.templateId ? [initialFilters.templateId] : []));
   const [locFilter, setLocFilter] = useState<Set<string>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<string>>(new Set(initialFilters?.sectorId ? [initialFilters.sectorId] : []));
@@ -106,6 +109,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     setDateToMs(ymdToLocalMs(initialFilters.hasta));
     setTypeFilter(new Set(initialFilters.templateId ? [initialFilters.templateId] : []));
     setSectorFilter(new Set(initialFilters.sectorId ? [initialFilters.sectorId] : []));
+    setStatusFilter(seedStatus(initialFilters.estado));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFilters]);
   // Modal multiselección de Tipo / Ubicación / Sector.

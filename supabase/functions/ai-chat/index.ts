@@ -140,7 +140,9 @@ Deno.serve(async (req: Request) => {
     const [cSect, cSectGeo, cTipos, cEns, cMues, cNcs, cUbic] = await Promise.all([
       head("project_sectors"),
       head("project_sectors").not("points_json", "is", null),
-      head("protocol_templates"),
+      // Solo plantillas VISIBLES (mismo filtro que loadCatalog: is_hidden se
+      // salta) — contar ocultas haría que la radiografía contradiga al catálogo.
+      head("protocol_templates").or("is_hidden.is.null,is_hidden.eq.false"),
       head("protocols").in("status", ["SUBMITTED", "APPROVED", "REJECTED"]),
       head("samples"),
       head("non_conformities"),
@@ -157,7 +159,9 @@ Deno.serve(async (req: Request) => {
     };
 
     // ── Tools con projectId cerrado en closure ──
-    const tools = buildTools(supabase, projectId, ubicacion);
+    // rol+flags: gatean destinos/acciones (un botón del chat jamás debe llevar
+    // a un módulo que el menú le oculta a ese usuario).
+    const tools = buildTools(supabase, projectId, ubicacion, { userRole: profile?.role ?? null, flags });
     const system = buildSystemPrompt({
       userName, userRole: profile?.role ?? null, projectName: String(proj.name ?? "el proyecto"), isFirstTurn,
       preferencias, snapshot, tieneUbicacion: !!ubicacion,

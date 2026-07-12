@@ -44,9 +44,30 @@ export interface ToolExecOutcome {
   links: unknown[] | null;
 }
 
+/** Estado COMPARTIDO del turno entre todas las tool calls: el chat pinta UN
+ *  gráfico y UNA tarjeta por respuesta — si el modelo genera dos, el segundo
+ *  reemplaza al primero y la nota devuelta debe decir la VERDAD (antes ambas
+ *  llamadas recibían "ya se muestra" y el modelo narraba dos gráficos). */
+export interface InterceptState { charts: number; actions: number }
+
+/** Une listas de links de varias llamadas (dedup por protocolId, tope 30). */
+export function mergeLinks(prev: unknown[] | null, next: unknown[] | null): unknown[] | null {
+  if (!next?.length) return prev;
+  if (!prev?.length) return next.slice(0, 30);
+  // deno-lint-ignore no-explicit-any
+  const idOf = (l: unknown) => String((l as any)?.protocolId ?? '');
+  const seen = new Set(prev.map(idOf));
+  const merged = [...prev];
+  for (const l of next) {
+    const id = idOf(l);
+    if (!id || !seen.has(id)) { seen.add(id); merged.push(l); }
+  }
+  return merged.slice(0, 30);
+}
+
 /** Ejecuta una tool por nombre, intercepta SVG/acción y acota el tamaño del
  *  resultado. Compartido por los loops de Claude y Gemini. */
-export async function executeToolCall(tools: ToolDef[], name: string, input: unknown): Promise<ToolExecOutcome> {
+export async function executeToolCall(tools: ToolDef[], name: string, input: unknown, state?: InterceptState): Promise<ToolExecOutcome> {
   const def = tools.find(t => t.name === name);
   if (!def) {
     return { resultStr: JSON.stringify({ error: `herramienta desconocida: ${name}` }), isError: true, chartSvg: null, action: null, links: null };
@@ -61,14 +82,34 @@ export async function executeToolCall(tools: ToolDef[], name: string, input: unk
     if (out && typeof out === 'object' && CHART_SVG_KEY in out) {
       // deno-lint-ignore no-explicit-any
       const { [CHART_SVG_KEY]: svg, ...rest } = out as any;
-      if (typeof svg === 'string' && svg) chartSvg = svg;
-      out = { ...rest, nota: 'El gráfico ya se muestra en el chat: NO lo describas visualmente, solo comenta las cifras.' };
+      if (typeof svg === 'string' && svg) {
+        chartSvg = svg;
+        const reemplaza = (state?.charts ?? 0) > 0;
+        if (state) state.charts++;
+        out = {
+          ...rest,
+          nota: reemplaza
+            ? 'ATENCIÓN: el chat muestra UN solo gráfico por respuesta y este REEMPLAZÓ al anterior (el anterior NO se ve). Comenta SOLO este gráfico y, si el usuario pidió varios, dile que los pida de a uno.'
+            : 'El gráfico ya se muestra en el chat: NO lo describas visualmente, solo comenta las cifras.',
+        };
+      } else {
+        // SVG vacío (datos/fechas inválidas): el modelo NO debe creer que hay gráfico.
+        out = { ...rest, grafico_generado: false, nota: 'NO se pudo generar el gráfico (datos insuficientes o fechas inválidas): no digas que se muestra un gráfico; comenta solo las cifras.' };
+      }
     }
     if (out && typeof out === 'object' && ACTION_KEY in out) {
       // deno-lint-ignore no-explicit-any
       const { [ACTION_KEY]: act, ...rest } = out as any;
-      if (act && typeof act === 'object') action = act;
-      out = rest;
+      if (act && typeof act === 'object') {
+        action = act;
+        const reemplaza = (state?.actions ?? 0) > 0;
+        if (state) state.actions++;
+        out = reemplaza
+          ? { ...rest, nota: 'ATENCIÓN: el chat muestra UNA sola tarjeta por respuesta y esta REEMPLAZÓ a la anterior. Propón las acciones DE A UNA (la anterior ya no existe).' }
+          : rest;
+      } else {
+        out = rest;
+      }
     }
     if (out && typeof out === 'object' && LINKS_KEY in out) {
       // deno-lint-ignore no-explicit-any

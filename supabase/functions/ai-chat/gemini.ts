@@ -15,13 +15,14 @@
  *    presupuesto en "thoughts" y devolver texto vacío; el largo lo gobierna
  *    el system prompt (3-6 líneas).
  */
-import { type ChatArgs, type ChatResult, executeToolCall, MAX_TOOL_ITERATIONS } from './providers.ts';
+import { type ChatArgs, type ChatResult, executeToolCall, type InterceptState, MAX_TOOL_ITERATIONS, mergeLinks } from './providers.ts';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // Reintentos ante saturación (feedback QA: "el error por alta demanda no puede
-// haber"). 429 = rate limit, 503 = modelo sobrecargado, 500 = transitorio.
-const RETRYABLE_STATUS = new Set([429, 500, 503]);
+// haber"). 429 = rate limit, 503 = sobrecargado, 500 transitorio, 502/504 =
+// gateways de Google bajo carga.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const RETRY_DELAYS_MS = [600, 1500];
 
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
@@ -77,6 +78,10 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
   let action: unknown | null = null;
   let links: unknown[] | null = null;
   let reply = '';
+  const interceptState: InterceptState = { charts: 0, actions: 0 };
+  // Gemini 3.x puede responder 200 con candidato VACÍO (finishReason STOP sin
+  // parts — ver header). Un (1) reintento del mismo request suele bastar.
+  let emptyRetried = false;
 
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
     const resp = await fetchWithRetry(url, {
@@ -92,7 +97,9 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
       }),
     });
     if (!resp.ok) {
-      if (RETRYABLE_STATUS.has(resp.status)) {
+      // Cualquier 5xx (o 429) tras agotar reintentos → mensaje amable, nunca
+      // el HTML/JSON crudo del gateway de Google en el chat del usuario.
+      if (resp.status === 429 || resp.status >= 500) {
         throw new Error('El modelo de IA está saturado en este momento. Vuelva a intentarlo en unos segundos.');
       }
       const detail = await resp.text().catch(() => '');
@@ -108,6 +115,11 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
 
     if (calls.length === 0 || iter === MAX_TOOL_ITERATIONS) {
       reply = parts.filter(p => typeof p.text === 'string').map(p => p.text).join('\n').trim();
+      if (!reply && calls.length === 0 && !emptyRetried) {
+        emptyRetried = true;
+        iter--; // repetir ESTA vuelta una vez (mismo contents)
+        continue;
+      }
       break;
     }
 
@@ -117,10 +129,10 @@ export async function runGeminiChat(a: ChatArgs): Promise<ChatResult> {
     const responses: GPart[] = [];
     for (const p of calls) {
       const call = p.functionCall;
-      const out = await executeToolCall(a.tools, String(call.name ?? ''), call.args ?? {});
-      if (out.chartSvg) chartSvg = out.chartSvg;
+      const out = await executeToolCall(a.tools, String(call.name ?? ''), call.args ?? {}, interceptState);
+      if (out.chartSvg) chartSvg = out.chartSvg; // gana el último — la NOTA se lo dice al modelo
       if (out.action) action = out.action;
-      if (out.links) links = out.links;
+      links = mergeLinks(links, out.links);
       // deno-lint-ignore no-explicit-any
       let parsed: any;
       try { parsed = JSON.parse(out.resultStr); } catch { parsed = out.resultStr; }

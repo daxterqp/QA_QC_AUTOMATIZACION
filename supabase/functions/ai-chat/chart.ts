@@ -55,13 +55,11 @@ export function renderTrendChartSvg(title: string, rawPoints: ChartPoint[]): str
   const xs = points.map(p => new Date(p.x + 'T00:00:00Z').getTime());
   const ys = points.map(p => p.y);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const ticks = niceTicks(Math.min(...ys), Math.max(...ys));
-  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
-  const plotW = W - M.left - M.right, plotH = H - M.top - M.bottom;
-  const X = (t: number) => M.left + (x1 === x0 ? plotW / 2 : ((t - x0) / (x1 - x0)) * plotW);
-  const Y = (v: number) => M.top + plotH - ((v - y0) / (y1 - y0)) * plotH;
 
-  // Tendencia (mínimos cuadrados sobre días).
+  // Tendencia (mínimos cuadrados sobre días) — ANTES de la escala: el dominio
+  // de ticks debe incluir los extremos de la recta; si la regresión sale del
+  // rango de los datos, clampear solo la Y aplastaría la pendiente dibujada y
+  // el gráfico contradiría la tendencia_por_dia que el modelo reporta.
   const n = points.length;
   const dx = xs.map(t => (t - x0) / 86400000);
   let sx = 0, sy = 0, sxy = 0, sxx = 0;
@@ -70,6 +68,12 @@ export function renderTrendChartSvg(title: string, rawPoints: ChartPoint[]): str
   const slope = Math.abs(den) < 1e-12 ? 0 : (n * sxy - sx * sy) / den;
   const inter = (sy - slope * sx) / n;
   const tAt = (t: number) => inter + slope * ((t - x0) / 86400000);
+
+  const ticks = niceTicks(Math.min(...ys, tAt(x0), tAt(x1)), Math.max(...ys, tAt(x0), tAt(x1)));
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const plotW = W - M.left - M.right, plotH = H - M.top - M.bottom;
+  const X = (t: number) => M.left + (x1 === x0 ? plotW / 2 : ((t - x0) / (x1 - x0)) * plotW);
+  const Y = (v: number) => M.top + plotH - ((v - y0) / (y1 - y0)) * plotH;
 
   const gridLines = ticks.map(v =>
     `<line x1="${M.left}" y1="${Y(v).toFixed(1)}" x2="${W - M.right}" y2="${Y(v).toFixed(1)}" stroke="${GRID}" stroke-width="1"/>` +
@@ -137,14 +141,17 @@ export function renderBarChartSvg(title: string, rawPoints: ChartPoint[]): strin
     return `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, h).toFixed(1)}" fill="${NAVY}" opacity="0.88" rx="1.5"/>`;
   }).join('');
 
-  // Etiquetas X: hasta 6, repartidas (centradas bajo su barra). esc(): las
-  // etiquetas categóricas (sectores) pueden traer & / < que romperían el SVG.
-  const nx = Math.min(6, points.length);
+  // Etiquetas X (esc(): las etiquetas categóricas pueden traer & / < que
+  // romperían el SVG). Con ≤12 barras se etiquetan TODAS — en un eje
+  // categórico (comparar_sectores) una barra sin etiqueta es inidentificable;
+  // con más (series por fecha) se reparten hasta 6.
+  const nx = points.length <= 12 ? points.length : 6;
+  const maxLen = points.length > 8 ? 9 : 14; // más barras → etiquetas más cortas
   const xLabels = Array.from({ length: nx }, (_, i) => {
     const idx = nx === 1 ? 0 : Math.round((i * (points.length - 1)) / (nx - 1));
     const cx = M.left + idx * step + step / 2;
     const label = dmy(points[idx].x);
-    return `<text x="${cx.toFixed(1)}" y="${H - M.bottom + 18}" text-anchor="middle" font-size="11" fill="${MUTED}">${esc(label.length > 14 ? label.slice(0, 13) + '…' : label)}</text>`;
+    return `<text x="${cx.toFixed(1)}" y="${H - M.bottom + 18}" text-anchor="middle" font-size="${points.length > 8 ? 9.5 : 11}" fill="${MUTED}">${esc(label.length > maxLen ? label.slice(0, maxLen - 1) + '…' : label)}</text>`;
   }).join('');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
