@@ -165,6 +165,9 @@ Deno.serve(async (req: Request) => {
     const system = buildSystemPrompt({
       userName, userRole: profile?.role ?? null, projectName: String(proj.name ?? "el proyecto"), isFirstTurn,
       preferencias, snapshot, tieneUbicacion: !!ubicacion,
+      descripcionObra: typeof flags?.ai_project_description === "string"
+        ? flags.ai_project_description.slice(0, 800)
+        : "",
     });
 
     const args = {

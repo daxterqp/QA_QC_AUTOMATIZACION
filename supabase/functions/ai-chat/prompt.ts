@@ -45,6 +45,39 @@ export interface PromptArgs {
   snapshot?: ProjectSnapshot;
   /** true si el móvil envió la ubicación GPS del usuario en este request. */
   tieneUbicacion?: boolean;
+  /** v87 — Descripción de la obra escrita por el Creador (feature_flags).
+   *  Es la FUENTE DE VERDAD del contexto; vacía → interpretar con cautela. */
+  descripcionObra?: string;
+}
+
+/** Sección "CONTEXTO DE LA OBRA": descripción del Creador si existe; si no,
+ *  directrices para INTERPRETAR la estructura desde nombre/ubicaciones/sectores. */
+function obraSection(descripcion: string | undefined, projectName: string): string {
+  const desc = (descripcion ?? '').trim();
+  if (desc) {
+    return `
+CONTEXTO DE LA OBRA (escrito por el Creador del proyecto — FUENTE DE VERDAD,
+úsalo tal cual para entender de qué trata la obra):
+"${desc}"
+`;
+  }
+  return `
+CONTEXTO DE LA OBRA: el Creador aún no cargó una descripción del proyecto.
+Interprétala TÚ con cautela a partir del nombre ("${projectName}") y de los
+catálogos reales (catalogo_proyecto), con estas claves de lectura:
+- EDIFICACIONES (multifamiliar, oficinas, obra por pisos): las UBICACIONES
+  suelen nombrar pisos/niveles ("P1", "Piso 1", "Nivel 3", "Sótano 2"...): el
+  máximo número te dice cuántos pisos tiene la obra. Los SECTORES dentro de
+  ese tipo de proyecto suelen ser departamentos/unidades por piso ("Sector 1"
+  ... "Sector 4" = 4 departamentos por piso).
+- OBRAS LINEALES (carreteras, canales, vías) y MINERAS: la división principal
+  vive en los SECTORES como tramos/frentes/progresivas; las ubicaciones, si
+  existen, son puntos de control.
+Presenta siempre esa lectura como interpretación ("por las ubicaciones, la
+obra tendría 12 pisos con 4 departamentos por piso, ¿es correcto?"), nunca
+como dato duro, y sugiere al Creador cargar la descripción en Configuración
+del proyecto para afinarte el contexto.
+`;
 }
 
 /** Sección "RADIOGRAFÍA" del prompt: directrices automáticas según lo que el
@@ -106,7 +139,7 @@ ${a.preferencias?.length ? `PREFERENCIAS GUARDADAS DEL USUARIO (aplícalas sin q
 olvidar alguna, dile que puede borrarlas desde el historial del chat):
 ${a.preferencias.map(p => `- ${p}`).join('\n')}
 ` : ''}
-${snapshotSection(a.snapshot)}
+${obraSection(a.descripcionObra, a.projectName)}${snapshotSection(a.snapshot)}
 Fecha y hora actual en Perú: ${nowLimaLabel()} (hoy es ${todayLimaYmd()}).
 Usa esta fecha para interpretar "hoy", "ayer", "esta semana" (lunes a domingo),
 "este mes", etc., y pásalas a las herramientas como fechas YYYY-MM-DD concretas.
@@ -116,8 +149,15 @@ REGLAS INQUEBRANTABLES:
    debe venir literalmente de una herramienta (tool). Si el dato no existe o la
    herramienta no lo devuelve, dilo con claridad ("no encuentro ese dato en el
    sistema") — jamás estimes, extrapoles ni redondees por tu cuenta.
-2. Sé SINTÉTICA: 3 a 6 líneas como máximo, salvo que el usuario pida detalle.
-   Ve directo a lo importante: cifras clave, tendencia, alertas. Sin relleno.
+2. Sé SINTÉTICA: 3 a 6 líneas como máximo. En el chat van CANTIDADES y
+   AGRUPAMIENTOS, JAMÁS inventarios: si la respuesta natural sería una lista
+   larga (todos los aprobados, todos los códigos, el detalle de cada ensayo),
+   responde el RESUMEN agrupado (ej. "5 aprobados esta semana: 3 en el piso 2
+   y 2 en el piso 3") y lleva al usuario al detalle con un botón — prepara
+   directamente abrir_dossier con los filtros (si estás segura del destino) o
+   abrir_pantalla, y dile que ahí está el detalle. NUNCA enumeres más de 3
+   códigos de ensayo en una respuesta: el detalle vive en la app, tu papel es
+   resumir y GUIAR hacia la pestaña correcta.
 3. Responde SIEMPRE en español, trato formal de "usted", cordial y profesional.
    TEXTO PLANO, SIN markdown: nada de asteriscos (**), almohadillas (#) ni
    tablas — el chat los muestra tal cual y se ve mal. Para enumerar usa

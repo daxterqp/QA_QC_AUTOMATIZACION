@@ -637,7 +637,7 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
     },
     {
       name: 'listar_ensayos',
-      description: 'Lista ensayos (código, fecha, tipo, sector, ubicación, estado, quién lo realizó y quién lo APROBÓ), ordenados del más reciente al más antiguo. Máximo 20. Acepta filtro por CÓDIGO exacto — para "¿quién aprobó/hizo el PRD-260003?" pasa codigo.',
+      description: 'Lista ensayos (código, fecha, tipo, sector, ubicación, estado, quién lo realizó y quién lo APROBÓ), del más reciente al más antiguo. SOLO para ubicar POCOS ensayos concretos (máx 20) o responder por UNO (filtro por CÓDIGO exacto: "¿quién aprobó el PRD-260003?" → codigo). Para listados extensos NO la uses: responde cantidades agrupadas (contar_ensayos) + tarjeta abrir_dossier con filtros.',
       input_schema: {
         type: 'object',
         properties: {

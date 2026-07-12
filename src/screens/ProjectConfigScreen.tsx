@@ -309,6 +309,21 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
               {/* v76 — Burbuja flotante de acceso rápido (arrastrable, recuerda posición). */}
               <CheckRow label="Botón rápido de FLOW" description="Burbuja flotante arrastrable para abrir el asistente desde cualquier pantalla del proyecto."
                 value={flags.ai_quick_button !== false} onToggle={() => setFlag('ai_quick_button', !(flags.ai_quick_button !== false))} />
+              {/* v87 — Descripción de la obra: la FUENTE DE VERDAD del contexto
+                  para FLOW. Si queda vacía, la IA interpreta con cautela desde
+                  el nombre del proyecto y los catálogos. */}
+              <Text style={styles.fieldLabel}>Descripción del proyecto (para FLOW)</Text>
+              <TextInput
+                value={flags.ai_project_description ?? ''}
+                onChangeText={txt => setFlag('ai_project_description', txt.slice(0, 600))}
+                multiline
+                style={[styles.urlInput, { minHeight: 96, textAlignVertical: 'top' }]}
+                placeholder={'Ej.: Edificio multifamiliar de 12 pisos + 2 sótanos, 4 departamentos por piso. Estructuras de concreto armado; acabados desde el piso 3.'}
+                placeholderTextColor={Colors.textMuted}
+              />
+              <Text style={styles.helperText}>
+                FLOW usa este texto como contexto de la obra (tipo de proyecto, pisos/tramos, detalles clave). Si lo deja vacío, intentará interpretarlo desde el nombre del proyecto, las ubicaciones (P1/Piso 1…) y los sectores.
+              </Text>
             </>
           )}
 

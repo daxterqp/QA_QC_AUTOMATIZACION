@@ -244,6 +244,10 @@ export interface ProjectFeatureFlags {
   module_email_reports?: boolean;
   /** v75 — Módulo Asistente de IA (chat del proyecto, solo móvil por ahora). Default OFF. */
   module_ai_assistant?: boolean;
+  /** v87 — Descripción de la obra escrita por el Creador: FLOW la usa como
+   *  fuente de verdad del contexto del proyecto (tipo de obra, pisos, tramos).
+   *  Vacía → la IA interpreta con cautela desde nombre/ubicaciones/sectores. */
+  ai_project_description?: string;
   /** v75 — Nivel de modelo del Asistente IA. El mapeo a modelo real es SERVER-SIDE
    *  (Edge Function) — el cliente nunca envía el nombre del modelo. Editable solo
    *  por el Creador (la pantalla de config ya es solo-CREATOR). Default 'economico'. */
@@ -333,6 +337,7 @@ export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
   module_summary_tables: false,
   module_email_reports: false,
   module_ai_assistant: false,
+  ai_project_description: '',
   ai_model_tier: 'economico',
   ai_provider: 'claude',
   ai_quick_button: true,

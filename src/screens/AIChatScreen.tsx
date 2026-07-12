@@ -469,9 +469,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
         fillerPlayerRef.current = player;
         player.play();
       } catch { /* sin muletilla */ }
-      // 2.8s: solo consultas realmente exigentes (feedback: a 1.3s sonaba en
-      // casi todas y se volvía repetitivo).
-    }, 2800);
+      // v87 — 7s: SOLO casos críticos (feedback: a 2.8s seguía sonando en casi
+      // todas las consultas con tools; la muletilla es el último recurso).
+    }, 7000);
   }, [projectId, stopFiller]);
   const disarmFillerTimer = useCallback(() => {
     if (fillerTimerRef.current) { clearTimeout(fillerTimerRef.current); fillerTimerRef.current = null; }
@@ -495,6 +495,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
           if (done) return;
           done = true;
           try { sub?.remove(); } catch { /* ya removido */ }
+          try { (player as any).pause?.(); } catch { /* ya detenido */ }
           try { player.remove(); } catch { /* ya liberado */ }
           deleteNarrationFile(uri);
           voicePlayerRef.current = null;
@@ -583,6 +584,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const handleVoiceUtteranceRef = useRef(handleVoiceUtterance);
   useEffect(() => { handleVoiceUtteranceRef.current = handleVoiceUtterance; }, [handleVoiceUtterance]);
 
+  // stopMic/stopSpeech se declaran en otros bloques del componente → refs.
+  const stopMicRef = useRef<(abort?: boolean) => void>(() => {});
+  const stopSpeechRef = useRef<() => void>(() => {});
+
   const exitVoiceMode = useCallback(() => {
     voiceModeRef.current = false;
     voiceErrorsRef.current = 0;
@@ -592,17 +597,18 @@ export default function AIChatScreen({ navigation, route }: Props) {
     disarmFillerTimer();
     stopFiller();
     stopVoiceGlow();
+    // v87 — La X debe CALLAR de inmediato: pausar el player del modo voz antes
+    // de liberarlo y cortar también la narración normal (manos libres) si
+    // estaba sonando — antes seguía hablando tras salir del diálogo.
+    try { (voicePlayerRef.current as any)?.pause?.(); } catch { /* ya detenido */ }
     voiceFinishRef.current?.();
+    stopSpeechRef.current();
     setVoiceMode(false);
     setVoicePhase('listening');
     setVoiceTranscript('');
     setVoiceReply('');
   }, [clearVoiceSubs, disarmFillerTimer, stopFiller, stopVoiceGlow]);
   exitVoiceModeRef.current = exitVoiceMode;
-
-  // stopMic/stopSpeech se declaran en otros bloques del componente → refs.
-  const stopMicRef = useRef<(abort?: boolean) => void>(() => {});
-  const stopSpeechRef = useRef<() => void>(() => {});
   const enterVoiceMode = useCallback(async () => {
     const speech = loadSpeech();
     if (!speech) {
@@ -1540,27 +1546,38 @@ export default function AIChatScreen({ navigation, route }: Props) {
           igual al modo voz de referencia que se mandó. ══ */}
       {voiceMode && (
         <View style={styles.voiceDock} pointerEvents="box-none">
+          {/* v87 — Difuminado hacia el chat MÁS pronunciado y con matices
+              azul→morado según la fase (le da vida sin animaciones caras). */}
           <Animated.View pointerEvents="none" style={[styles.voiceGlow, { opacity: voiceGlowAnim }]}>
             <LinearGradient
               colors={[
                 'transparent',
-                voicePhase === 'speaking' ? 'rgba(66,143,255,0.55)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.4)' : 'rgba(94,170,255,0.5)',
-                voicePhase === 'speaking' ? 'rgba(66,143,255,0.95)' : voicePhase === 'thinking' ? 'rgba(120,150,190,0.8)' : 'rgba(94,170,255,0.9)',
+                voicePhase === 'speaking' ? 'rgba(111,110,255,0.4)' : voicePhase === 'thinking' ? 'rgba(143,123,255,0.38)' : 'rgba(94,150,255,0.4)',
+                voicePhase === 'speaking' ? 'rgba(101,116,255,0.85)' : voicePhase === 'thinking' ? 'rgba(134,110,255,0.82)' : 'rgba(88,140,255,0.85)',
+                voicePhase === 'speaking' ? 'rgba(150,96,255,1)' : voicePhase === 'thinking' ? 'rgba(122,92,255,1)' : 'rgba(78,120,255,1)',
               ]}
-              locations={[0, 0.55, 1]}
+              locations={[0, 0.35, 0.72, 1]}
               style={{ flex: 1 }}
             />
           </Animated.View>
-          <View style={[styles.voiceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            {voicePhase === 'thinking' && <SharkSpinner size={22} color={Colors.white} />}
-            <Text style={styles.voiceBarStatus} numberOfLines={1}>
-              {voicePhase === 'listening'
-                ? (voiceTranscript ? `"${voiceTranscript}"` : 'Escuchando…')
-                : voicePhase === 'thinking' ? 'Pensando…' : (voiceReply || 'Hablando…')}
-            </Text>
-            <TouchableOpacity style={styles.voiceCloseBtn} onPress={exitVoiceMode} activeOpacity={0.85}>
-              <Ionicons name="close" size={20} color={Colors.white} />
-            </TouchableOpacity>
+          {/* v87 — Barra OPACA (se veía lo de atrás): gradiente sólido
+              azul→morado con el tiburón girando en TODAS las fases. */}
+          <View style={styles.voiceBarWrap}>
+            <LinearGradient
+              colors={['#1b2b55', '#2c2166']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={[styles.voiceBar, { paddingBottom: Math.max(insets.bottom, 12) }]}
+            >
+              <SharkSpinner size={24} color={Colors.white} durationMs={voicePhase === 'thinking' ? 1100 : 2600} />
+              <Text style={styles.voiceBarStatus} numberOfLines={1}>
+                {voicePhase === 'listening'
+                  ? (voiceTranscript ? `"${voiceTranscript}"` : 'Escuchando…')
+                  : voicePhase === 'thinking' ? 'Pensando…' : (voiceReply || 'Hablando…')}
+              </Text>
+              <TouchableOpacity style={styles.voiceCloseBtn} onPress={exitVoiceMode} activeOpacity={0.85}>
+                <Ionicons name="close" size={20} color={Colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
           </View>
         </View>
       )}
@@ -1677,14 +1694,13 @@ const styles = StyleSheet.create({
   // v79 — Modo solo voz: chat visible + franja de iluminación inferior.
   voiceDock: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 55, elevation: 15 },
   voiceGlow: {
-    position: 'absolute', left: 0, right: 0, bottom: 0, height: 130,
+    position: 'absolute', left: 0, right: 0, bottom: 0, height: 185,
     overflow: 'hidden',
   },
+  voiceBarWrap: { borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: 'hidden' },
   voiceBar: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 12,
-    backgroundColor: 'rgba(11,24,48,0.92)',
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    paddingHorizontal: 16, paddingTop: 14,
   },
   voiceBarStatus: { flex: 1, fontFamily: FF_SEMI, fontSize: 13.5, color: Colors.white },
   voiceCloseBtn: {
