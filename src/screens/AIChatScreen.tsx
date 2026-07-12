@@ -22,6 +22,15 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, SvgXml } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SharkLogo, SharkSpinner } from '@components/FlowSharkLogo';
+// v82 — Misma tipografía del login (Montserrat) para TODO el módulo IA.
+import {
+  useFonts, Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold,
+} from '@expo-google-fonts/montserrat';
+
+const FF_REG = 'Montserrat_400Regular';
+const FF_SEMI = 'Montserrat_600SemiBold';
+const FF_BOLD = 'Montserrat_700Bold';
+const FF_XBOLD = 'Montserrat_800ExtraBold';
 import { Q } from '@nozbe/watermelondb';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
@@ -130,7 +139,8 @@ function RichText({ text, style }: { text: string; style: StyleProp<TextStyle> }
     <Text style={style}>
       {parts.map((p, i) =>
         p.startsWith('**') && p.endsWith('**') && p.length > 4
-          ? <Text key={i} style={{ fontWeight: '800' }}>{p.slice(2, -2)}</Text>
+          // FF_BOLD explícito: Android no sintetiza negrita sobre fuente custom.
+          ? <Text key={i} style={{ fontFamily: FF_BOLD }}>{p.slice(2, -2)}</Text>
           : p)}
     </Text>
   );
@@ -226,6 +236,9 @@ function TypingDots() {
 
 export default function AIChatScreen({ navigation, route }: Props) {
   const { projectId, projectName } = route.params;
+  // Tipografía del login (ya cacheada tras el arranque; el fallback del sistema
+  // cubre el primer frame si aún no cargó — no se bloquea el render).
+  useFonts({ Montserrat_400Regular, Montserrat_600SemiBold, Montserrat_700Bold, Montserrat_800ExtraBold });
   const insets = useSafeAreaInsets();
   const { width: winWidth } = useWindowDimensions();
   const { currentUser } = useAuth();
@@ -452,7 +465,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
         fillerPlayerRef.current = player;
         player.play();
       } catch { /* sin muletilla */ }
-    }, 1300);
+      // 2.8s: solo consultas realmente exigentes (feedback: a 1.3s sonaba en
+      // casi todas y se volvía repetitivo).
+    }, 2800);
   }, [projectId, stopFiller]);
   const disarmFillerTimer = useCallback(() => {
     if (fillerTimerRef.current) { clearTimeout(fillerTimerRef.current); fillerTimerRef.current = null; }
@@ -871,8 +886,18 @@ export default function AIChatScreen({ navigation, route }: Props) {
   // (los TypingDots solo se muestran en ESA sesión).
   const sendingRef = useRef(false);
   const [sendingSessionId, setSendingSessionId] = useState<string | null>(null);
+  // v82 — STOP: token de cancelación. Al detener, el resultado en vuelo se
+  // DESCARTA al llegar (la petición no puede abortarse en el server, pero el
+  // usuario recupera el control al instante).
+  const cancelSeqRef = useRef(0);
+  const cancelGeneration = useCallback(() => {
+    cancelSeqRef.current++;
+    sendingRef.current = false;
+    setSending(false);
+    setSendingSessionId(null);
+  }, []);
 
-  const send = useCallback(async (text: string): Promise<AIChatMessage | null> => {
+  const send = useCallback(async (text: string, opts?: { reuseSession?: AIChatSession }): Promise<AIChatMessage | null> => {
     const msg = text.trim();
     if (!msg || sendingRef.current || !session) return null;
     sendingRef.current = true;
@@ -881,25 +906,32 @@ export default function AIChatScreen({ navigation, route }: Props) {
     setSendingSessionId(session.id);
 
     const stamp = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const userMsg: AIChatMessage = { id: `u-${stamp()}`, role: 'user', text: msg, at: Date.now() };
-    // Primer mensaje de la sesión → TRANSICIÓN de marca (v78): el barrido de
-    // olas del login + un velo que pasa de transparente a BLANCO, se desmonta
-    // la bienvenida bajo el velo y el blanco se desvanece revelando el chat.
-    if (session.messages.length === 0) {
-      setWelcomeLeaving(true);
-      glRef.current?.bigWave();
-      Animated.timing(whiteVeil, { toValue: 1, duration: 620, delay: 280, useNativeDriver: true }).start(() => {
-        setWelcomeLeaving(false);
-        Animated.timing(whiteVeil, { toValue: 0, duration: 300, useNativeDriver: true }).start();
-      });
+    // v82 — RETRY: con reuseSession la sesión YA termina en el mensaje del
+    // usuario a re-generar (no se agrega otro; tampoco corre la transición).
+    let base: AIChatSession;
+    if (opts?.reuseSession) {
+      base = opts.reuseSession;
+    } else {
+      const userMsg: AIChatMessage = { id: `u-${stamp()}`, role: 'user', text: msg, at: Date.now() };
+      // Primer mensaje de la sesión → TRANSICIÓN de marca (v78): el barrido de
+      // olas del login + un velo que pasa de transparente a BLANCO, se desmonta
+      // la bienvenida bajo el velo y el blanco se desvanece revelando el chat.
+      if (session.messages.length === 0) {
+        setWelcomeLeaving(true);
+        glRef.current?.bigWave();
+        Animated.timing(whiteVeil, { toValue: 1, duration: 620, delay: 280, useNativeDriver: true }).start(() => {
+          setWelcomeLeaving(false);
+          Animated.timing(whiteVeil, { toValue: 0, duration: 300, useNativeDriver: true }).start();
+        });
+      }
+      base = {
+        ...session,
+        titulo: session.messages.length === 0 ? sessionTitleFrom(msg) : session.titulo,
+        messages: [...session.messages, userMsg],
+        updatedAt: Date.now(),
+      };
+      setSession(base);
     }
-    const base: AIChatSession = {
-      ...session,
-      titulo: session.messages.length === 0 ? sessionTitleFrom(msg) : session.titulo,
-      messages: [...session.messages, userMsg],
-      updatedAt: Date.now(),
-    };
-    setSession(base);
 
     // Anexar la respuesta SOBRE la sesión VIVA (prev), no sobre el `base`
     // congelado: entre el envío y la respuesta pudo cambiar el estado de un
@@ -919,11 +951,13 @@ export default function AIChatScreen({ navigation, route }: Props) {
       });
     };
 
+    const mySeq = cancelSeqRef.current; // token de cancelación de ESTE envío
     try {
       const history = base.messages.slice(0, -1)
         .filter(m => !isErrorMsg(m))
         .map(m => ({ role: m.role, content: m.text }));
       const res = await sendChatMessage({ projectId, message: msg, history, isFirstTurn });
+      if (cancelSeqRef.current !== mySeq) return null; // el usuario detuvo: descartar
       // recordar_preferencia es SILENCIOSA: se guarda local, sin tarjeta
       // (no es destructiva y FLOW ya la confirma en el texto).
       let action = res.action;
@@ -950,6 +984,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
       }
       return aiMsg;
     } catch (e) {
+      if (cancelSeqRef.current !== mySeq) return null; // detenido: sin burbuja de error
       const errMsg: AIChatMessage = {
         id: `e-${stamp()}`, role: 'assistant',
         text: `⚠ ${e instanceof Error ? e.message : 'No pude responder. Intente de nuevo.'}`,
@@ -958,13 +993,30 @@ export default function AIChatScreen({ navigation, route }: Props) {
       applyResult(errMsg);
       return errMsg;
     } finally {
-      sendingRef.current = false;
-      setSending(false);
-      setSendingSessionId(null);
+      if (cancelSeqRef.current === mySeq) {
+        sendingRef.current = false;
+        setSending(false);
+        setSendingSessionId(null);
+      }
     }
   }, [projectId, session, isFirstTurn, whiteVeil, toggleSpeech]);
   // El loop del modo voz llama a send vía ref (send se declara aquí, el loop arriba).
   sendRef.current = send;
+
+  // v82 — VOLVER A INTENTAR: quita la última respuesta de FLOW y re-genera a
+  // partir del último mensaje del usuario (solo disponible en la respuesta
+  // más reciente, para no reescribir el medio de la conversación).
+  const retryMessage = useCallback((item: AIChatMessage) => {
+    if (!session || sendingRef.current) return;
+    const idx = session.messages.findIndex(m => m.id === item.id);
+    if (idx < 1) return;
+    const prevUser = [...session.messages.slice(0, idx)].reverse().find(m => m.role === 'user');
+    if (!prevUser) return;
+    const trimmed: AIChatSession = { ...session, messages: session.messages.slice(0, idx), updatedAt: Date.now() };
+    setSession(trimmed);
+    saveSession(projectId, trimmed).catch(() => {});
+    void send(prevUser.text, { reuseSession: trimmed });
+  }, [session, projectId, send]);
 
   // ── Ejecución de tarjetas de acción (one-shot, con confirmación del usuario) ──
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
@@ -1120,6 +1172,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
     }
   }, [projectId, projectName, navigation, markActionDone, openEnsayo, currentUser]);
 
+  const lastMsgId = messages.length ? messages[messages.length - 1].id : null;
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
@@ -1132,7 +1185,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         {!isUser && (
           <PulseIn fresh={Date.now() - item.at < 4000}>
             <View style={styles.avatar}>
-              <Ionicons name="water" size={13} color={Colors.white} />
+              <SharkLogo size={16} color={Colors.white} />
             </View>
           </PulseIn>
         )}
@@ -1204,6 +1257,12 @@ export default function AIChatScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           )}
           <View style={styles.msgFooter}>
+            {/* Volver a intentar: solo en la ÚLTIMA respuesta (incluye errores). */}
+            {!isUser && item.id === lastMsgId && (
+              <TouchableOpacity onPress={() => retryMessage(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="refresh" size={15} color={isError ? Colors.danger : Colors.textMuted} />
+              </TouchableOpacity>
+            )}
             {!isUser && !isError && (
               <TouchableOpacity onPress={() => shareMessage(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="share-social-outline" size={15} color={Colors.textMuted} />
@@ -1227,7 +1286,7 @@ export default function AIChatScreen({ navigation, route }: Props) {
         </View>
       </View>
     );
-  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction, openEnsayo, shareMessage]);
+  }, [winWidth, speakingId, loadingSpeechId, toggleSpeech, runningActionId, executeAction, openEnsayo, shareMessage, lastMsgId, retryMessage]);
 
   return (
     <View style={styles.container}>
@@ -1242,19 +1301,26 @@ export default function AIChatScreen({ navigation, route }: Props) {
         <View style={{ height: insets.top + 44, backgroundColor: (messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface }} />
         <FadeVeil height={46} color={(messages.length === 0 || welcomeLeaving) ? Colors.navy : Colors.surface} edge="top" />
       </View>
-      <View style={[styles.floatBar, { top: insets.top + 8 }]} pointerEvents="box-none">
-        <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Ionicons name="chevron-back" size={20} color={Colors.white} />
-        </TouchableOpacity>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={styles.floatBtn} onPress={startNewSession} activeOpacity={0.8}>
-            <Ionicons name="create-outline" size={18} color={Colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
-            <Ionicons name="ellipsis-vertical" size={18} color={Colors.white} />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* v82 — Sin burbuja: solo el ícono, blanco sobre la bienvenida navy y
+          navy sobre el chat claro (el difuminado de atrás da el contraste). */}
+      {(() => {
+        const topIconColor = (messages.length === 0 || welcomeLeaving) ? Colors.white : Colors.navy;
+        return (
+          <View style={[styles.floatBar, { top: insets.top + 8 }]} pointerEvents="box-none">
+            <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.6} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="chevron-back" size={24} color={topIconColor} />
+            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 22 }}>
+              <TouchableOpacity style={styles.floatBtn} onPress={startNewSession} activeOpacity={0.6} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="create-outline" size={22} color={topIconColor} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.floatBtn} onPress={() => setShowMenu(true)} activeOpacity={0.6} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="ellipsis-vertical" size={22} color={topIconColor} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+      })()}
 
       {/* Menú "⋮": Historial + Leer respuestas (reemplaza los botones sueltos). */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
@@ -1295,10 +1361,10 @@ export default function AIChatScreen({ navigation, route }: Props) {
                 onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
                 ListFooterComponent={sending && sendingSessionId === session?.id ? (
                   <View style={[styles.msgRow, styles.msgRowAI]}>
-                    <View style={styles.avatar}><Ionicons name="water" size={13} color={Colors.white} /></View>
-                    {/* v81 — El tiburón de FLOW "nada en círculos" mientras carga. */}
-                    <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
-                      <SharkSpinner size={26} color={Colors.navy} />
+                    {/* v82 — El tiburón gira DENTRO del círculo del avatar
+                        mientras FLOW carga (no dentro del mensaje). */}
+                    <View style={styles.avatar}><SharkSpinner size={16} color={Colors.white} /></View>
+                    <View style={[styles.bubble, styles.bubbleAI, { paddingVertical: 14 }]}>
                       <TypingDots />
                     </View>
                   </View>
@@ -1325,10 +1391,12 @@ export default function AIChatScreen({ navigation, route }: Props) {
                       nombre y carrusel vertical lento de sugerencias (3 visibles,
                       ida y vuelta). Sin párrafos que saturen. */}
                   <View style={[styles.emptyWrap, !glOk && { backgroundColor: Colors.navy }]}>
-                    <SharkLogo size={120} color={Colors.white} />
-                    <Text style={styles.flowLogoText}>
-                      FLOW <Text style={styles.flowLogoIA}>IA</Text>
-                    </Text>
+                    {/* v82 — Lockup horizontal como la referencia: tiburón +
+                        FLOW al costado, todo centrado. */}
+                    <View style={styles.logoLockup}>
+                      <SharkLogo size={84} color={Colors.white} />
+                      <Text style={styles.flowLogoText}>FLOW</Text>
+                    </View>
                     <Text style={styles.flowSlogan}>La inteligencia de su obra</Text>
                     <Text style={[styles.emptyTitle, styles.emptyTitleDark]}>{greeting}</Text>
                     {insight && <Text style={[styles.insightText, styles.insightTextDark]}>{insight}</Text>}
@@ -1390,11 +1458,20 @@ export default function AIChatScreen({ navigation, route }: Props) {
               <Ionicons name={micActive ? 'mic' : 'mic-outline'} size={19} color={micActive ? Colors.white : Colors.primary} />
             </TouchableOpacity>
           </Animated.View>
-          {input.trim() ? (
+          {/* v82 — Mientras FLOW responde: CUADRADO de stop (detiene el
+              procesamiento). Con texto: enviar. Sin texto: modo voz. */}
+          {sending ? (
             <TouchableOpacity
-              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+              style={styles.stopBtn}
+              onPress={cancelGeneration}
+              activeOpacity={0.8}
+            >
+              <View style={styles.stopSquare} />
+            </TouchableOpacity>
+          ) : input.trim() ? (
+            <TouchableOpacity
+              style={styles.sendBtn}
               onPress={() => { stopMic(); send(input); }}
-              disabled={sending}
               activeOpacity={0.8}
             >
               <Ionicons name="arrow-up" size={19} color={Colors.white} />
@@ -1403,7 +1480,6 @@ export default function AIChatScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={styles.voiceModeBtn}
               onPress={enterVoiceMode}
-              disabled={sending}
               activeOpacity={0.8}
             >
               <EqualizerIcon size={19} color={Colors.white} />
@@ -1535,25 +1611,21 @@ export default function AIChatScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
 
-  // v78 — Controles flotantes (reemplazan al encabezado completo).
+  // v82 — Controles flotantes SIN burbuja (solo el ícono; color según fondo).
   floatBar: {
-    position: 'absolute', left: 12, right: 12, zIndex: 60, elevation: 12,
+    position: 'absolute', left: 14, right: 14, zIndex: 60, elevation: 12,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  floatBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: 'rgba(14,33,61,0.42)',
-    alignItems: 'center', justifyContent: 'center',
-  },
+  floatBtn: { padding: 4 },
 
-  // Estado inicial (bienvenida limpia v78)
+  // Estado inicial (bienvenida v82: lockup horizontal + Montserrat)
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  flowLogoText: { fontSize: 34, fontWeight: '900', color: Colors.white, letterSpacing: 4, marginTop: 4 },
-  flowLogoIA: { fontSize: 20, fontWeight: '800', color: '#9fc3ee', letterSpacing: 2 },
-  flowSlogan: { fontSize: 12, fontWeight: '700', color: '#bcd0ea', letterSpacing: 1.5, textTransform: 'uppercase', marginTop: -6 },
-  emptyTitle: { fontSize: 19, fontWeight: '900', color: Colors.navy, marginTop: 10 },
+  logoLockup: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  flowLogoText: { fontFamily: FF_XBOLD, fontSize: 42, color: Colors.white, letterSpacing: 5 },
+  flowSlogan: { fontFamily: FF_SEMI, fontSize: 11.5, color: '#bcd0ea', letterSpacing: 2, textTransform: 'uppercase', marginTop: -2 },
+  emptyTitle: { fontFamily: FF_BOLD, fontSize: 18, color: Colors.navy, marginTop: 12, textAlign: 'center', paddingHorizontal: 10 },
   emptyTitleDark: { color: Colors.white },
-  insightText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
+  insightText: { fontFamily: FF_SEMI, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   insightTextDark: { color: '#bcd0ea' },
 
   // v80 — 3 preguntas fijas (sin carrusel), mismo ancho.
@@ -1565,7 +1637,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.34)',
   },
-  sugCardText: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.white },
+  sugCardText: { flex: 1, fontFamily: FF_SEMI, fontSize: 13, color: Colors.white },
 
   // v79 — Modo solo voz: chat visible + franja de iluminación inferior.
   voiceDock: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 55, elevation: 15 },
@@ -1579,7 +1651,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(11,24,48,0.92)',
     borderTopLeftRadius: 22, borderTopRightRadius: 22,
   },
-  voiceBarStatus: { flex: 1, fontSize: 13.5, fontWeight: '700', color: Colors.white },
+  voiceBarStatus: { flex: 1, fontFamily: FF_SEMI, fontSize: 13.5, color: Colors.white },
   voiceCloseBtn: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: 'rgba(255,255,255,0.14)',
@@ -1594,7 +1666,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: Radius.md, paddingVertical: 6, ...Shadow.card,
   },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
-  menuItemText: { flex: 1, fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
+  menuItemText: { flex: 1, fontFamily: FF_SEMI, fontSize: 13.5, color: Colors.textPrimary },
   menuDivider: { height: 1, backgroundColor: Colors.surface, marginHorizontal: 8 },
   menuToggle: { width: 38, height: 22, borderRadius: 11, backgroundColor: Colors.border, padding: 2, justifyContent: 'center' },
   menuToggleOn: { backgroundColor: Colors.primary },
@@ -1632,7 +1704,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9, paddingVertical: 5, backgroundColor: Colors.primary + '0A',
     maxWidth: 170,
   },
-  linkChipText: { fontSize: 11.5, fontWeight: '700', color: Colors.primary },
+  linkChipText: { fontFamily: FF_SEMI, fontSize: 11.5, color: Colors.primary },
 
   // Tarjeta de acción
   actionCard: {
@@ -1642,14 +1714,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary + '0A',
   },
   actionCardDone: { borderColor: Colors.border, backgroundColor: Colors.surface },
-  actionLabel: { flex: 1, fontSize: 12.5, fontWeight: '700', color: Colors.textPrimary },
+  actionLabel: { flex: 1, fontFamily: FF_SEMI, fontSize: 12.5, color: Colors.textPrimary },
   actionBtn: {
     backgroundColor: Colors.primary, borderRadius: 14,
     paddingHorizontal: 12, paddingVertical: 6,
   },
   actionBtnDone: { backgroundColor: Colors.success },
-  actionBtnText: { color: Colors.white, fontSize: 11.5, fontWeight: '800' },
-  msgText: { fontSize: 14, lineHeight: 20 },
+  actionBtnText: { color: Colors.white, fontFamily: FF_BOLD, fontSize: 11.5 },
+  msgText: { fontFamily: FF_REG, fontSize: 13.5, lineHeight: 20 },
   msgTextUser: { color: Colors.white },
   msgTextAI: { color: Colors.textPrimary },
   msgTextError: { color: Colors.danger },
@@ -1679,6 +1751,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', ...Shadow.subtle,
   },
   sendBtnDisabled: { backgroundColor: Colors.textMuted },
+  // v82 — Stop (cuadrado) mientras la IA procesa.
+  stopBtn: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.navy,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  stopSquare: { width: 14, height: 14, borderRadius: 2.5, backgroundColor: Colors.white },
   micBtn: {
     width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.white,
     borderWidth: 1.5, borderColor: Colors.primary,
@@ -1696,7 +1774,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(14,33,61,0.55)', justifyContent: 'center', padding: 22 },
   historyCard: { backgroundColor: Colors.white, borderRadius: Radius.md, padding: 16, ...Shadow.card },
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  historyTitle: { fontSize: 16, fontWeight: '900', color: Colors.navy },
+  historyTitle: { fontFamily: FF_XBOLD, fontSize: 16, color: Colors.navy },
   newChatBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
     backgroundColor: Colors.primary, borderRadius: Radius.sm, paddingVertical: 10, marginBottom: 10,
@@ -1714,6 +1792,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.surface,
   },
   historyItemActive: { backgroundColor: Colors.primary + '0D' },
-  historyItemTitle: { fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
+  historyItemTitle: { fontFamily: FF_SEMI, fontSize: 13.5, color: Colors.textPrimary },
   historyItemMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
 });
