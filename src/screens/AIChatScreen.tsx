@@ -115,6 +115,7 @@ const DESTINO_SCREEN: Record<string, { screen: string; params?: Record<string, u
   contactos: { screen: 'PhoneContacts' },
   archivos: { screen: 'FileUpload' },
   ubicaciones: { screen: 'LocationList' },
+  inicio: { screen: 'ProjectMenu' },
 };
 
 /** Config de audio para el TTS. La clave en Android es shouldRouteThroughEarpiece:

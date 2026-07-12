@@ -31,7 +31,7 @@ export const ACTION_KEY = '__action';
 export const LINKS_KEY = '__links';
 
 /** Pantallas del proyecto a las que Flo puede llevar al usuario. */
-const DESTINOS = ['ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos', 'archivos', 'ubicaciones'] as const;
+const DESTINOS = ['inicio', 'ensayos', 'dossier', 'muestras', 'mapa', 'sectores', 'trazabilidad', 'tablas_resumen', 'configuracion', 'papelera', 'topografia', 'planos', 'contactos', 'archivos', 'ubicaciones'] as const;
 const DESTINO_LABEL: Record<string, string> = {
   ensayos: 'Ensayos', dossier: 'Dossier de protocolos', muestras: 'Muestras',
   mapa: 'Mapa del proyecto', sectores: 'Sectores', trazabilidad: 'Trazabilidad',
@@ -39,6 +39,7 @@ const DESTINO_LABEL: Record<string, string> = {
   papelera: 'Papelera de reciclaje', topografia: 'Datos topográficos',
   planos: 'Planos', contactos: 'Contactos',
   archivos: 'Cargar archivos', ubicaciones: 'Ubicaciones / Puntos de control',
+  inicio: 'Inicio del proyecto (dashboard)',
 };
 
 // ── v85 — Disponibilidad de destinos por FLAGS del proyecto y ROL ────────────
@@ -1216,6 +1217,97 @@ export function buildTools(supabase: SupabaseClient, projectId: string, ubicacio
           tipos_con_rangos: conRangos.length,
           violaciones: violaciones.slice(0, 30),
           ...(violaciones.length > 30 ? { nota: `Mostrando 30 de ${violaciones.length} violaciones.` } : {}),
+        };
+      },
+    },
+    {
+      name: 'protocolos_faltantes',
+      description: 'SOLO para proyectos CON UBICACIONES (obras por pisos/departamentos: cada ubicación tiene su plan exacto de protocolos). Calcula cuántos protocolos FALTAN por ubicación, agrupados por especialidad (prefijo del código: ARQ, IIEE, IISS…). Acepta filtro por nombre de ubicación ("P1", "Piso 2", "sector 3" — matchea todas las que contengan el texto). Úsala ante "¿cuánto falta?", "¿qué protocolos faltan en el piso X?". En proyectos SIN ubicaciones NO la uses (ahí el avance es progresivo o por cuota de la descripción).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          ubicacion_nombre: { type: 'string', description: 'Filtro por nombre de ubicación (contiene, sin acentos): "P1", "Piso 2 sector 3"… Vacío = todas.' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: { ubicacion_nombre?: string }) => {
+        // Plan exacto: locations.template_ids = códigos id_protocolo separados
+        // por coma (mismo contrato que el orden del dossier web).
+        const [locQ, tplQ] = await Promise.all([
+          supabase.from('locations').select('id, name, template_ids').eq('project_id', projectId).order('created_at', { ascending: true }).limit(500),
+          supabase.from('protocol_templates').select('id, id_protocolo, name').eq('project_id', projectId),
+        ]);
+        if (locQ.error) throw new Error(locQ.error.message);
+        const locs = (locQ.data ?? []) as { id: string; name: string | null; template_ids: string | null }[];
+        if (locs.length === 0) {
+          return { error: 'sin_ubicaciones', mensaje: 'Este proyecto no tiene ubicaciones: el total exacto de protocolos no está definido. Si la descripción de la obra fija una CUOTA (N ensayos por día/semana), compara contra contar_ensayos del periodo; si no, informa el avance actual.' };
+        }
+        const codeOf = new Map<string, string>();
+        for (const t of (tplQ.data ?? []) as { id: string; id_protocolo: string | null; name: string | null }[]) {
+          codeOf.set(t.id, String(t.id_protocolo ?? t.name ?? t.id));
+        }
+        // Filtro tolerante por nombre (contiene, sin acentos) — puede dar VARIAS.
+        const q = norm(input.ubicacion_nombre ?? '');
+        const objetivo = q ? locs.filter(l => norm(String(l.name ?? '')).includes(q)) : locs;
+        if (objetivo.length === 0) {
+          return { error: 'ubicacion_no_encontrada', consulta: input.ubicacion_nombre, candidatas: locs.slice(0, 30).map(l => l.name) };
+        }
+        // Protocolos registrados (no borradores) por ubicación — PAGINADO.
+        const hechoPorLoc = new Map<string, Map<string, string>>(); // locId → (codigo → status "mejor")
+        const RANK: Record<string, number> = { APPROVED: 3, SUBMITTED: 2, REJECTED: 1 };
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from('protocols')
+            .select('location_id, template_id, status')
+            .eq('project_id', projectId).in('status', NON_DRAFT)
+            .order('id', { ascending: true }).range(from, from + 999);
+          if (error) throw new Error(error.message);
+          for (const p of (data ?? []) as { location_id: string | null; template_id: string | null; status: string | null }[]) {
+            if (!p.location_id || !p.template_id) continue;
+            const code = codeOf.get(p.template_id) ?? p.template_id;
+            const m = hechoPorLoc.get(p.location_id) ?? new Map<string, string>();
+            const prev = m.get(code);
+            if (!prev || (RANK[p.status ?? ''] ?? 0) > (RANK[prev] ?? 0)) m.set(code, p.status ?? '');
+            hechoPorLoc.set(p.location_id, m);
+          }
+          if (!data || data.length < 1000) break;
+        }
+        // "Especialidad" = prefijo alfabético del código (ARQ-01 → ARQ).
+        const espDe = (code: string) => code.replace(/[-_ ]?\d+$/, '') || code;
+        let totalFaltan = 0, totalEsperados = 0, totalEnRevision = 0;
+        let sinPlan = 0;
+        const porUbic: { ubicacion: string | null; esperados: number; faltan: number; en_revision: number; faltan_por_especialidad: Record<string, number> }[] = [];
+        const espGlobal: Record<string, number> = {};
+        for (const l of objetivo) {
+          const plan = (l.template_ids ?? '').split(',').map(s => s.trim()).filter(Boolean);
+          if (plan.length === 0) { sinPlan++; continue; }
+          const hecho = hechoPorLoc.get(l.id) ?? new Map<string, string>();
+          const faltantes = plan.filter(c => !hecho.has(c));
+          const enRev = plan.filter(c => hecho.get(c) === 'SUBMITTED').length;
+          totalEsperados += plan.length;
+          totalFaltan += faltantes.length;
+          totalEnRevision += enRev;
+          const porEsp: Record<string, number> = {};
+          for (const c of faltantes) {
+            const e = espDe(c);
+            porEsp[e] = (porEsp[e] ?? 0) + 1;
+            espGlobal[e] = (espGlobal[e] ?? 0) + 1;
+          }
+          porUbic.push({ ubicacion: l.name, esperados: plan.length, faltan: faltantes.length, en_revision: enRev, faltan_por_especialidad: porEsp });
+        }
+        // Acotar salida (contexto): las 30 ubicaciones con más faltantes.
+        porUbic.sort((a, b) => b.faltan - a.faltan);
+        const recorte = porUbic.length > 30;
+        return {
+          ubicaciones_evaluadas: porUbic.length,
+          total_esperados: totalEsperados,
+          total_registrados: totalEsperados - totalFaltan,
+          total_faltantes: totalFaltan,
+          en_revision: totalEnRevision,
+          faltan_por_especialidad: espGlobal,
+          por_ubicacion: porUbic.slice(0, 30),
+          ...(recorte ? { advertencia_recorte: `Se muestran las 30 ubicaciones con más faltantes de ${porUbic.length}.` } : {}),
+          ...(sinPlan > 0 ? { advertencia: `${sinPlan} ubicación(es) no tienen plan de protocolos cargado (template_ids vacío) — ahí no se puede saber qué falta.` } : {}),
+          nota: 'Adjunta DIRECTO la tarjeta al Inicio del proyecto (preparar_accion abrir_pantalla destino "inicio") para el detalle completo del dashboard — sin preguntar.',
         };
       },
     },
