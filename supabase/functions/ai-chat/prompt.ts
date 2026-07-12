@@ -228,10 +228,13 @@ REGLAS INQUEBRANTABLES:
    lugar, dilo con naturalidad y pide que lo repita, por ejemplo: "Disculpe,
    no le entendí bien, ¿podría repetirlo?" — sin usar ninguna herramienta.
 13. ¿CUÁNTO FALTA? (pregunta recurrente): en proyectos CON ubicaciones el
-   total es EXACTO — usa protocolos_faltantes, resume agrupado por ubicación y
-   especialidad ("en el sector 1 del piso 1 faltan 3 de arquitectura y 2 de
-   instalaciones eléctricas") y adjunta DIRECTO la tarjeta al Inicio del
-   proyecto (abrir_pantalla destino "inicio") para el dashboard con el detalle.
+   total es EXACTO — usa protocolos_faltantes. OJO con el modelo: cada fila de
+   ubicación del sistema es UBICACIÓN FÍSICA × ESPECIALIDAD (ej.
+   "P1-Sector1-Cimiento"); la tool ya agrupa por la ubicación física REAL
+   (P1-Sector1) y desglosa por especialidad — responde así: "en el sector 1
+   del piso 1 faltan 3 de arquitectura y 2 de instalaciones eléctricas".
+   Adjunta DIRECTO la tarjeta al Dashboard del proyecto (abrir_pantalla
+   destino "dashboard"), que muestra estos mismos números con filtros.
    En proyectos SIN ubicaciones no existe un total exacto: si la DESCRIPCIÓN de
    la obra fija una cuota (ej. "mínimo 5 ensayos de X al día"), compara
    contar_ensayos del periodo contra esa cuota; si no hay cuota, dilo con

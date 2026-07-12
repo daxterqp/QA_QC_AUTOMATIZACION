@@ -115,7 +115,9 @@ const DESTINO_SCREEN: Record<string, { screen: string; params?: Record<string, u
   contactos: { screen: 'PhoneContacts' },
   archivos: { screen: 'FileUpload' },
   ubicaciones: { screen: 'LocationList' },
-  inicio: { screen: 'ProjectMenu' },
+  // El "Dashboard" del proyecto (Aprobados vs Rechazados, avance semanal,
+  // N/M completados por especialidad) vive en la pantalla Historical.
+  dashboard: { screen: 'Historical' },
 };
 
 /** Config de audio para el TTS. La clave en Android es shouldRouteThroughEarpiece:
