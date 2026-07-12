@@ -40,8 +40,8 @@ export function RepeatPromptModal({ directives, onCancel, onConfirm }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-navy/50 flex items-end sm:items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md p-6 flex flex-col gap-4 shadow-modal">
+    <div className="fixed inset-0 z-50 bg-navy/50 flex items-end sm:items-center justify-center p-4 modal-overlay-in">
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 flex flex-col gap-4 shadow-modal sheet-panel-in">
         <div>
           <h3 className="text-base font-bold text-navy">{t('webCMisc.repeat.title')}</h3>
           <p className="text-xs text-textSecondary mt-1">

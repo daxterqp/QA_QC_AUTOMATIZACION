@@ -14,6 +14,8 @@ import { useAuth } from '@context/AuthContext';
 import { useI18n } from '@i18n/index';
 import WaterRipples from '@components/WaterRipples';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
+import { Motion } from '../theme/motion';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { Colors, Radius, Shadow } from '../theme/colors';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -80,10 +82,12 @@ export default function LoginScreen() {
   const hintPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(Animated.sequence([
+    const loop = Animated.loop(Animated.sequence([
       Animated.timing(hintPulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
       Animated.timing(hintPulse, { toValue: 0, duration: 1100, useNativeDriver: true }),
-    ])).start();
+    ]));
+    loop.start();
+    return () => loop.stop(); // v89 — unico loop del set sin cleanup
   }, [hintPulse]);
 
   const resetIdle = () => {
@@ -105,7 +109,8 @@ export default function LoginScreen() {
     enteredRef.current = false;
     setEntered(false);
     setFocused(null);
-    Animated.timing(enterAnim, { toValue: 0, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }).start();
+    // v89 — morph en pantalla con curva in-out FUERTE (la built-in es debil).
+    Animated.timing(enterAnim, { toValue: 0, duration: 400, easing: Motion.easeInOut, useNativeDriver: true }).start();
   };
 
   useEffect(() => () => { if (idleTimer.current) clearTimeout(idleTimer.current); }, []);
@@ -115,7 +120,9 @@ export default function LoginScreen() {
   const [glSupported, setGlSupported] = useState(true);
   const layoutRef = useRef({ w: 1, h: 1 });
   const lastMove = useRef({ x: 0, y: 0 });
-  const useGL = USE_GL_WATER && glSupported;
+  const reduceMotion = useReducedMotion();
+  // v89 — reduce motion del sistema: sin agua GL (queda el fondo estatico).
+  const useGL = USE_GL_WATER && glSupported && !reduceMotion;
 
   const onWrapLayout = (e: any) => {
     const { width, height } = e.nativeEvent.layout;

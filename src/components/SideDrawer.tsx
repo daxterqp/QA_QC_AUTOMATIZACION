@@ -19,6 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '../theme/colors';
+import { Motion } from '../theme/motion';
 import { useI18n } from '@i18n/index';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -71,14 +72,15 @@ export default function SideDrawer({ visible, onClose, userName, roleLabel, role
   useEffect(() => {
     if (visible) {
       setMounted(true);
+      // v89 — curvas explicitas: sin easing RN aplica su default debil.
       Animated.parallel([
-        Animated.timing(slide, { toValue: 0, duration: 240, useNativeDriver: true }),
-        Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
+        Animated.timing(slide, { toValue: 0, duration: 260, easing: Motion.easeDrawer, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 1, duration: 260, easing: Motion.easeOut, useNativeDriver: true }),
       ]).start();
     } else if (mounted) {
       Animated.parallel([
-        Animated.timing(slide, { toValue: -DRAWER_W, duration: 200, useNativeDriver: true }),
-        Animated.timing(fade, { toValue: 0, duration: 200, useNativeDriver: true }),
+        Animated.timing(slide, { toValue: -DRAWER_W, duration: 200, easing: Motion.easeOut, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 0, duration: 200, easing: Motion.easeOut, useNativeDriver: true }),
       ]).start(() => setMounted(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

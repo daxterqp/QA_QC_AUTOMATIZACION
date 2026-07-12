@@ -39,8 +39,8 @@ export function VolumeCalculatorModal({ open, kind, perimeter, area, initialStat
   };
 
   return (
-    <div className="fixed inset-0 z-[300] bg-black/50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 flex flex-col gap-3">
+    <div className="fixed inset-0 z-[300] bg-black/50 flex items-end sm:items-center justify-center modal-overlay-in" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 flex flex-col gap-3 sheet-panel-in">
         <div className="flex items-center justify-between">
           <h3 className="font-extrabold text-navy text-base">{t('webCMeasure.volume.title')}</h3>
           <button onClick={onClose} className="text-muted hover:text-navy"><X size={18} /></button>

@@ -59,8 +59,10 @@ export default function TourOverlay() {
     if (!isActive) return;
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false }),
-        Animated.timing(pulseAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+        // v89 — nativo: antes animaba tambien borderColor (color = JS thread)
+        // y arrastraba ESTE loop infinito al JS thread durante todo el tour.
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
       ])
     );
     loop.start();
@@ -241,10 +243,9 @@ export default function TourOverlay() {
   const spaceBelow = SH - (hy + hh + PAD);
   const showAbove = spaceBelow < 260;
 
-  const borderColor = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [`${TEAL}99`, TEAL],
-  });
+  // v89 — Borde ESTATICO: animar color obliga useNativeDriver:false y corria
+  // en el JS thread (frames caidos); los anillos ya dan la señal de pulso.
+  const borderColor = TEAL;
 
   // showAbove: tooltip encima del elemento.
   // SH - hy + 12 posiciona el borde inferior del tooltip 12px arriba del elemento.

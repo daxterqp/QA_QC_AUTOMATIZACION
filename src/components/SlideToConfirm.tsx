@@ -104,15 +104,16 @@ export function SlideToConfirm({
       const next = startX.value + e.translationX;
       translateX.value = Math.max(0, Math.min(maxX, next));
     })
-    .onEnd(() => {
+    .onEnd((e) => {
       'worklet';
-      if (disabled || maxX === 0) { translateX.value = withSpring(0); return; }
+      // v89 — velocity: el resorte continua el impulso del dedo al soltar.
+      if (disabled || maxX === 0) { translateX.value = withSpring(0, { damping: 18, stiffness: 180, velocity: e.velocityX }); return; }
       if (translateX.value >= maxX * threshold) {
-        translateX.value = withSpring(maxX, { damping: 18, stiffness: 180 }, () => {
+        translateX.value = withSpring(maxX, { damping: 18, stiffness: 180, velocity: e.velocityX }, () => {
           runOnJS(handleConfirm)();
         });
       } else {
-        translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+        translateX.value = withSpring(0, { damping: 18, stiffness: 180, velocity: e.velocityX });
       }
     });
 
@@ -120,8 +121,11 @@ export function SlideToConfirm({
     transform: [{ translateX: translateX.value }],
   }));
 
+  // v89 — scaleX en vez de width: animar layout (width) fuerza
+  // layout+paint+composite en CADA frame del arrastre; scaleX es GPU-only.
+  // El fill ocupa todo el track y se escala desde la izquierda.
   const fillStyle = useAnimatedStyle(() => ({
-    width: translateX.value + KNOB_SIZE / 2,
+    transform: [{ scaleX: trackWidth > 0 ? (translateX.value + KNOB_SIZE / 2) / trackWidth : 0 }],
   }));
 
   // El icono target se desvanece a medida que el knob lo cubre — feedback de
@@ -192,9 +196,12 @@ const styles = StyleSheet.create({
   fill: {
     position: 'absolute',
     left: 0,
+    right: 0,
     top: 0,
     bottom: 0,
     borderRadius: TRACK_HEIGHT / 2,
+    // v89 — el scaleX del fill escala desde el borde izquierdo.
+    transformOrigin: 'left center',
   },
   knob: {
     position: 'absolute',

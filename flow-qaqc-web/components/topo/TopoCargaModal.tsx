@@ -144,7 +144,7 @@ export function TopoCargaModal({ columns, initialRows, title, busy, onSave, onCa
   };
 
   return (
-    <div className="fixed inset-0 bg-navy/60 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-navy/60 z-50 flex items-center justify-center p-4 modal-overlay-in">
       <div className="bg-white rounded-xl shadow-modal w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-5 border-b border-border">
           <h3 className="text-navy font-bold text-base">{title}</h3>

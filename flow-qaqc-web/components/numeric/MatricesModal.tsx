@@ -20,7 +20,7 @@ export function MatricesModal({ matrices, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4 modal-overlay-in"
       onClick={onClose}
     >
       <div

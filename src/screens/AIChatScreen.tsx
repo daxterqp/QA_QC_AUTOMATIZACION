@@ -44,6 +44,9 @@ import { repairCloudSummaryOnce } from '@services/SummaryRowService';
 import { createInstances } from '@services/ProtocolInstanceService';
 import { pushProjectToSupabase } from '@services/SupabaseSyncService';
 import WaterRipplesGL, { type WaterGLHandle } from '@components/WaterRipplesGL';
+import { PressableScale } from '@components/PressableScale';
+import { Motion } from '../theme/motion';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import {
   type AIChatMessage, type AIChatSession, type AIEnsayoLink, addPref,
   deleteNarrationFile, deleteSession, getFillerAudioUri, loadPrefs, loadSessions,
@@ -203,14 +206,20 @@ function EqualizerIcon({ size = 19, color = '#fff' }: { size?: number; color?: s
 /** Pulso de entrada del avatar (una onda al llegar cada respuesta). Solo anima
  *  mensajes FRESCOS (recién llegados) — al retomar una sesión no pulsa todo. */
 function PulseIn({ children, fresh }: { children: React.ReactNode; fresh: boolean }) {
-  const scale = useRef(new Animated.Value(fresh ? 0.4 : 1)).current;
+  // v89 — 0.92 + fade (antes 0.4 sin opacity: "pop" desde muy chico; el
+  // playbook pide 0.9-0.97 con opacidad acompañando).
+  const scale = useRef(new Animated.Value(fresh ? 0.92 : 1)).current;
+  const opacity = useRef(new Animated.Value(fresh ? 0 : 1)).current;
   useEffect(() => {
     if (fresh) {
-      Animated.spring(scale, { toValue: 1, friction: 4, tension: 110, useNativeDriver: true }).start();
+      Animated.parallel([
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 110, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 180, easing: Motion.easeOut, useNativeDriver: true }),
+      ]).start();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
+  return <Animated.View style={{ opacity, transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
 const ymdLocal = (d: Date) =>
@@ -223,8 +232,8 @@ function TypingDots() {
     const anims = dots.map((v, i) =>
       Animated.loop(Animated.sequence([
         Animated.delay(i * 180),
-        Animated.timing(v, { toValue: 1, duration: 320, useNativeDriver: true }),
-        Animated.timing(v, { toValue: 0.25, duration: 320, useNativeDriver: true }),
+        Animated.timing(v, { toValue: 1, duration: 260, useNativeDriver: true }),
+        Animated.timing(v, { toValue: 0.25, duration: 260, useNativeDriver: true }),
         Animated.delay((2 - i) * 180),
       ])));
     anims.forEach(a => a.start());
@@ -424,11 +433,17 @@ export default function AIChatScreen({ navigation, route }: Props) {
 
   // Franja de iluminación inferior: "respira" (pulso suave) mientras escucha
   // o habla; queda fija y tenue al pensar. Sin GL — barato en batería/CPU.
+  const reduceMotionRef = useRef(false);
   const voiceGlowAnim = useRef(new Animated.Value(0.5)).current;
   const voiceGlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const startVoiceGlow = useCallback((mode: 'listening' | 'speaking') => {
     voiceGlowLoopRef.current?.stop();
     const [lo, hi, dur] = mode === 'speaking' ? [0.55, 1, 420] : [0.35, 0.75, 900];
+    // v89 — reduce motion: glow FIJO (sin breathing infinito).
+    if (reduceMotionRef.current) {
+      voiceGlowAnim.setValue((hi + lo) / 2);
+      return;
+    }
     voiceGlowLoopRef.current = Animated.loop(Animated.sequence([
       Animated.timing(voiceGlowAnim, { toValue: hi, duration: dur, useNativeDriver: true }),
       Animated.timing(voiceGlowAnim, { toValue: lo, duration: dur, useNativeDriver: true }),
@@ -1211,6 +1226,9 @@ export default function AIChatScreen({ navigation, route }: Props) {
   const lastMsgId = messages.length ? messages[messages.length - 1].id : null;
   /** true mientras se ve la bienvenida navy (incluida su salida animada). */
   const onWelcome = messages.length === 0 || welcomeLeaving;
+  // v89 — reduce motion del sistema (agua GL y breathing del glow se apagan).
+  const reduceMotion = useReducedMotion();
+  reduceMotionRef.current = reduceMotion;
   const renderMessage = useCallback(({ item }: { item: AIChatMessage }) => {
     const isUser = item.role === 'user';
     const isError = !isUser && item.text.startsWith('⚠');
@@ -1428,11 +1446,11 @@ export default function AIChatScreen({ navigation, route }: Props) {
                   onStartShouldSetResponderCapture={(e) => { onWaterTouch(e); return false; }}
                   onMoveShouldSetResponderCapture={(e) => { onWaterMove(e); return false; }}
                 >
-                  {glOk && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
+                  {glOk && !reduceMotion && <WaterRipplesGL ref={glRef} onUnsupported={() => setGlOk(false)} />}
                   {/* v78 — Bienvenida LIMPIA: gota SVG arriba-centro, saludo con
                       nombre y carrusel vertical lento de sugerencias (3 visibles,
                       ida y vuelta). Sin párrafos que saturen. */}
-                  <View style={[styles.emptyWrap, !glOk && { backgroundColor: Colors.navy }]}>
+                  <View style={[styles.emptyWrap, (!glOk || reduceMotion) && { backgroundColor: Colors.navy }]}>
                     {/* v83 — Bienvenida mínima: solo el logo grande y, al
                         costado, el saludo (sin "FLOW" ni slogan — pantalla
                         limpia, feedback del usuario). */}
@@ -1505,29 +1523,26 @@ export default function AIChatScreen({ navigation, route }: Props) {
           {/* v82 — Mientras FLOW responde: CUADRADO de stop (detiene el
               procesamiento). Con texto: enviar. Sin texto: modo voz. */}
           {sending ? (
-            <TouchableOpacity
+            <PressableScale
               style={[styles.stopBtn, onWelcome && styles.chipBtnWelcome]}
               onPress={cancelGeneration}
-              activeOpacity={0.8}
             >
               <View style={styles.stopSquare} />
-            </TouchableOpacity>
+            </PressableScale>
           ) : input.trim() ? (
-            <TouchableOpacity
+            <PressableScale
               style={styles.sendBtn}
               onPress={() => { stopMic(); send(input); }}
-              activeOpacity={0.8}
             >
               <Ionicons name="arrow-up" size={19} color={Colors.white} />
-            </TouchableOpacity>
+            </PressableScale>
           ) : (
-            <TouchableOpacity
+            <PressableScale
               style={[styles.voiceModeBtn, onWelcome && styles.chipBtnWelcome]}
               onPress={enterVoiceMode}
-              activeOpacity={0.8}
             >
               <EqualizerIcon size={19} color={Colors.white} />
-            </TouchableOpacity>
+            </PressableScale>
           )}
         </View>
       </KeyboardAvoidingView>

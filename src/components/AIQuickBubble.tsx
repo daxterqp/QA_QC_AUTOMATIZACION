@@ -90,7 +90,9 @@ export function AIQuickBubble({ route, navigate }: Props) {
     const w = Dimensions.get('window').width;
     next.x = next.x + SIZE / 2 < w / 2 ? MARGIN : w - SIZE - MARGIN;
     posRaw.current = next;
-    Animated.spring(pos, { toValue: next, useNativeDriver: false, friction: 6 }).start();
+    // v89 — native driver: solo anima transform (la burbuja es overlay global,
+    // el snap corria en el JS thread). Velocity del gesto: feel-check pendiente.
+    Animated.spring(pos, { toValue: next, useNativeDriver: true, friction: 6 }).start();
     AsyncStorage.setItem(POS_KEY, JSON.stringify(next)).catch(() => {});
   };
   const settleRef = useRef(settle);

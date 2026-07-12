@@ -133,7 +133,7 @@ export default function MyAccountPage() {
           </div>
           <p className="text-xs text-navy/70 leading-relaxed min-h-[32px]">{t(TIP_KEYS[tip])}</p>
           <div className="flex gap-1 mt-2">
-            {TIP_KEYS.map((_, i) => <span key={i} className={cn('h-1.5 rounded-full transition-all', i === tip ? 'w-4 bg-primary' : 'w-1.5 bg-border')} />)}
+            {TIP_KEYS.map((_, i) => <span key={i} className={cn('h-1.5 rounded-full transition-[width,background-color] duration-200 ease-smooth', i === tip ? 'w-4 bg-primary' : 'w-1.5 bg-border')} />)}
           </div>
         </button>
 

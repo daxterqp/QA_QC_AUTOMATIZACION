@@ -83,8 +83,8 @@ export function LabelPrintModal({ payload, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4 modal-overlay-in">
+      <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[90vh] flex flex-col modal-panel-in">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <div>

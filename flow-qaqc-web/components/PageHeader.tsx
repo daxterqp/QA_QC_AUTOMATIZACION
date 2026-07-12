@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@lib/utils';
 import { useI18n } from '@lib/i18n';
 
@@ -26,6 +26,19 @@ export default function PageHeader({
   title, subtitle, crumbs, syncing, rightContent, backHref, onRefresh, refreshing,
 }: PageHeaderProps) {
   const router = useRouter();
+  // v89 — Feedback de EXITO al terminar la recarga: el spinner que solo se
+  // detiene no confirma nada; un check de 1.2s cierra el ciclo.
+  const [justRefreshed, setJustRefreshed] = useState(false);
+  const wasRefreshing = useRef(false);
+  useEffect(() => {
+    const was = wasRefreshing.current;
+    wasRefreshing.current = !!refreshing;
+    if (was && !refreshing) {
+      setJustRefreshed(true);
+      const t = setTimeout(() => setJustRefreshed(false), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [refreshing]);
   const { t } = useI18n();
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
@@ -46,9 +59,8 @@ export default function PageHeader({
 
 
       {/* Glow de fondo — aurora radial */}
-      <div className="absolute top-0 right-0 w-[70%] h-full" style={{
-        background: 'radial-gradient(ellipse 60% 100% at 85% 50%, rgba(0,188,180,0.07) 0%, rgba(79,195,247,0.06) 40%, transparent 70%)',
-        animation: 'flowPulseGlow 8s ease-in-out infinite',
+      <div className="absolute top-0 right-0 w-[70%] h-full flow-pulse-glow" style={{
+        background: 'radial-gradient(ellipse 60% 100% at 85% 50%, rgba(0,188,180,0.07) 0%, rgba(79,195,247,0.06) 40%, transparent 70%)'
       }} />
 
       {/* Ondas animadas "Flow" */}
@@ -135,7 +147,9 @@ export default function PageHeader({
                 title={t('webCMisc.header.refresh')}
                 className="w-9 h-9 rounded-lg flex items-center justify-center text-white border border-white/20 hover:bg-white/15 transition disabled:opacity-50"
               >
-                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+                {justRefreshed
+                  ? <Check size={14} className="text-emerald-300" />
+                  : <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />}
               </button>
             )}
           </div>

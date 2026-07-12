@@ -71,9 +71,8 @@ export default function ProjectsPage() {
 
 
         {/* Glow de fondo — aurora radial */}
-        <div className="absolute top-0 right-0 w-[70%] h-full" style={{
-          background: 'radial-gradient(ellipse 60% 100% at 85% 50%, rgba(0,188,180,0.07) 0%, rgba(79,195,247,0.06) 40%, transparent 70%)',
-          animation: 'flowPulseGlow 8s ease-in-out infinite',
+        <div className="absolute top-0 right-0 w-[70%] h-full flow-pulse-glow" style={{
+          background: 'radial-gradient(ellipse 60% 100% at 85% 50%, rgba(0,188,180,0.07) 0%, rgba(79,195,247,0.06) 40%, transparent 70%)'
         }} />
 
         {/* Ondas animadas "Flow" */}
@@ -188,15 +187,16 @@ export default function ProjectsPage() {
                             : t('webMisc.showHiddenProjects', { count: hiddenCount, plural: hiddenCount !== 1 ? 's' : '' })}
               </button>
             )}
-            {filtered.map(project => (
+            {filtered.map((project, i) => (
+              <div key={project.id} className="animate-[fadeSlideUp_.35s_var(--ease-out)_both]" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
               <ProjectCard
-                key={project.id}
                 project={project}
                 isJefe={isJefe}
                 isCreator={currentUser?.role === 'CREATOR'}
                 isHidden={hiddenIds.has(project.id)}
                 onToggleHidden={() => toggleHidden(project.id)}
               />
+              </div>
             ))}
           </>
         )}

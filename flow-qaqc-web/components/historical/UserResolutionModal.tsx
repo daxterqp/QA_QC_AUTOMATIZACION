@@ -72,7 +72,7 @@ export function UserResolutionModal({ unknownUsers, onConfirm, onCancel }: Props
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4 modal-overlay-in" onClick={onCancel}>
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-modal overflow-hidden"
            onClick={e => e.stopPropagation()}>
         {/* Header */}

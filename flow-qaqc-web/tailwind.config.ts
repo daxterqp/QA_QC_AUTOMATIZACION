@@ -10,6 +10,11 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      transitionTimingFunction: {
+        smooth: 'var(--ease-out)',
+        'smooth-in-out': 'var(--ease-in-out)',
+        drawer: 'var(--ease-drawer)',
+      },
       colors: {
         // Paleta corporativa S-CUA
         navy:      '#0e213d',

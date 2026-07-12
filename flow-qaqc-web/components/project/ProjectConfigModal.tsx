@@ -112,8 +112,8 @@ export function ProjectConfigModal({
     // Overlay SCROLLEABLE: si el modal es más alto que la ventana, se desplaza el
     // overlay completo. Patrón a prueba de quirks de flexbox (el `flex-1+min-h-0`
     // no scrolleaba en el Chromium del desktop). Header sticky para no perderlo.
-    <div className="fixed inset-0 z-50 bg-navy/50 overflow-y-auto p-4 flex justify-center items-start" onClick={onCancel}>
-      <div className="bg-white rounded-xl w-full max-w-2xl my-4 flex flex-col shadow-modal"
+    <div className="fixed inset-0 z-50 bg-navy/50 overflow-y-auto p-4 flex justify-center items-start modal-overlay-in" onClick={onCancel}>
+      <div className="bg-white rounded-xl w-full max-w-2xl my-4 flex flex-col shadow-modal modal-panel-in"
            onClick={e => e.stopPropagation()}>
 
         {/* Header */}

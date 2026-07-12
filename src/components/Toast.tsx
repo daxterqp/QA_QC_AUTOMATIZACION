@@ -13,6 +13,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, View, Text, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius } from '../theme/colors';
+import { Motion } from '../theme/motion';
 
 export type ToastTone = 'success' | 'info' | 'warning' | 'danger';
 
@@ -42,6 +43,9 @@ const TONE_STYLE: Record<ToastTone, { bg: string; icon: string }> = {
 export function ToastHost() {
   const [current, setCurrent] = useState<ToastEvent | null>(null);
   const opacity = useRef(new Animated.Value(0)).current;
+  // v89 — El toast baja desde su anclaje (top) al entrar: fade puro se
+  // materializaba de la nada (sin fisicalidad).
+  const translateY = useRef(new Animated.Value(-8)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueRef = useRef<ToastEvent[]>([]);
   const currentRef = useRef<ToastEvent | null>(null);
@@ -52,9 +56,14 @@ export function ToastHost() {
     const present = (ev: ToastEvent) => {
       currentRef.current = ev;
       setCurrent(ev);
-      Animated.timing(opacity, { toValue: 1, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+      translateY.setValue(-8);
+      Animated.parallel([
+        Animated.timing(opacity, { toValue: 1, duration: 180, easing: Motion.easeOut, useNativeDriver: true }),
+        Animated.timing(translateY, { toValue: 0, duration: 180, easing: Motion.easeOut, useNativeDriver: true }),
+      ]).start();
       timerRef.current = setTimeout(() => {
-        Animated.timing(opacity, { toValue: 0, duration: 200, easing: Easing.in(Easing.quad), useNativeDriver: true })
+        // v89 — salida ease-OUT (Easing.in arranca lento justo cuando el ojo mira).
+        Animated.timing(opacity, { toValue: 0, duration: 160, easing: Motion.easeOut, useNativeDriver: true })
           .start(({ finished }) => {
             if (!finished) return;
             const next = queueRef.current.shift();
@@ -91,7 +100,7 @@ export function ToastHost() {
 
   return (
     <View pointerEvents="none" style={styles.host}>
-      <Animated.View style={[styles.bubble, { backgroundColor: t.bg, opacity }]}>
+      <Animated.View style={[styles.bubble, { backgroundColor: t.bg, opacity, transform: [{ translateY }] }]}>
         <Ionicons name={t.icon as any} size={16} color={Colors.white} />
         <Text style={styles.text} numberOfLines={2}>{current.message}</Text>
       </Animated.View>

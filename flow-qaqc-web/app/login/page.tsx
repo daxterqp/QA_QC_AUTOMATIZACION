@@ -167,7 +167,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={!canSubmit || loading}
-              className="bg-white/15 border border-white/20 text-white rounded-lg py-4 text-[13px] font-bold tracking-[0.15em] uppercase mt-1 transition-all hover:bg-white/25 hover:shadow-[0_0_20px_rgba(255,255,255,0.08)] disabled:opacity-30 disabled:cursor-not-allowed"
+              className="bg-white/15 border border-white/20 text-white rounded-lg py-4 text-[13px] font-bold tracking-[0.15em] uppercase mt-1 transition-[background-color,box-shadow] hover:bg-white/25 hover:shadow-[0_0_20px_rgba(255,255,255,0.08)] disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {loading ? 'Verificando...' : 'Ingresar'}
             </button>

@@ -87,13 +87,13 @@ function AnalysisCard({
         <>
           <div className="flex h-7 rounded-md overflow-hidden w-full">
             <div
-              className="flex items-center justify-center text-white text-[11px] font-bold transition-all"
+              className="flex items-center justify-center text-white text-[11px] font-bold transition-[width,left] duration-300 ease-smooth-in-out"
               style={{ width: `${Math.max(pctA, 1)}%`, backgroundColor: colorA }}
             >
               {pctA >= 15 ? `${pctA}%` : ''}
             </div>
             <div
-              className="flex items-center justify-center text-white text-[11px] font-bold transition-all"
+              className="flex items-center justify-center text-white text-[11px] font-bold transition-[width,left] duration-300 ease-smooth-in-out"
               style={{ width: `${Math.max(pctB, 1)}%`, backgroundColor: colorB }}
             >
               {pctB >= 15 ? `${pctB}%` : ''}
@@ -351,11 +351,11 @@ function SpecialtyBarChart({
             <span className="text-xs text-gray-700 w-28 shrink-0 leading-tight">{name}</span>
             <div className="flex-1 relative h-7 rounded overflow-hidden" style={{ backgroundColor: C.pending }}>
               {approved > 0 && (
-                <div className="absolute left-0 top-0 bottom-0 transition-all"
+                <div className="absolute left-0 top-0 bottom-0 transition-[width,left] duration-300 ease-smooth-in-out"
                   style={{ width: `${appPct}%`, backgroundColor: C.success }} />
               )}
               {rejected > 0 && (
-                <div className="absolute top-0 bottom-0 transition-all"
+                <div className="absolute top-0 bottom-0 transition-[width,left] duration-300 ease-smooth-in-out"
                   style={{ left: `${appPct}%`, width: `${rejPct}%`, backgroundColor: C.danger }} />
               )}
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-white drop-shadow">

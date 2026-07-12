@@ -13,8 +13,9 @@
  * Tap → abre SyncStatusModal con detalle por op_type + acciones de retry.
  */
 
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, StatusBar } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, StatusBar } from 'react-native';
+import { Motion } from '../theme/motion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNetwork } from '@context/NetworkContext';
@@ -61,6 +62,7 @@ export function OfflineBanner() {
   return (
     <>
       <View pointerEvents="box-none" style={[styles.container, { top: topOffset }]}>
+        <ChipIn>
         <TouchableOpacity
           onPress={() => setShowModal(true)}
           activeOpacity={0.85}
@@ -84,11 +86,27 @@ export function OfflineBanner() {
             </View>
           )}
         </TouchableOpacity>
+        </ChipIn>
       </View>
 
       {showModal && <SyncStatusModal onClose={() => setShowModal(false)} />}
     </>
   );
+}
+
+/** v89 — Entrada del pill con fade+scale (antes se teletransportaba al
+ *  cambiar de estado oculto→visible). Salida instantanea: aceptable. */
+function ChipIn({ children }: { children: React.ReactNode }) {
+  const scale = useRef(new Animated.Value(0.92)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 180, easing: Motion.easeOut, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 180, easing: Motion.easeOut, useNativeDriver: true }),
+    ]).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <Animated.View style={{ opacity, transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
