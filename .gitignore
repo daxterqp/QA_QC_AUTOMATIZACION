@@ -54,3 +54,6 @@ _wmdb_dump.db
 
 # Carpeta-base para arrancar Flow_PM (copia del esqueleto; no es fuente de QA/QC)
 flow-pm-starter/
+
+# Marketing: brutos de video/audio no van al repo
+Marketing/media/
