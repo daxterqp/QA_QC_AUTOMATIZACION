@@ -13,7 +13,7 @@
  */
 
 import NetInfo from '@react-native-community/netinfo';
-import { dequeueDue, markSuccess, markFailure, markProcessing, cleanupStaleProcessing } from './SyncQueueService';
+import { dequeueDue, markSuccess, markFailure, markProcessing, cleanupStaleProcessing, nudgeAllPending } from './SyncQueueService';
 import {
   pushProtocolItemStrict,
   pushProtocolStatusStrict,
@@ -104,8 +104,11 @@ class _SyncWorker {
     this.reconnectTimeouts.clear();
   }
 
-  /** Fuerza un tick inmediato (botón "Sincronizar ahora"). */
+  /** Fuerza un tick inmediato (botón "Sincronizar ahora").
+   *  v92 — primero ADELANTA a ahora las PENDING con backoff futuro: sin esto,
+   *  el tick las saltaba (next_attempt_at > now) y el botón "no hacía nada". */
   async forceTick(): Promise<void> {
+    await nudgeAllPending().catch(() => {});
     await this.tick();
   }
 
@@ -173,7 +176,15 @@ class _SyncWorker {
     const acquired = await markProcessing(item.id);
     if (!acquired) return; // alguien más la tomó o ya no es PENDING
     try {
-      await this.handle(item.opType as SyncOpType, item.entityId, item.payloadJson);
+      // v92 — TIMEOUT de 30s por op: en wifi de obra un fetch puede colgarse
+      // minutos y la fila quedaba PROCESSING "eterna" (el ⏳ pegado). Con el
+      // timeout pasa a backoff y se reintenta; si el fetch zombi termina OK
+      // después, markSuccess ya NO destruye una fila re-encolada (fix v92 en
+      // SyncQueueService) y el re-push es un upsert idempotente.
+      await Promise.race([
+        this.handle(item.opType as SyncOpType, item.entityId, item.payloadJson),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout de red (30s) — se reintentará')), 30_000)),
+      ]);
       await markSuccess(item.id);
     } catch (e) {
       console.warn(`[SyncWorker] op ${item.opType}/${item.entityId} falló:`, e);

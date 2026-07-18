@@ -34,9 +34,12 @@ export interface EnqueueArgs {
   payload?: Record<string, unknown>;
 }
 
-/** Backoff exponencial con jitter ±20%. attempt=1 → ~5s, attempt=10 → 10min. */
+/** Backoff exponencial con jitter ±20%. attempt=1 → ~10s, cap 2min.
+ *  v92 — cap 10min→2min: el worker solo corre ONLINE; con señal, esperar 10
+ *  minutos por un blip se percibía como "la subida se trabó". Lo permanente
+ *  sigue cubierto por MAX_ATTEMPTS → FAILED_PERMANENT con retry manual. */
 function backoffMs(attempts: number): number {
-  const base = Math.min(Math.pow(2, attempts) * 5_000, 10 * 60_000);
+  const base = Math.min(Math.pow(2, attempts) * 5_000, 2 * 60_000);
   const jitter = base * (0.8 + Math.random() * 0.4);
   return Math.round(jitter);
 }
@@ -66,17 +69,19 @@ export async function enqueue(args: EnqueueArgs): Promise<void> {
 
     if (reusable) {
       const row = reusable as any;
-      // D2: Si la fila ya falló al menos una vez (attempts > 0), preservamos
-      // el backoff exponencial — resetearlo permitiría que una fila con 9
-      // intentos fallidos quede inmediatamente retriable, anulando la espera.
-      // Solo refrescamos el payload/projectId para que el worker use datos
-      // frescos cuando llegue el momento programado.
+      // D2/v92: si la fila ya falló (attempts > 0) preservamos el CONTADOR de
+      // intentos (una fila con 9 fallos no debe volverse retriable-infinita),
+      // pero la edición fresca ADELANTA la próxima ventana a ~10s: el dato
+      // cambió (el fallo pudo deberse al dato viejo) y el usuario está activo —
+      // dejarlo esperando minutos de backoff se percibía como "se trabó".
       const preserveBackoff = row.attempts > 0;
       await row.update((r: any) => {
         if (!preserveBackoff) {
           r.attempts = 0;
           r.nextAttemptAt = now;
           r.lastError = null;
+        } else {
+          r.nextAttemptAt = Math.min(r.nextAttemptAt ?? now, now + backoffMs(1));
         }
         r.status = 'PENDING';
         r.payloadJson = payloadStr;
@@ -156,11 +161,18 @@ export async function dequeueDue(limit = 20): Promise<any[]> {
     .fetch();
 }
 
-/** Marca una op como exitosa y la elimina permanentemente. */
+/** Marca una op como exitosa y la elimina permanentemente.
+ *  v92 — SOLO si la fila sigue PROCESSING (nuestra). Si volvió a PENDING es
+ *  que (a) el usuario editó de nuevo (H2 re-encoló con datos frescos) o
+ *  (b) cleanupStaleProcessing la reseteó mientras nuestro fetch colgado
+ *  seguía vivo — destruirla en esos casos PERDÍA la subida del dato nuevo
+ *  hasta la siguiente edición. El re-push extra es un upsert idempotente. */
 export async function markSuccess(itemId: string): Promise<void> {
   await database.write(async () => {
     const row = await syncQueueCollection.find(itemId).catch(() => null);
-    if (row) await (row as any).destroyPermanently();
+    if (!row) return;
+    if ((row as any).status !== 'PROCESSING') return; // re-encolada: dejarla subir de nuevo
+    await (row as any).destroyPermanently();
   });
 }
 
@@ -213,6 +225,24 @@ export async function retryAllFailed(): Promise<number> {
   return failed.length;
 }
 
+/** v92 — "Sincronizar ahora" REAL: adelanta a AHORA la próxima ventana de
+ *  TODAS las PENDING (mantiene attempts — no anula la protección de
+ *  FAILED_PERMANENT). Antes el botón solo hacía un tick, y el tick salta las
+ *  filas con backoff futuro → parecía que no hacía nada. */
+export async function nudgeAllPending(): Promise<number> {
+  const now = Date.now();
+  const rows = await syncQueueCollection
+    .query(Q.where('status', 'PENDING'), Q.where('next_attempt_at', Q.gt(now)))
+    .fetch();
+  if (rows.length === 0) return 0;
+  await database.write(async () => {
+    for (const row of rows) {
+      await (row as any).update((u: any) => { u.nextAttemptAt = now; });
+    }
+  });
+  return rows.length;
+}
+
 /** DRENADO MANUAL — resetea TODAS las ops pendientes/fallidas a PENDING con
  *  attempts=0 y next_attempt_at=now, anulando cualquier backoff. Úsalo cuando una
  *  op quedó esperando (backoff largo) o FAILED_PERMANENT y quieres forzar su subida
@@ -240,7 +270,18 @@ export async function listQueueOps(): Promise<{ id: string; opType: SyncOpType; 
   const rows = await syncQueueCollection
     .query(Q.where('status', Q.oneOf(['PENDING', 'PROCESSING', 'FAILED_PERMANENT'])), Q.sortBy('created_at', Q.asc))
     .fetch();
-  return (rows as any[]).map(r => ({ id: r.id, opType: r.opType, entityId: r.entityId, status: r.status, attempts: r.attempts ?? 0, lastError: r.lastError ?? null }));
+  // v92 — Colapsar el par PROCESSING+PENDING de la MISMA entidad (patrón H2:
+  // el worker procesa la vieja mientras la edición nueva espera): el usuario
+  // veía la misma "Fila 1" dos veces y parecía un atasco. Se muestra UNA,
+  // priorizando la que está subiendo ahora.
+  const byKey = new Map<string, any>();
+  const rank: Record<string, number> = { PROCESSING: 3, FAILED_PERMANENT: 2, PENDING: 1 };
+  for (const r of rows as any[]) {
+    const k = `${r.opType}|${r.entityId}`;
+    const prev = byKey.get(k);
+    if (!prev || (rank[r.status] ?? 0) > (rank[prev.status] ?? 0)) byKey.set(k, r);
+  }
+  return Array.from(byKey.values()).map(r => ({ id: r.id, opType: r.opType, entityId: r.entityId, status: r.status, attempts: r.attempts ?? 0, lastError: r.lastError ?? null }));
 }
 
 /** Describe una op para el usuario: qué protocolo y qué casilla/dato se está subiendo. */

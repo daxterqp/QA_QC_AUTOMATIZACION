@@ -134,13 +134,18 @@ export async function seedFilledEnsayos(a: DevSeedArgs): Promise<DevSeedResult> 
     //    el submit real.
     if (updated) {
       pushProtocolStatus(updated).catch(() => {});
-      enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: pid, projectId: a.projectId })
-        .then(() => SyncWorker.forceTick())
-        .catch(() => {});
+      enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: pid, projectId: a.projectId }).catch(() => {});
+      // v92 — Los ITEMS también van por la COLA (retry garantizado): sin esto
+      // dependían solo del push masivo best-effort del final; si fallaba, los
+      // valores quedaban solo locales hasta el próximo sync de pantalla.
+      for (const it of sorted as any[]) {
+        enqueueSync({ opType: 'PUSH_PROTOCOL_ITEM', entityId: it.id, projectId: a.projectId }).catch(() => {});
+      }
     }
     upsertSummaryRow(pid, { xrefValues: {} }).catch(() => {});
   }
 
+  SyncWorker.forceTick().catch(() => {});
   pushProjectToSupabase(a.projectId).catch(() => {});
   return { codes, warnings };
 }
