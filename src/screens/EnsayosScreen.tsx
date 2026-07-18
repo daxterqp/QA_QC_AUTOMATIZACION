@@ -50,6 +50,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { DateRangePicker } from '@components/DateRangePicker';
 import { useAuth } from '@context/AuthContext';
 import { createInstances } from '@services/ProtocolInstanceService';
+import { seedFilledEnsayos } from '@services/DevSeedService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { todayEnsayoDate, parseEnsayoDate, pickMask, seqFromCode, type SeqResetScope } from '@utils/protocolCode';
 import { renumberProject } from '@services/RenumberService';
@@ -442,10 +443,15 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     }
   };
 
-  const openAddModal = (g: Group) => {
+  // v91 — "+Dev" (solo desarrollo): mismo modal de crear, pero al confirmar
+  // genera los ensayos LLENOS (autollenado :ej) y ENVIADOS a aprobación.
+  const [devSeedMode, setDevSeedMode] = useState(false);
+
+  const openAddModal = (g: Group, devSeed = false) => {
+    setDevSeedMode(devSeed);
     setModalGroup(g);
     setSelTemplateId(g.templateId ?? (templates.find(t => !t.isHidden)?.id ?? ''));
-    setCountText('1');
+    setCountText(devSeed ? '10' : '1');
     setFechaText(g.ensayoDate ?? todayEnsayoDate());
     setHoraText(nowHHMM());
     setHoraTouched(false);
@@ -471,23 +477,35 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     }
     setCreating(true);
     try {
-      const { codes, warnings } = await createInstances({
-        projectId,
-        template,
-        count,
-        locationId: null,
-        sectorId: modalGroup.sectorId ?? null,
-        sectorName: modalGroup.sectorId ? modalGroup.label : null,
-        ensayoDate: fecha,
-        ensayoTime: hora,
-      });
+      const { codes, warnings } = devSeedMode
+        ? await seedFilledEnsayos({
+            projectId,
+            template: { id: template.id, name: template.name, idProtocolo: template.idProtocolo ?? null },
+            count,
+            sectorId: modalGroup.sectorId ?? null,
+            sectorName: modalGroup.sectorId ? modalGroup.label : null,
+            ensayoDate: fecha,
+            ensayoTime: hora,
+            filledById: currentUser?.id ?? null,
+          })
+        : await createInstances({
+            projectId,
+            template,
+            count,
+            locationId: null,
+            sectorId: modalGroup.sectorId ?? null,
+            sectorName: modalGroup.sectorId ? modalGroup.label : null,
+            ensayoDate: fecha,
+            ensayoTime: hora,
+          });
       setModalGroup(null);
       await loadData();
       setExpanded(prev => new Set(prev).add(modalGroup.key));
       const assigned = codes.filter(Boolean);
       Alert.alert(
-        t('ensayos.alert.created.title'),
+        devSeedMode ? '+Dev: ensayos llenos y enviados' : t('ensayos.alert.created.title'),
         t('ensayos.alert.created.msg', { count, type: template.idProtocolo ?? template.name }) +
+        (devSeedMode ? '\nLlenados con el patrón de la ficha y ENVIADOS a aprobación.' : '') +
         (assigned.length > 0 ? t('ensayos.alert.created.codes', { codes: `${assigned[0]}${assigned.length > 1 ? ` … ${assigned[assigned.length - 1]}` : ''}` }) : '') +
         (warnings.length > 0 ? t('ensayos.alert.created.warning', { warning: warnings[0] }) : ''),
       );
@@ -975,6 +993,14 @@ export default function EnsayosScreen({ navigation, route }: Props) {
               <TouchableOpacity style={styles.addBtn} onPress={() => openAddModal(g)} activeOpacity={0.7}>
                 <Ionicons name="add-circle-outline" size={16} color={Colors.primary} />
                 <Text style={styles.addBtnText}>{t('ensayos.group.addTest')}</Text>
+              </TouchableOpacity>
+            )}
+            {__DEV__ && canAdd && !g.hidden && (
+              // v91 — HERRAMIENTA DE DESARROLLO (quitar antes de producción):
+              // genera N ensayos llenos+enviados para poblar datos de prueba.
+              <TouchableOpacity style={styles.addBtn} onPress={() => openAddModal(g, true)} activeOpacity={0.7}>
+                <Ionicons name="flask-outline" size={16} color={Colors.warning} />
+                <Text style={[styles.addBtnText, { color: Colors.warning }]}>+Dev</Text>
               </TouchableOpacity>
             )}
           </View>

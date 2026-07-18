@@ -233,12 +233,33 @@ export default function ProtocolFillPage() {
   // En protocolos numéricos: items manuales requieren valor; fx y gr no exigen entrada.
   const allAnswered = numericMode
     ? (() => {
+        // v91 — MODO OBLIGATORIAS (espejo del móvil): con al menos una celda
+        // `:oblig`, SOLO esas bloquean el envío; sin `:oblig`, regla clásica.
+        const specs = items.map(it => parseNumericRow(it.validation_method));
+        const hasOblig = specs.some(sp => sp?.kind === 'row' && sp.cells.some(c => (c as { required?: boolean }).required));
+        if (hasOblig) {
+          return items.every((it, idx) => {
+            const spec = specs[idx];
+            if (spec?.kind !== 'row') return true;
+            const cellVals = splitRowComments(it.comments, spec.cells.length);
+            for (let i = 0; i < spec.cells.length; i++) {
+              const c = spec.cells[i] as { kind: string; required?: boolean };
+              if (!c.required) continue;
+              if (c.kind === 'manual' || c.kind === 'percent' || c.kind === 'free') {
+                if (parseNumeric(cellVals[i]) == null) return false;
+              } else if ((cellVals[i] ?? '').trim() === '') {
+                return false;
+              }
+            }
+            return true;
+          });
+        }
         // v42e (M2) — un protocolo numérico NO se considera respondido si no tiene
         // NINGUNA celda de ingreso. Las reglas de completitud (manual + list) se
         // mantienen idénticas; solo se añade la exigencia de ≥1 celda de ingreso.
         let hasAnyInput = false;
-        const allOk = items.every(it => {
-          const spec = parseNumericRow(it.validation_method);
+        const allOk = items.every((it, idx) => {
+          const spec = specs[idx];
           if (!spec) return false;
           if (spec.kind !== 'row') return true; // graph, header, matrix-* no requieren respuesta
           // row: manual + list requieren valor; formula/lookup se computan solas

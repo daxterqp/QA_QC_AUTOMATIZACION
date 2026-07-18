@@ -61,6 +61,11 @@ export type CellMods = {
    *  valores CONGRUENTES con el patrón físico de la ficha. Texto (número,
    *  decimal u opción de lista). Solo en celdas de ENTRADA. */
   sample?: string;
+  /** `:oblig` (v91) — CELDA OBLIGATORIA. Si una ficha declara AL MENOS una
+   *  celda `:oblig`, el envío a aprobación exige SOLO esas celdas (el resto
+   *  queda opcional). Sin ninguna `:oblig`, aplica la regla clásica (todas
+   *  las manual/list). Solo tiene sentido en celdas de ENTRADA. */
+  required?: boolean;
 };
 
 export type NumericCellSpec = CellMods & (
@@ -243,6 +248,8 @@ const RE_FLAG_SUFFIX = /:(oculto|nopdf)\s*$/i;
 const RE_DEC_SUFFIX = /:dec\[(\d)\]\s*$/i;
 /** Sufijo `:ej[valor]` — valor de ejemplo para el Llenado Automático. */
 const RE_EJ_SUFFIX = /:ej\[([^\[\]]*)\]\s*$/i;
+/** Sufijo `:oblig` (v91) — marca la celda como OBLIGATORIA para el envío. */
+const RE_OBLIG_SUFFIX = /:oblig\s*$/i;
 // ── v32: tipos de campo nuevos ───────────────────────────────────────────
 /** bool-[] — casilla Sí/No. */
 const RE_BOOL    = /^bool-\[\]$/i;
@@ -441,6 +448,7 @@ function parseCellSegment(seg: string): NumericCellSpec | null {
   let noReport = false;
   let decimals: number | undefined;
   let sample: string | undefined;
+  let required = false;
   for (let changed = true; changed; ) {
     changed = false;
     const nm = m.match(RE_NORMA_SUFFIX);
@@ -456,6 +464,8 @@ function parseCellSegment(seg: string): NumericCellSpec | null {
     }
     const ej = m.match(RE_EJ_SUFFIX);
     if (ej) { sample = ej[1].trim(); m = m.slice(0, ej.index).trim(); changed = true; continue; }
+    const ob = m.match(RE_OBLIG_SUFFIX);
+    if (ob) { required = true; m = m.slice(0, ob.index).trim(); changed = true; continue; }
     const fl = m.match(RE_FLAG_SUFFIX);
     if (fl) {
       if (/^oculto$/i.test(fl[1])) hidden = true; else noReport = true;
@@ -471,6 +481,7 @@ function parseCellSegment(seg: string): NumericCellSpec | null {
     ...(hidden ? { hidden: true, noReport: true } : {}),
     ...(noReport ? { noReport: true } : {}),
     ...(decimals != null ? { decimals } : {}),
+    ...(required ? { required: true } : {}),
   });
 
   // v33 — ingreso libre (probar antes de RE_MANUAL: corchetes vacíos).

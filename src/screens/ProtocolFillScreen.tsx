@@ -706,13 +706,36 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
 
   const allAnswered = numericMode
     ? (() => {
+        // v91 — MODO OBLIGATORIAS: si la ficha declara al menos una celda
+        // `:oblig`, SOLO esas celdas bloquean el envío (el resto es opcional)
+        // y las filas que no parsean tampoco bloquean. Sin `:oblig` → regla
+        // clásica de siempre (todas las manual/list).
+        const specs = items.map(it => parseNumericRow((it as any).validationMethod ?? null));
+        const hasOblig = specs.some(sp => sp?.kind === 'row' && sp.cells.some(c => (c as { required?: boolean }).required));
+        if (hasOblig) {
+          return items.every((it, idx) => {
+            const spec = specs[idx];
+            if (spec?.kind !== 'row') return true;
+            const cellVals = splitRowComments((it as any).comments ?? null, spec.cells.length);
+            for (let i = 0; i < spec.cells.length; i++) {
+              const c = spec.cells[i] as { kind: string; required?: boolean };
+              if (!c.required) continue;
+              if (c.kind === 'manual' || c.kind === 'percent' || c.kind === 'free') {
+                if (parseNumeric(cellVals[i]) == null) return false;
+              } else if ((cellVals[i] ?? '').trim() === '') {
+                return false;
+              }
+            }
+            return true;
+          });
+        }
         // v42e (M2) — un protocolo numérico NO se considera respondido si no tiene
         // NINGUNA celda de ingreso (p. ej. plantilla con typos que dejó todo como
         // headers/calculadas). Las reglas de completitud (manual + list) se mantienen
         // idénticas; solo se añade la exigencia de ≥1 celda de ingreso.
         let hasAnyInput = false;
-        const allOk = items.every(it => {
-          const spec = parseNumericRow((it as any).validationMethod ?? null);
+        const allOk = items.every((it, idx) => {
+          const spec = specs[idx];
           if (!spec) return false;
           if (spec.kind !== 'row') return true; // graph, header, matrix-* no requieren respuesta
           const cellVals = splitRowComments((it as any).comments ?? null, spec.cells.length);

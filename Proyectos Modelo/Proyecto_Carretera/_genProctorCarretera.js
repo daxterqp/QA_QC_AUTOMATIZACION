@@ -18,12 +18,13 @@ const row = (act, met, sec) => { p += 1; rows.push([ID, NAME, p, act, met, sec])
 const header = (met, sec) => { p += 1; rows.push([ID, NAME, p, '', met, sec]); return p; };
 const perCol = (tpl, n = 4) => COLS.slice(0, n).map(c => tpl.replace(/\{c\}/g, c)).join(' // ');
 // Entrada por columna con valor de ejemplo (:ej) distinto por punto.
-const inEj = (base, ejs) => ejs.map(e => `${base}:ej[${e}]`).join(' // ');
+// v91 — `:oblig`: las ENTRADAS del ensayo son obligatorias para poder enviar.
+const inEj = (base, ejs) => ejs.map(e => `${base}:ej[${e}]:oblig`).join(' // ');
 
 // ── S0 — Datos del molde y la muestra ──
 const S0 = 'Datos del molde y la muestra';
-const pV = row('Volumen del molde (cm³)', 'numerico-[943:2124]:dec[1]:ej[2124]', S0);          // 1
-const pWm = row('Peso del molde vacío (g)', 'numerico-[2500:6500]:dec[1]:ej[5350]', S0);       // 2
+const pV = row('Volumen del molde (cm³)', 'numerico-[943:2124]:dec[1]:ej[2124]:oblig', S0);          // 1
+const pWm = row('Peso del molde vacío (g)', 'numerico-[2500:6500]:dec[1]:ej[5350]:oblig', S0);       // 2
 
 // ── S1 — Compactación (4 puntos) — entradas + cálculos por punto ──
 const S1 = 'Determinación de la curva de compactación (4 puntos)';

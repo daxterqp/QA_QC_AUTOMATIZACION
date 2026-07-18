@@ -179,3 +179,18 @@ columna, refs cruzadas). Salidas: `PRV4_Proctor_v4.xlsx` + `PRV4_TablasAuxiliare
   y `D:\VxP_QAQC_Automatizado\flow-qaqc-web\components\numeric\NumericTable.tsx`
 - Importador de hojas: `D:\VxP_QAQC_Automatizado\flow-qaqc-web\lib\excelParser.ts`
 - DSL de referencia (detalle): `D:\VxP_QAQC_Automatizado\docs\PROTOCOLOS_NUMERICOS.md`
+
+
+## Sufijo `:oblig` — celdas OBLIGATORIAS (v91, 2026-07-14)
+
+- `:oblig` marca una celda de ENTRADA como obligatoria para el envío a
+  aprobación. Combinable con los demás sufijos en cualquier orden:
+  `numerico-[943:2124]:dec[1]:ej[2124]:oblig`.
+- **Semántica:** si la ficha declara AL MENOS una celda `:oblig`, el envío
+  exige SOLO esas celdas (el resto queda opcional) y las filas que no parsean
+  no bloquean. Si la ficha NO usa `:oblig`, aplica la regla clásica (todas
+  las `manual`/`list` requeridas) — compatibilidad total con fichas viejas.
+- Regla práctica: marcar `:oblig` en las ENTRADAS físicas del ensayo (pesos,
+  volúmenes, lecturas); dejar opcionales observaciones/campos secundarios.
+- Primer caso aplicado: PRM (Proctor Modificado del Proyecto Carretera) —
+  las 6 filas de entrada llevan `:oblig`.
