@@ -2825,6 +2825,70 @@ export async function closeStaleSessions(userId: string, deviceId: string): Prom
   return closed;
 }
 
+// v98c — deps del RE-CONGELADO de huecos (pull-to-refresh de la ficha).
+import { buildFrozenComments } from '@utils/freezeSnapshot';
+import { parseNumericRow, splitRowComments, joinRowComments } from '@utils/numericProtocol';
+import { resolveXrefs } from '@services/XrefResolver';
+import type { AuxTables, XrefValues } from '@utils/formulaEval';
+
+/** v98c — RE-CONGELADO de huecos: si una ficha SUBMITTED/APPROVED tiene celdas
+ *  CALCULADAS con slot VACÍO en su snapshot (p.ej. filas añadidas al template
+ *  DESPUÉS del envío — caso dictámenes en texto: la ficha se envió sin las
+ *  filas ocultas/matrices y sus lookups quedaron '—' para siempre), las
+ *  computa ahora y RELLENA. Nunca sobreescribe un valor congelado existente.
+ *  Best-effort; los items rellenados se encolan al outbox. */
+async function refreezeProtocolGaps(protocolId: string): Promise<void> {
+  try {
+    const proto: any = await protocolsCollection.find(protocolId).catch(() => null);
+    if (!proto || (proto.status !== 'SUBMITTED' && proto.status !== 'APPROVED')) return;
+    const items = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+    if (items.length === 0) return;
+
+    const tbls = await labAuxTablesCollection.query(Q.where('project_id', proto.projectId)).fetch().catch(() => [] as any[]);
+    const aux: AuxTables = {};
+    for (const t of tbls as any[]) {
+      try { aux[String(t.groupKey).toLowerCase()] = { columns: JSON.parse(t.columnsJson ?? '[]'), rows: JSON.parse(t.rowsJson ?? '[]') }; } catch { /* corrupta */ }
+    }
+    let xrefVals: XrefValues = {};
+    try {
+      const r = await resolveXrefs(
+        proto.projectId,
+        (items as any[]).map(it => ({ validation_method: it.validationMethod ?? null, comments: it.comments ?? null, partida_item: it.partidaItem ?? null })),
+        (s: string) => s,
+      );
+      xrefVals = r.values;
+    } catch { /* sin xrefs resolubles */ }
+
+    const frozen = buildFrozenComments(
+      (items as any[]).map(it => ({ id: it.id, partidaItem: it.partidaItem ?? null, validationMethod: it.validationMethod ?? null, comments: it.comments ?? null })),
+      aux, xrefVals,
+    );
+    const changed: string[] = [];
+    await database.write(async () => {
+      for (const it of items as any[]) {
+        const fz = frozen.get(it.id);
+        if (fz == null) continue;
+        const spec = parseNumericRow(it.validationMethod ?? null);
+        const n = spec && spec.kind === 'row' ? spec.cells.length : 1;
+        const cur = splitRowComments(it.comments ?? null, n);
+        const neu = splitRowComments(fz, n);
+        let touched = false;
+        const merged = cur.map((v, i) => {
+          if ((v ?? '').trim() !== '') return v;                       // congelado existente: intocable
+          if ((neu[i] ?? '').trim() !== '') { touched = true; return neu[i]; }
+          return v;
+        });
+        if (!touched) continue;
+        await it.update((x: any) => { x.comments = joinRowComments(merged); });
+        changed.push(it.id);
+      }
+    });
+    for (const id of changed) {
+      enqueueSync({ opType: 'PUSH_PROTOCOL_ITEM', entityId: id, projectId: proto.projectId }).catch(() => {});
+    }
+  } catch { /* best-effort: el próximo refresh reintenta */ }
+}
+
 /**
  * v96 — Recarga PUNTUAL de UNA ficha desde la nube (pull-to-refresh dentro de
  * ProtocolFillScreen) + AUTO-REPARACIÓN de fichas vacías.
@@ -2891,7 +2955,10 @@ export async function refreshProtocolFromCloud(protocolId: string): Promise<{ he
   //    items presentes no tocamos nada (diferencias legítimas por expansión
   //    paramétrica / versiones de template).
   const itemsNow = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
-  if (itemsNow.length > 0 || !templateId) return { healed: 0 };
+  if (itemsNow.length > 0 || !templateId) {
+    await refreezeProtocolGaps(protocolId);   // v98c — rellenar snapshots con huecos
+    return { healed: 0 };
+  }
 
   const tmplItems = await protocolTemplateItemsCollection.query(Q.where('template_id', templateId)).fetch();
   if (tmplItems.length === 0) return { healed: 0 };
@@ -2931,5 +2998,6 @@ export async function refreshProtocolFromCloud(protocolId: string): Promise<{ he
   for (const id of newIds) {
     enqueueSync({ opType: 'PUSH_PROTOCOL_ITEM', entityId: id, projectId: local.projectId }).catch(() => {});
   }
+  await refreezeProtocolGaps(protocolId);   // v98c
   return { healed: newIds.length };
 }
