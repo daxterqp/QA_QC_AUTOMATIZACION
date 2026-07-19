@@ -721,6 +721,23 @@ export default function EnsayosScreen({ navigation, route }: Props) {
     [mode, groups, selectedGroupKey],
   );
 
+  // v97 — Recordar el ÚLTIMO tipo/sector elegido (por proyecto+modo): al volver
+  // a entrar a "Ensayos por tipo/sector", la vista abre PRECARGADA en él (antes
+  // siempre había que re-elegirlo en el modal). Solo auto-aplica una vez y solo
+  // si el usuario aún no eligió nada en esta visita.
+  const lastGroupRestored = React.useRef(false);
+  useEffect(() => {
+    if (mode === 'date' || lastGroupRestored.current || selectedGroupKey != null) return;
+    if (groups.length === 0) return;
+    AsyncStorage.getItem(`ensayos_last_group:${projectId}:${mode}`)
+      .then(saved => {
+        if (lastGroupRestored.current) return;
+        lastGroupRestored.current = true;
+        if (saved && groups.some(g => g.key === saved)) setSelectedGroupKey(saved);
+      })
+      .catch(() => { lastGroupRestored.current = true; });
+  }, [mode, projectId, groups, selectedGroupKey]);
+
   const sections = useMemo(() => visibleGroups.map((g, idx) => {
     const items = protosOf(g);
     // v73 — tipo/sector: el grupo elegido va SIEMPRE abierto (es la vista).
@@ -1123,7 +1140,12 @@ export default function EnsayosScreen({ navigation, route }: Props) {
                   <TouchableOpacity
                     key={g.key}
                     style={[styles.pickerItem, sel && styles.pickerItemActive]}
-                    onPress={() => { setSelectedGroupKey(g.key); setShowGroupPicker(false); }}
+                    onPress={() => {
+                      setSelectedGroupKey(g.key);
+                      setShowGroupPicker(false);
+                      // v97 — persistir la elección para precargarla la próxima vez.
+                      AsyncStorage.setItem(`ensayos_last_group:${projectId}:${mode}`, g.key).catch(() => {});
+                    }}
                   >
                     <View style={[styles.radio, sel && styles.radioActive]}>{sel && <View style={styles.radioInner} />}</View>
                     <Text style={[styles.pickerItemText, sel && { color: Colors.primary, fontWeight: '700' }]} numberOfLines={2}>
