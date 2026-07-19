@@ -2824,3 +2824,90 @@ export async function closeStaleSessions(userId: string, deviceId: string): Prom
 
   return closed;
 }
+
+/**
+ * v96 — Recarga PUNTUAL de UNA ficha desde la nube (pull-to-refresh dentro de
+ * ProtocolFillScreen) + AUTO-REPARACIÓN de fichas vacías.
+ *
+ * 1. Trae de Supabase el protocolo + sus items + los items del TEMPLATE y los
+ *    mergea con fresh-override (LWW por fila — mismas reglas que el pull).
+ * 2. Si tras el merge la ficha sigue SIN items pero el template sí tiene
+ *    (bug PRM-260003: instancia creada durante la ventana en que el pull en
+ *    segundo plano aún no traía las filas del template), copia las filas del
+ *    template a la instancia (expansión paramétrica default) y las encola al
+ *    outbox para que la reparación también suba a la nube.
+ *
+ * La siembra duplica deliberadamente el copiado de createInstances (20 líneas)
+ * para no importar ProtocolInstanceService desde aquí (riesgo de ciclo vía
+ * TopoCargaService).
+ */
+export async function refreshProtocolFromCloud(protocolId: string): Promise<{ healed: number }> {
+  const local: any = await protocolsCollection.find(protocolId).catch(() => null);
+  if (!local) return { healed: 0 };
+  const templateId: string | null = local.templateId ?? null;
+
+  // 1. Fetch remoto puntual (3 queries chicas).
+  const [pRes, iRes, tRes] = await Promise.all([
+    supabase.from('protocols').select('*').eq('id', protocolId).limit(1),
+    supabase.from('protocol_items').select('*').eq('protocol_id', protocolId),
+    templateId
+      ? supabase.from('protocol_template_items').select('*').eq('template_id', templateId)
+      : Promise.resolve({ data: [] as any[], error: null } as any),
+  ]);
+
+  const prepares: any[] = [];
+  if (Array.isArray(pRes.data) && pRes.data.length > 0) {
+    prepares.push(...prepareFreshOverride(protocolsCollection, pRes.data, [local]));
+  }
+  const localItems = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+  if (Array.isArray(iRes.data)) {
+    prepares.push(...prepareFreshOverride(protocolItemsCollection, iRes.data, localItems));
+  }
+  if (templateId && Array.isArray(tRes.data)) {
+    const localTmpl = await protocolTemplateItemsCollection.query(Q.where('template_id', templateId)).fetch();
+    prepares.push(...prepareFreshOverride(protocolTemplateItemsCollection, tRes.data, localTmpl));
+  }
+  if (prepares.length > 0) {
+    await database.write(async () => { await database.batch(...prepares); });
+  }
+
+  // 2. Auto-reparación SOLO si la ficha quedó totalmente vacía (0 items): con
+  //    items presentes no tocamos nada (diferencias legítimas por expansión
+  //    paramétrica / versiones de template).
+  const itemsNow = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+  if (itemsNow.length > 0 || !templateId) return { healed: 0 };
+
+  const tmplItems = await protocolTemplateItemsCollection.query(Q.where('template_id', templateId)).fetch();
+  if (tmplItems.length === 0) return { healed: 0 };
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { expandTemplateItems } = require('@utils/parametricExpand');
+  const { items: expanded } = expandTemplateItems(
+    tmplItems.map((ti: any) => ({
+      partida_item: ti.partidaItem ?? null,
+      item_description: ti.itemDescription,
+      validation_method: ti.validationMethod ?? null,
+      section: (ti as any).section ?? null,
+    })),
+    {},
+  );
+  const newIds: string[] = [];
+  await database.write(async () => {
+    for (const tmplItem of expanded as any[]) {
+      const rec = await protocolItemsCollection.create((item: any) => {
+        item.protocolId = protocolId;
+        item.partidaItem = tmplItem.partida_item ?? null;
+        item.itemDescription = tmplItem.item_description;
+        item.validationMethod = tmplItem.validation_method ?? null;
+        item.section = tmplItem.section ?? null;
+        item.isCompliant = false;
+        item.comments = null;
+      });
+      newIds.push(rec.id);
+    }
+  });
+  for (const id of newIds) {
+    enqueueSync({ opType: 'PUSH_PROTOCOL_ITEM', entityId: id, projectId: local.projectId }).catch(() => {});
+  }
+  return { healed: newIds.length };
+}

@@ -71,9 +71,48 @@ export async function createInstances(args: CreateInstancesArgs): Promise<Create
   const warnings: string[] = [];
 
   // 1. Items de la plantilla + expansión paramétrica (defaultN si no hay choices).
-  const templateItems = await protocolTemplateItemsCollection
+  let templateItems = await protocolTemplateItemsCollection
     .query(Q.where('template_id', args.template.id))
     .fetch();
+  // v96 — GUARD anti-fichas-vacías (bug PRM-260003): con el patrón "pinta local,
+  // pull en segundo plano" (v86) el template puede existir localmente ANTES de
+  // que lleguen sus filas; crear la instancia en esa ventana la dejaba con 0
+  // items para siempre (y así se subía). Si el local está vacío: traer las
+  // filas AHORA de la nube y sembrarlas (synced); si aun así no hay, ABORTAR
+  // con mensaje claro — jamás crear fichas sin filas.
+  if (templateItems.length === 0) {
+    try {
+      const { data } = await supabase
+        .from('protocol_template_items')
+        .select('*')
+        .eq('template_id', args.template.id);
+      if (Array.isArray(data) && data.length > 0) {
+        await database.write(async () => {
+          for (const r of data as any[]) {
+            await protocolTemplateItemsCollection.create((rec: any) => {
+              rec._raw.id = r.id;
+              rec.templateId = r.template_id;
+              rec.partidaItem = r.partida_item ?? null;
+              rec.itemDescription = r.item_description ?? '';
+              rec.validationMethod = r.validation_method ?? null;
+              rec.section = r.section ?? null;
+              rec._raw._status = 'synced';   // vino de la nube: no re-subir
+              rec._raw._changed = '';
+            });
+          }
+        });
+        templateItems = await protocolTemplateItemsCollection
+          .query(Q.where('template_id', args.template.id))
+          .fetch();
+      }
+    } catch { /* sin red → cae al abort de abajo */ }
+    if (templateItems.length === 0) {
+      throw new Error(
+        'La plantilla aún no termina de descargarse (0 filas). ' +
+        'Recarga el proyecto (o revisa tu conexión) e intenta de nuevo.',
+      );
+    }
+  }
   const tmplForExpand = templateItems.map((ti: any) => ({
     partida_item: ti.partidaItem ?? null,
     item_description: ti.itemDescription,

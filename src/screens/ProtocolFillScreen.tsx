@@ -33,7 +33,7 @@ import type Plan from '@models/Plan';
 import type Evidence from '@models/Evidence';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { Ionicons } from '@expo/vector-icons';
-import { pushProjectToSupabase, pushProtocolStatus, pushProtocolItem, pushPlansToSupabase } from '@services/SupabaseSyncService';
+import { pushProjectToSupabase, pushProtocolStatus, pushProtocolItem, pushPlansToSupabase, refreshProtocolFromCloud } from '@services/SupabaseSyncService';
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { buildFrozenComments } from '@utils/freezeSnapshot';
 import { resolveXrefs } from '@services/XrefResolver';
@@ -355,8 +355,8 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       .catch(() => {});
   }, [items]));
 
-  useEffect(() => {
-    const load = async () => {
+  // v96 — load extraído a callback para poder RE-CARGAR tras el pull-to-refresh.
+  const loadScreen = useCallback(async () => {
       const proto = await protocolsCollection.find(protocolId);
       setProtocol(proto);
       // v45.3 — tipo de ficha (id_protocolo de la plantilla) para los agrupamientos.
@@ -423,9 +423,20 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
         };
       }
       setItemState(initial);
-    };
-    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [protocolId]);
+
+  useEffect(() => { loadScreen(); }, [loadScreen]);
+
+  // v96 — Pull-to-refresh DENTRO de la ficha: recarga puntual desde la nube
+  // (protocolo + items + template, LWW) + auto-reparación si quedó sin filas
+  // (bug PRM-260003) + re-lectura del estado local de la pantalla.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const onPullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try { await refreshProtocolFromCloud(protocolId); } catch { /* offline → solo re-lee local */ }
+    try { await loadScreen(); } finally { setPullRefreshing(false); }
+  }, [protocolId, loadScreen]);
 
   useEffect(() => {
     if (!protocol?.locationId) return;
@@ -986,6 +997,9 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
       {/* Lista de items */}
       <FlatList
         ref={mainListRef}
+        // v96 — Pull-to-refresh: recarga la ficha desde la nube + repara vacías.
+        refreshing={pullRefreshing}
+        onRefresh={onPullRefresh}
         // v86 — Con el teclado abierto, el primer tap sobre Sí/No/cámara/Enviar
         // solo cerraba el teclado y se perdía (doble toque, peor con guantes).
         keyboardShouldPersistTaps="handled"
