@@ -554,7 +554,12 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
   const showSectionBands = sections.length > 1;
 
   // Modal "Ver tablas": solo si hay matrices auxiliares
-  const matrixList = useMemo(() => Object.values(matrices), [matrices]);
+  // v96d — Matrices INTERNAS (id con prefijo '_') ocultas de "Ver tablas"
+  // (diccionarios código→texto, no catálogos de consulta). Espejo del móvil.
+  const matrixList = useMemo(
+    () => Object.entries(matrices).filter(([id]) => !id.startsWith('_')).map(([, m]) => m),
+    [matrices],
+  );
   const [showMatricesModal, setShowMatricesModal] = useState(false);
 
   return (
@@ -563,7 +568,7 @@ export function NumericTable({ items, readOnly: readOnlyProp, onChangeManual, fr
         {!readOnly && manualOrder.length > 0 && (
           <button
             onClick={startPlay}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-white hover:bg-primary/90 transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition border border-success text-success bg-white hover:bg-success/5"
             title={t('webCNumeric.startFillTip')}
           >
             <Play size={12} fill="currentColor" />

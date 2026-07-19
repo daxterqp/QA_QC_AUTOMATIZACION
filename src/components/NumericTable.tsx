@@ -538,7 +538,13 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
       .catch(() => { if (!cancelled) setXrefResults([]); });
     return () => { cancelled = true; };
   }, [xrefPicker, projectId, xrefSearch]);
-  const matrixList = useMemo(() => Object.values(matrices), [matrices]);
+  // v96d — Matrices INTERNAS (id con prefijo '_', ej. _MSN/_MCF de los dictámenes
+  // en texto) no se muestran en "Ver tablas": son diccionarios código→texto de la
+  // ficha, no catálogos de consulta para el técnico.
+  const matrixList = useMemo(
+    () => Object.entries(matrices).filter(([id]) => !id.startsWith('_')).map(([, m]) => m),
+    [matrices],
+  );
   const [showMatricesModal, setShowMatricesModal] = useState(false);
 
   const manualOrder = useMemo(() => {
@@ -1123,7 +1129,7 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {!readOnly && manualOrder.length > 0 && (
           <TouchableOpacity onPress={startPlay} style={styles.playBtn}>
-            <Ionicons name="play" size={12} color={Colors.white} />
+            <Ionicons name="play" size={12} color={Colors.success} />
             <Text style={styles.playText}>{t('numericTable.startFill')}</Text>
           </TouchableOpacity>
         )}
@@ -1404,12 +1410,14 @@ function MatricesModalMobile({ matrices, onClose }: { matrices: MatrixData[]; on
 const styles = StyleSheet.create({
   wrap: { gap: 8 },
   // v32b — verde y compacto (mismo tamaño que el botón "Recapturar" del GPS)
-  playBtn: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.success, paddingVertical: 5, paddingHorizontal: 10, borderRadius: Radius.sm },
+  // v96d — ghost button verde (pedido del usuario) con la MISMA altura que
+  // matricesBtn (paddingVertical 6 + borde 1).
+  playBtn: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.success, paddingVertical: 6, paddingHorizontal: 12, borderRadius: Radius.sm },
   // Herramienta de desarrollo (autollenado) — estilo "dashed naranja" para que NO se
   // confunda con un control de producción. Solo se renderiza en builds __DEV__.
   devFillBtn: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderStyle: 'dashed', borderColor: '#b45309', backgroundColor: '#fff7ed', paddingVertical: 5, paddingHorizontal: 10, borderRadius: Radius.sm, marginBottom: 8 },
   devFillText: { color: '#b45309', fontSize: 11, fontWeight: '800' },
-  playText: { color: Colors.white, fontSize: 11, fontWeight: '700' },
+  playText: { color: Colors.success, fontSize: 12, fontWeight: '700' },
   // Banner de errores estilo alerta: borde izquierdo de color (como las alertas
   // del resto de la app), fondo cálido suave derivado de Colors.warning.
   banner: { backgroundColor: '#faf3e6', borderLeftWidth: 4, borderLeftColor: Colors.warning, borderRadius: Radius.sm, paddingVertical: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
