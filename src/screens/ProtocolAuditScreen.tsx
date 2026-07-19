@@ -670,6 +670,9 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         {numericMode ? (
           <View style={{ gap: 12 }}>
             <NumericTable
+              // v98b — SIN projectId el mapa id→código de xref no se resuelve y el
+              // Audit mostraba el ID interno crudo (bug reportado por el usuario).
+              projectId={(protocol as any)?.projectId ?? null}
               protocolCode={(protocol as any)?.protocolCode ?? null}
               items={items.map(it => ({
                 id: (it as any).id,

@@ -330,6 +330,10 @@ export default function ProtocolAuditPage() {
         else if (cell.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: cell.refKey, matrixId: cell.matrixId, searchCol: cell.searchCol, returnCol: cell.returnCol });
         else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
         else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
+        // v98b — celdas XREF al scope con su valor CONGELADO (comments): las `get`
+        // hornean el número heredado al enviar; sin esto las fórmulas que las
+        // referencian (#3A) daban null → "no conforme" falso (espejo del móvil).
+        else if (cell.kind === 'xref') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
       }
     }
     const { scope, errors, textValues } = resolveScopeCells(scopeCells, matrices, xrefValuesForAudit, auxTablesForAudit);

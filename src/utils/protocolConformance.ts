@@ -57,6 +57,12 @@ export function isProtocolConforming(items: ConformanceItem[], auxTables: AuxTab
       else if (cell.kind === 'formula' && cell.expr?.includes('@')) scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
       else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
       else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
+      // v98b — Las celdas XREF entran al scope con su valor CONGELADO (comments):
+      // las `get` hornearon el número heredado al enviar (p.ej. DMS del Proctor) y
+      // las fórmulas que las referencian (#3A) lo necesitan. Sin esta rama, TODA
+      // ficha con referencias salía "no conforme" (fórmulas → null) y el Dossier
+      // exigía "Aprobar con observación" sin haber ningún error real.
+      else if (cell.kind === 'xref') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
     }
   }
 
