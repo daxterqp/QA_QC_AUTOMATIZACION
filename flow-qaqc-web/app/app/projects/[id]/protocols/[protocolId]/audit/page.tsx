@@ -376,7 +376,9 @@ export default function ProtocolAuditPage() {
           let depsFilled = true;
           try {
             const deps = extractRefs(cell.expr);
-            depsFilled = deps.every(d => scope[d] != null);
+            // v98f — dep "llena" también si es TEXTO (list en textValues), p.ej.
+            // BUSCAR(tabla, #2A, col) con #2A lista — espejo del fix móvil.
+            depsFilled = deps.every(d => scope[d] != null || (textValues[d] != null && textValues[d] !== ''));
           } catch { depsFilled = false; }
           if (!depsFilled) { ok = false; break outer; }
           if (cell.range && !inRange(v, cell.range)) { ok = false; break outer; }

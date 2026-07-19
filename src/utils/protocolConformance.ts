@@ -103,7 +103,12 @@ export function isProtocolConforming(items: ConformanceItem[], auxTables: AuxTab
         if (v == null) return false;
         try {
           const deps = extractRefs(cell.expr);
-          if (!deps.every(d => scope[d] != null)) return false;
+          // v98f — una dependencia también está "llena" si es TEXTO (celdas list,
+          // p.ej. BUSCAR(tabla, #2A, col) con #2A = "Base Granular"): esas viven
+          // en textValues, no en el scope numérico. Exigir solo scope numérico
+          // marcaba "no conforme" FALSO a toda ficha con BUSCAR sobre una lista
+          // (GRA/DCC/CBR) aunque la fórmula resolviera perfectamente.
+          if (!deps.every(d => scope[d] != null || (textValues[d] != null && textValues[d] !== ''))) return false;
         } catch { return false; }
         if (cell.range && !inRange(v, cell.range)) return false;
       }
