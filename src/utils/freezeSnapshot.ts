@@ -20,6 +20,13 @@ interface FreezeItem { id: string; partidaItem: string | null; validationMethod:
  *  congelado los incluya — sin esto quedarían en blanco en Audit/Resumen. */
 export function buildFrozenComments(items: FreezeItem[], auxTables?: AuxTables, xrefValues?: XrefValues): Map<string, string> {
   const out = new Map<string, string>();
+  // v98e — ORDEN DETERMINISTA por partida (natural). Los items llegan en orden
+  // de fetch ARBITRARIO (Watermelon no garantiza orden) y extractMatrices es
+  // POSICIONAL: las filas val- deben SEGUIR a su matrix-[..]. Con orden
+  // revuelto las matrices se arman corruptas y los lookups congelan VACÍO
+  // (bug DCC-260003: dictámenes en blanco tras enviar).
+  items = [...items].sort((a, b) =>
+    String(a.partidaItem ?? '').localeCompare(String(b.partidaItem ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validationMethod) }));
   const { mainRows, matrices } = extractMatrices(parsed);
 

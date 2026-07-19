@@ -13,6 +13,12 @@ interface FreezeItem { id: string; partida_item: string | null; validation_metho
  *  `xrefValues` resuelve los llamados entre ensayos `@código.celda` (v42). */
 export function buildFrozenComments(items: FreezeItem[], auxTables?: AuxTables, xrefValues?: XrefValues): Map<string, string> {
   const out = new Map<string, string>();
+  // v98e — ORDEN DETERMINISTA por partida (natural): extractMatrices es
+  // POSICIONAL (val- debe seguir a su matrix-[..]); con orden de fetch
+  // arbitrario las matrices se corrompen y los lookups congelan vacío.
+  // Espejo del mismo fix en src/utils/freezeSnapshot.ts (móvil).
+  items = [...items].sort((a, b) =>
+    String(a.partida_item ?? '').localeCompare(String(b.partida_item ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
   const { mainRows, matrices } = extractMatrices(parsed);
 

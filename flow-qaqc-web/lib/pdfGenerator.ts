@@ -554,7 +554,10 @@ function numericProtoBlocks(
   headerColor: string = DEFAULT_HEADER_COLOR,
   croquis?: { block: NumericPdfBlock; placement: 'start' | 'end' } | null,
 ): NumericPdfBlock[] {
-  const blocks = buildNumericProtocolBlocks(full.items.map(it => ({
+  // v98e — orden determinista por partida (matrices/render posicionales).
+  const itemsSorted = [...full.items].sort((a, b) =>
+    String(a.partida_item ?? '').localeCompare(String(b.partida_item ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
+  const blocks = buildNumericProtocolBlocks(itemsSorted.map(it => ({
     id: it.id,
     item_description: it.item_description,
     validation_method: it.validation_method,

@@ -113,6 +113,11 @@ export async function createInstances(args: CreateInstancesArgs): Promise<Create
       );
     }
   }
+  // v98e — ORDEN DETERMINISTA por partida al copiar: el fetch de Watermelon no
+  // garantiza orden y las instancias nacían con filas revueltas → el detector
+  // POSICIONAL de matrices (val- tras matrix-) se corrompía al congelar.
+  templateItems = [...templateItems].sort((a: any, b: any) =>
+    String(a.partidaItem ?? '').localeCompare(String(b.partidaItem ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   const tmplForExpand = templateItems.map((ti: any) => ({
     partida_item: ti.partidaItem ?? null,
     item_description: ti.itemDescription,

@@ -38,10 +38,13 @@ export function isProtocolConforming(items: ConformanceItem[], auxTables: AuxTab
   }
 
   // Modo numérico: construir scope live con matrices y validar cada celda.
-  const parsedRows = items.map(it => ({
-    item: it,
-    spec: parseNumericRow(it.validationMethod ?? null),
-  }));
+  // v98e — orden determinista por partida (extractMatrices es posicional).
+  const parsedRows = [...items]
+    .sort((a, b) => String(a.partidaItem ?? '').localeCompare(String(b.partidaItem ?? ''), undefined, { numeric: true, sensitivity: 'base' }))
+    .map(it => ({
+      item: it,
+      spec: parseNumericRow(it.validationMethod ?? null),
+    }));
   const { mainRows, matrices } = extractMatrices(parsedRows);
   const scopeCells: ScopeCell[] = [];
   for (const { item, spec } of mainRows) {

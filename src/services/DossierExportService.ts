@@ -643,8 +643,11 @@ function xrefCommentsForPdf(vm: string | null, comments: string | null): string 
   }).join(', ')).join(' // ');
 }
 
-/** Mapea los modelos WatermelonDB (camelCase) al shape plano del helper. */
+/** Mapea los modelos WatermelonDB (camelCase) al shape plano del helper.
+ *  v98e — orden determinista por partida (matrices/render posicionales). */
 function toNumericPdfItems(items: ProtocolItem[]): NumericPdfItem[] {
+  items = [...items].sort((a: any, b: any) =>
+    String(a.partidaItem ?? '').localeCompare(String(b.partidaItem ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   return items.map(it => ({
     id: it.id,
     item_description: it.itemDescription,

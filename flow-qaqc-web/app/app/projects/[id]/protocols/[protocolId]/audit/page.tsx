@@ -313,7 +313,10 @@ export default function ProtocolAuditPage() {
   if (numericMode) {
     // Construir celdas planas (multi-columna) y resolver scope live
     const scopeCells: ScopeCell[] = [];
-    const parsedRows = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
+    // v98e — orden determinista por partida (extractMatrices es posicional).
+    const parsedRows = [...items]
+      .sort((a, b) => String(a.partida_item ?? '').localeCompare(String(b.partida_item ?? ''), undefined, { numeric: true, sensitivity: 'base' }))
+      .map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
     const { matrices } = extractMatrices(parsedRows);
     for (const { item, spec } of parsedRows) {
       if (spec?.kind !== 'row') continue;
