@@ -378,7 +378,7 @@ export default function EnsayosPage() {
         syncing={isLoading}
       />
 
-      <div className="flex-1 p-4 max-w-3xl w-full mx-auto flex flex-col gap-2">
+      <div className="flex-1 p-4 max-w-screen-2xl w-full mx-auto flex flex-col gap-2">
         {/* ── v32: buscador + filtros cruzados ── */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 bg-white border border-border rounded-md px-3">
@@ -529,22 +529,23 @@ export default function EnsayosPage() {
                 <span className="text-[11px] text-textMuted">{items.length === 1 ? t('webEnsayos.list.countTest', { n: items.length }) : t('webEnsayos.list.countTests', { n: items.length })}</span>
               </button>
 
-              {/* v32 — Panel desplegado: fondo plomo tipo tapiz (estilo "Planos") */}
+              {/* v32 — Panel desplegado: fondo plomo tipo tapiz (estilo "Planos").
+                  v93 — items en grid (2-3 col en PC) dentro de cada grupo. */}
               {isOpen && (
-                <div className="flex flex-col gap-1.5 bg-[#e6eaf0] rounded-b-md px-2.5 py-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 bg-[#e6eaf0] rounded-b-md px-2.5 py-2.5">
                   {isJefe && g.hidden && (
-                    <p className="text-[11px] text-textMuted italic text-center py-1.5">
+                    <p className="col-span-full text-[11px] text-textMuted italic text-center py-1.5">
                       {t('webEnsayos.list.hiddenType')}
                     </p>
                   )}
                   {isJefe && !g.hidden && (
                     <button onClick={() => openAddModal(g)}
-                      className="flex items-center justify-center gap-1.5 py-2 rounded border-[1.5px] border-primary bg-white text-primary text-xs font-bold hover:bg-primary/5 transition">
+                      className="col-span-full flex items-center justify-center gap-1.5 py-2 rounded border-[1.5px] border-primary bg-white text-primary text-xs font-bold hover:bg-primary/5 transition">
                       <Plus size={13} /> {t('webEnsayos.list.addTest')}
                     </button>
                   )}
                   {items.length === 0 && (
-                    <p className="text-xs text-textMuted italic pl-1">
+                    <p className="col-span-full text-xs text-textMuted italic pl-1">
                       {filtersActive ? t('webEnsayos.list.emptyFiltered') : t('webEnsayos.list.emptyNone')}
                     </p>
                   )}

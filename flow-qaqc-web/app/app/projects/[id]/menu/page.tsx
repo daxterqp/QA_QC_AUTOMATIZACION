@@ -229,7 +229,7 @@ export default function ProjectMenuPage() {
         crumbs={[{ label: t('webEnsayos.menu.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…' }]}
       />
 
-      <div className="flex-1 p-4 max-w-3xl w-full mx-auto">
+      <div className="flex-1 p-4 max-w-screen-2xl w-full mx-auto">
         {/* Hero */}
         <div className="bg-white rounded-xl shadow-card border border-border p-5 mb-4 flex items-center gap-4">
           <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center">
@@ -242,13 +242,13 @@ export default function ProjectMenuPage() {
           <ProjectRefreshButton projectId={projectId} />
         </div>
 
-        {/* Opciones */}
-        <div className="flex flex-col gap-3 mb-6">
+        {/* Opciones — grid en PC (v93): dossier destacado a lo ancho, módulos en 2-3 col */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
           {/* Parte C — Dossier de calidad SIEMPRE primero, enlaza al dossier
               existente (sin duplicarlo) y muestra el estado del proyecto. */}
           <Link
             href={`/app/projects/${projectId}/dossier`}
-            className="bg-white rounded-xl shadow-card border border-border p-4 flex items-center gap-4 hover:shadow-lg hover:border-primary/30 transition group"
+            className="md:col-span-2 xl:col-span-3 bg-white rounded-xl shadow-card border border-border p-4 flex items-center gap-4 hover:shadow-lg hover:border-primary/30 transition group"
           >
             <div className={`w-14 h-14 rounded-lg flex items-center justify-center ${TONE.success.box} ${TONE.success.icon}`}>
               <BookOpen size={26} />
@@ -272,9 +272,9 @@ export default function ProjectMenuPage() {
               <Link
                 key={opt.key}
                 href={opt.href}
-                className="bg-white rounded-xl shadow-card border border-border p-4 flex items-center gap-4 hover:shadow-lg hover:border-primary/30 transition group"
+                className="h-full bg-white rounded-xl shadow-card border border-border p-4 flex items-center gap-4 hover:shadow-lg hover:border-primary/30 transition group"
               >
-                <div className={`w-14 h-14 rounded-lg flex items-center justify-center ${TONE[opt.tone].box} ${TONE[opt.tone].icon}`}>
+                <div className={`w-14 h-14 shrink-0 rounded-lg flex items-center justify-center ${TONE[opt.tone].box} ${TONE[opt.tone].icon}`}>
                   <Icon size={26} />
                 </div>
                 <div className="flex-1">

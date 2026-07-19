@@ -148,8 +148,8 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Lista */}
-      <div className="p-4 flex flex-col gap-3 pb-10">
+      {/* Lista — grid en PC (v93): 1 col móvil → hasta 4 en pantallas anchas */}
+      <div className="p-4 pb-10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 max-w-screen-2xl mx-auto w-full">
         {showSkeleton ? (
           [...Array(3)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl shadow-card p-4 flex flex-col gap-3 animate-pulse">
@@ -166,7 +166,7 @@ export default function ProjectsPage() {
             </div>
           ))
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center py-16 gap-3">
+          <div className="col-span-full flex flex-col items-center py-16 gap-3">
             <FolderOpen size={40} className="text-[#8896a5]" />
             <p className="text-[#8896a5] font-semibold">
               {search ? t('webMisc.noResultsShort') : t('webMisc.noProjectsYet')}
@@ -180,7 +180,7 @@ export default function ProjectsPage() {
             {hiddenCount > 0 && (
               <button
                 onClick={() => setShowHidden(v => !v)}
-                className="self-end text-[11px] font-bold text-muted hover:text-navy flex items-center gap-1 mb-1"
+                className="col-span-full justify-self-end text-[11px] font-bold text-muted hover:text-navy flex items-center gap-1 mb-1"
               >
                 {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
                 {showHidden ? t('webMisc.hideHiddenProjects', { count: hiddenCount, plural: hiddenCount !== 1 ? 's' : '' })
@@ -188,7 +188,7 @@ export default function ProjectsPage() {
               </button>
             )}
             {filtered.map((project, i) => (
-              <div key={project.id} className="animate-[fadeSlideUp_.35s_var(--ease-out)_both]" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
+              <div key={project.id} className="h-full animate-[fadeSlideUp_.35s_var(--ease-out)_both]" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
               <ProjectCard
                 project={project}
                 isJefe={isJefe}
@@ -226,7 +226,7 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
   return (
     <div
       className={cn(
-        'bg-white rounded-xl shadow-card overflow-hidden border-t-[3px] hover:shadow-lg transition-shadow',
+        'bg-white rounded-xl shadow-card overflow-hidden border-t-[3px] hover:shadow-lg transition-shadow h-full flex flex-col',
         isHidden && 'opacity-60',
       )}
       style={{ borderTopColor: 'var(--color-primary, #00bcb4)' }}
@@ -261,8 +261,8 @@ function ProjectCard({ project, isJefe, isCreator, isHidden, onToggleHidden }: {
         <ChevronRight size={20} className="text-[#8896a5]" />
       </div>
 
-      {/* Fila de chips de acción (igual que móvil) */}
-      <div className="flex items-center gap-1.5 px-3 pb-3 pt-2.5 border-t border-divider">
+      {/* Fila de chips de acción (igual que móvil); mt-auto = alturas parejas en grid */}
+      <div className="mt-auto flex items-center gap-1.5 px-3 pb-3 pt-2.5 border-t border-divider flex-wrap">
         {/* Observaciones (con contador rojo si > 0) */}
         <Link
           href={`/app/projects/${project.id}/observations`}

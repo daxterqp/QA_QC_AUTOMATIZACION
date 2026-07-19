@@ -98,7 +98,7 @@ export default function UsersPage() {
         }
       />
 
-      <div className="flex-1 max-w-3xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
+      <div className="flex-1 max-w-screen-2xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
         {/* Búsqueda */}
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -125,14 +125,14 @@ export default function UsersPage() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {filtered.map(u => {
               const meta = ROLE_META[u.role];
               const role = meta ? { label: t(meta.labelKey), cls: meta.cls } : { label: u.role, cls: 'bg-gray-100 text-gray-600' };
               const isSelf = u.id === currentUser?.id;
               const projNames = (accessByUser[u.id] ?? []).map(id => projName[id]).filter(Boolean) as string[];
               return (
-                <div key={u.id} className="bg-white rounded-xl shadow-subtle px-4 py-3 flex items-center gap-3 hover:shadow-md transition">
+                <div key={u.id} className="h-full bg-white rounded-xl shadow-subtle px-4 py-3 flex items-center gap-3 hover:shadow-md transition">
                   <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-black flex items-center justify-center flex-shrink-0">
                     {(u.name?.[0] ?? '') + (u.apellido?.[0] ?? '')}
                   </div>

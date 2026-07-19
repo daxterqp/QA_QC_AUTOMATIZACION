@@ -390,7 +390,7 @@ export default function DossierPage() {
         }
       />
 
-      <div className="flex-1 max-w-2xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
+      <div className="flex-1 max-w-screen-2xl w-full mx-auto px-4 py-5 flex flex-col gap-4">
 
         {/* ── Filtros inteligentes (dinámicos según configuración del proyecto) ── */}
         {!isLoading && protocols.length > 0 && (
@@ -522,7 +522,8 @@ export default function DossierPage() {
               </span>
             </div>
 
-            {/* Protocol cards */}
+            {/* Protocol cards — grid en PC (v93) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 items-start">
             {section.data.map(protocol => (
               <ProtocolCard
                 key={protocol.id}
@@ -538,6 +539,7 @@ export default function DossierPage() {
                 includeEquipment={includeEquipment}
               />
             ))}
+            </div>
           </div>
         ))}
       </div>

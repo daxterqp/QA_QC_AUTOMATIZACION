@@ -8,6 +8,9 @@
  * que el resto del sistema.
  */
 import proj4 from 'proj4';
+import type { Project } from '@/types';
+// Tipo-only (se borra al compilar): no arrastra Leaflet a este módulo puro.
+import type { MapOrthophoto } from '@components/sectors/SectorMap';
 
 export type OrthoSystem = 'WGS84_LATLNG' | 'PSAD56_LATLNG' | 'WGS84_UTM' | 'PSAD56_UTM' | 'CUSTOM';
 
@@ -77,6 +80,28 @@ export function cornersToBounds(a: LatLng, b: LatLng): LeafletBounds {
 }
 
 export const isUtm = (s: OrthoSystem) => s === 'WGS84_UTM' || s === 'PSAD56_UTM';
+
+/**
+ * Ortofoto del proyecto → capas ImageOverlay del mapa (servidas vía el proxy
+ * /api/s3-image). v37 — teselas de la versión activa (1 o N), con fallback a
+ * la key única antigua. Extraída de SectoresTab para reusarla en el dashboard.
+ */
+export function buildOrthophotoSources(
+  project: Pick<Project, 'orthophoto_tiles_json' | 'orthophoto_s3_key' | 'orthophoto_bounds_json' | 'updated_at'> | null | undefined,
+): MapOrthophoto[] {
+  if (!project) return [];
+  const v = project.updated_at ? `&t=${encodeURIComponent(String(project.updated_at))}` : '';
+  const mk = (key: string, bounds: any, rotation?: any): MapOrthophoto =>
+    ({ url: `/api/s3-image?key=${encodeURIComponent(key)}${v}`, bounds, opacity: 0.9, rotation });
+  const tiles = project.orthophoto_tiles_json;
+  if (Array.isArray(tiles) && tiles.length > 0) {
+    return tiles.filter(t => t?.s3Key && t?.bounds).map(t => mk(t.s3Key, t.bounds, (t as any).rotation));
+  }
+  if (project.orthophoto_s3_key && project.orthophoto_bounds_json) {
+    return [mk(project.orthophoto_s3_key, project.orthophoto_bounds_json)];
+  }
+  return [];
+}
 
 /**
  * Normaliza un bounds de CUALQUIER forma a exactamente [[s,w],[n,e]] con 4

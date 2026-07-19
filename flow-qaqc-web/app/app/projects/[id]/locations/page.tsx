@@ -128,14 +128,14 @@ export default function LocationsPage() {
         )}
       </div>
 
-      {/* Lista */}
-      <div className="flex-1 p-4 flex flex-col gap-2.5">
+      {/* Lista — grid en PC (v93) */}
+      <div className="flex-1 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 auto-rows-min max-w-screen-2xl mx-auto w-full">
         {showSkeleton ? (
           [...Array(6)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl h-16 animate-pulse border border-gray-100" />
           ))
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center py-16 gap-3">
+          <div className="col-span-full flex flex-col items-center py-16 gap-3">
             <MapPin size={36} className="text-[#8896a5]" />
             <p className="text-[#8896a5] font-semibold text-sm text-center">
               {locations.length === 0

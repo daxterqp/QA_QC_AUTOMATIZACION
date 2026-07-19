@@ -100,7 +100,7 @@ export default function SamplesPage() {
         crumbs={[{ label: t('webEnsayos.menu.crumbProjects'), href: '/app/projects' }, { label: project?.name ?? '…' }]}
       />
 
-      <div className="flex-1 p-4 max-w-3xl w-full mx-auto flex flex-col gap-3">
+      <div className="flex-1 p-4 max-w-screen-2xl w-full mx-auto flex flex-col gap-3">
         {/* Filtros */}
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-2 bg-white border border-border rounded-lg px-3 py-2">
@@ -122,7 +122,7 @@ export default function SamplesPage() {
         )}
 
         <button onClick={() => setShowAdd(true)}
-          className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-bold bg-primary/5 border border-primary/30 text-primary hover:bg-primary/10 transition">
+          className="sm:self-start sm:px-6 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-bold bg-primary/5 border border-primary/30 text-primary hover:bg-primary/10 transition">
           <Plus size={15} /> {t('samples.addSample')}
         </button>
 
@@ -134,16 +134,16 @@ export default function SamplesPage() {
           </button>
         )}
 
-        {/* Lista */}
+        {/* Lista — grid en PC (v93) */}
         {isLoading ? (
           <p className="text-sm text-textMuted text-center py-8">…</p>
         ) : visible.length === 0 ? (
           <p className="text-sm text-textMuted text-center py-8">{t('samples.empty')}</p>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {visible.map(s => (
               <Link key={s.id} href={`/app/projects/${projectId}/samples/${s.id}`}
-                className="bg-white rounded-xl shadow-card border border-border border-t-[3px] p-3 flex items-center gap-3 hover:shadow-lg hover:border-primary/30 transition group"
+                className="h-full bg-white rounded-xl shadow-card border border-border border-t-[3px] p-3 flex items-center gap-3 hover:shadow-lg hover:border-primary/30 transition group"
                 style={{ borderTopColor: 'var(--color-primary, #00bcb4)' }}>
                 <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
                   <FlaskConical size={18} className="text-primary" />

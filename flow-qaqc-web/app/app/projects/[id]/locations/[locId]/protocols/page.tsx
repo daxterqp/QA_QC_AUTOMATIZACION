@@ -126,7 +126,7 @@ export default function LocationProtocolsPage() {
         syncing={isLoading}
       />
 
-      <div className="flex-1 p-4 flex flex-col gap-2.5">
+      <div className="flex-1 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 auto-rows-min max-w-screen-2xl mx-auto w-full">
         {isLoading ? (
           [...Array(4)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl shadow-subtle p-4 flex items-center gap-3 animate-pulse">
@@ -139,7 +139,7 @@ export default function LocationProtocolsPage() {
             </div>
           ))
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center py-16 gap-3">
+          <div className="col-span-full flex flex-col items-center py-16 gap-3">
             <AlertCircle size={36} className="text-[#8896a5]" />
             <p className="text-[#8896a5] text-sm text-center leading-relaxed">
               {t('webMisc.noLinkedProtocols')}<br />

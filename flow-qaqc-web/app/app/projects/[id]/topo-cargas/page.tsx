@@ -114,7 +114,7 @@ export default function TopoCargasPage() {
         ) : undefined}
       />
 
-      <div className="flex-1 p-4 flex flex-col gap-4 pb-24">
+      <div className="flex-1 p-4 flex flex-col gap-4 pb-24 max-w-screen-2xl mx-auto w-full">
         {coverage && <TopoCoverageBox summary={coverage} detailHref={`/app/projects/${projectId}/topo-coverage`} />}
         {isLoading ? (
           <div className="flex items-center gap-2 text-muted text-sm"><Loader2 size={16} className="animate-spin" /> Cargando…</div>
@@ -127,8 +127,10 @@ export default function TopoCargasPage() {
           groups.map(([day, items]) => (
             <div key={day} className="flex flex-col gap-2">
               <p className="text-[11px] font-bold text-muted uppercase tracking-wider">{fmtDate(day)}</p>
+              {/* grid en PC (v93) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
               {items.map((c) => (
-                <div key={c.id} className="bg-white rounded-xl shadow-subtle border border-transparent hover:border-primary/20 transition flex items-center gap-3 p-4">
+                <div key={c.id} className="h-full bg-white rounded-xl shadow-subtle border border-transparent hover:border-primary/20 transition flex items-center gap-3 p-4">
                   <button onClick={() => canEdit && openEdit(c)} disabled={!canEdit} className="flex-1 min-w-0 flex items-center gap-3 text-left">
                     <div className="w-9 h-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <Mountain size={16} className="text-primary" />
@@ -154,6 +156,7 @@ export default function TopoCargasPage() {
                   )}
                 </div>
               ))}
+              </div>
             </div>
           ))
         )}

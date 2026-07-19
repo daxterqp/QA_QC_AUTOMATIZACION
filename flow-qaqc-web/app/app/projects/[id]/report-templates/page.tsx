@@ -67,17 +67,17 @@ export default function ReportTemplatesPage() {
         }
       />
 
-      <div className="flex-1 p-4 flex flex-col gap-2.5 max-w-3xl w-full mx-auto">
+      <div className="flex-1 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 auto-rows-min max-w-screen-2xl w-full mx-auto">
         {isLoading ? (
           [...Array(3)].map((_, i) => <div key={i} className="bg-white rounded-xl h-[84px] animate-pulse border border-gray-100" />)
         ) : templates.length === 0 ? (
-          <div className="flex flex-col items-center py-16 gap-3">
+          <div className="col-span-full flex flex-col items-center py-16 gap-3">
             <Mail size={36} className="text-[#8896a5]" />
             <p className="text-[#8896a5] font-semibold text-sm text-center">Aún no hay modelos de reporte.<br />Crea uno para enviar la Tabla Resumen + gráficos por correo, automáticamente.</p>
           </div>
         ) : (
           templates.map(tpl => (
-            <div key={tpl.id} className="bg-white rounded-xl shadow-subtle border border-transparent p-4 flex items-center gap-3 hover:shadow-card hover:border-primary/20 transition group">
+            <div key={tpl.id} className="h-full bg-white rounded-xl shadow-subtle border border-transparent p-4 flex items-center gap-3 hover:shadow-card hover:border-primary/20 transition group">
               <div className={cn('w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0', tpl.status === 'active' ? 'bg-primary/10' : 'bg-gray-100')}>
                 <Mail size={18} className={tpl.status === 'active' ? 'text-primary' : 'text-[#8896a5]'} />
               </div>

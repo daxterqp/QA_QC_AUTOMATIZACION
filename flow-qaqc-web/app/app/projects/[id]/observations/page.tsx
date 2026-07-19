@@ -327,17 +327,17 @@ export default function ObservationsPage() {
         </div>
       </div>
 
-      {/* ── Lista ── */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+      {/* ── Lista — grid en PC (v93) ── */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 auto-rows-min max-w-screen-2xl mx-auto w-full">
         {isLoading && (
-          <div className="flex flex-col items-center gap-3 py-16">
+          <div className="col-span-full flex flex-col items-center gap-3 py-16">
             <Loader2 size={28} className="animate-spin text-primary" />
             <p className="text-muted text-sm">{t('webEnsayos.obs.loading')}</p>
           </div>
         )}
 
         {!isLoading && filtered.length === 0 && (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
+          <div className="col-span-full flex flex-col items-center gap-3 py-16 text-center">
             <AlertCircle size={36} className="text-muted opacity-30" />
             <p className="text-muted text-sm font-semibold">
               {filter === 'all' ? t('webEnsayos.obs.emptyAll') : (filter === 'open' ? t('webEnsayos.obs.emptyOpen') : t('webEnsayos.obs.emptyClosed'))}

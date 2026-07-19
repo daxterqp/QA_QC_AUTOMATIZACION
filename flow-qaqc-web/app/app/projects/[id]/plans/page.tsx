@@ -122,7 +122,7 @@ export default function PlansPage() {
         }
       />
 
-      <div className="flex-1 p-4 max-w-4xl mx-auto w-full flex flex-col gap-3">
+      <div className="flex-1 p-4 max-w-screen-2xl mx-auto w-full flex flex-col gap-3">
         {/* Toggle modo + sync */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex rounded-lg border border-border bg-white p-0.5">
@@ -200,11 +200,11 @@ export default function PlansPage() {
                   </button>
 
                   {isOpen && (
-                    <div className="border-t border-border">
+                    <div className="border-t border-border p-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                       {group.plans.map(plan => (
                         <div
                           key={plan.id}
-                          className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 hover:bg-surface transition"
+                          className="h-full flex items-center gap-3 px-3 py-3 rounded-lg border border-border hover:bg-surface transition"
                         >
                           <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                             <FileText size={18} className="text-primary" />

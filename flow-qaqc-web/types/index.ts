@@ -572,6 +572,9 @@ export interface Protocol {
   coord_backup_lat?: number | null;
   coord_backup_lng?: number | null;
   coord_backup_captured_at?: number | null;
+  /** v44 — coordenada WGS84 derivada del módulo topográfico (prioridad sobre GPS). */
+  topo_latitude?: number | null;
+  topo_longitude?: number | null;
   sector_id?: string | null;
   // v31 — modos de llenado + codificación correlativa (Partes D+E)
   /** v43 — Muestra física vinculada (módulo "ensayos por muestra"). */

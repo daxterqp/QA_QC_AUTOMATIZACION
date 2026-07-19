@@ -27,6 +27,7 @@ import {
 import { SectorCroquis } from './SectorCroquis';
 import { OrthophotoSection } from './OrthophotoSection';
 import type { MapSector, MapOrthophoto } from './SectorMap';
+import { buildOrthophotoSources } from '@lib/orthophoto';
 import { useProjects } from '@hooks/useProjects';
 import { useI18n, tx } from '@lib/i18n';
 
@@ -72,15 +73,12 @@ export function SectoresTab({ projectId }: { projectId: string }) {
   );
 
   // Ortofoto del proyecto → ImageOverlay del mapa (servida vía proxy s3-image).
-  const orthophotos = useMemo<MapOrthophoto[]>(() => {
-    const v = project?.updated_at ? `&t=${encodeURIComponent(String(project.updated_at))}` : '';
-    const mk = (key: string, bounds: any, rotation?: any) => ({ url: `/api/s3-image?key=${encodeURIComponent(key)}${v}`, bounds, opacity: 0.9, rotation });
-    // v37 — teselas de la versión activa (1 o N). Fallback a la key única antigua.
-    const tiles = project?.orthophoto_tiles_json;
-    if (Array.isArray(tiles) && tiles.length > 0) return tiles.filter(t => t?.s3Key && t?.bounds).map(t => mk(t.s3Key, t.bounds, (t as any).rotation));
-    if (project?.orthophoto_s3_key && project?.orthophoto_bounds_json) return [mk(project.orthophoto_s3_key, project.orthophoto_bounds_json)];
-    return [];
-  }, [project?.orthophoto_tiles_json, project?.orthophoto_s3_key, project?.orthophoto_bounds_json, project?.updated_at]);
+  // Lógica compartida con el dashboard en lib/orthophoto.buildOrthophotoSources.
+  const orthophotos = useMemo<MapOrthophoto[]>(
+    () => buildOrthophotoSources(project),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project?.orthophoto_tiles_json, project?.orthophoto_s3_key, project?.orthophoto_bounds_json, project?.updated_at],
+  );
 
   const refreshProject = () => {
     refetchProjects();

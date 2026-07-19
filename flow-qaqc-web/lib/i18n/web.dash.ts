@@ -129,6 +129,47 @@ export const STRINGS_WEB_DASH: Record<string, { es: string; en: string; pt: stri
   'webDash.deleteChartTitle': { es: 'Eliminar gráfico', en: 'Delete chart', pt: 'Excluir gráfico' },
   'webDash.done': { es: 'Listo', en: 'Done', pt: 'Pronto' },
 
+  // ── Dashboard rediseñado: KPIs ──
+  'webDash.kpiProjects': { es: 'Obras', en: 'Projects', pt: 'Obras' },
+  'webDash.kpiTotalTests': { es: 'Ensayos totales', en: 'Total tests', pt: 'Ensaios totais' },
+  'webDash.kpiProgress': { es: 'Avance de obra', en: 'Work progress', pt: 'Avanço da obra' },
+  'webDash.kpiAvgProgress': { es: 'Avance promedio', en: 'Average progress', pt: 'Avanço médio' },
+  'webDash.kpiPendingReview': { es: 'Pend. de revisión', en: 'Pending review', pt: 'Pend. de revisão' },
+  'webDash.kpiOpenObs': { es: 'Obs. abiertas', en: 'Open obs.', pt: 'Obs. abertas' },
+  'webDash.kpiOfExpected': { es: '{done} de {total} esperados', en: '{done} of {total} expected', pt: '{done} de {total} esperados' },
+
+  // ── Dashboard rediseñado: filtros ──
+  'webDash.filterSpecialty': { es: 'Especialidad', en: 'Specialty', pt: 'Especialidade' },
+  'webDash.filterStatusHint': { es: 'solo mapa', en: 'map only', pt: 'só mapa' },
+  'webDash.statusSubmittedShort': { es: 'En revisión', en: 'In review', pt: 'Em revisão' },
+  'webDash.statusDraftShort': { es: 'Borrador', en: 'Draft', pt: 'Rascunho' },
+
+  // ── Dashboard rediseñado: donut / panel ──
+  'webDash.donutTitle': { es: 'Avance de obra', en: 'Work progress', pt: 'Avanço da obra' },
+
+  // ── Dashboard rediseñado: mapa ──
+  'webDash.mapLoading': { es: 'Cargando mapa…', en: 'Loading map…', pt: 'Carregando mapa…' },
+  'webDash.mapLayerTests': { es: 'Ensayos', en: 'Tests', pt: 'Ensaios' },
+  'webDash.mapOpenTest': { es: 'Abrir ensayo', en: 'Open test', pt: 'Abrir ensaio' },
+  'webDash.mapLegendStatus': { es: 'Estados', en: 'Status', pt: 'Estados' },
+  'webDash.mapLegendProgress': { es: 'Avance', en: 'Progress', pt: 'Avanço' },
+  'webDash.bucketGood': { es: '≥ 70%', en: '≥ 70%', pt: '≥ 70%' },
+  'webDash.bucketMid': { es: '40–69%', en: '40–69%', pt: '40–69%' },
+  'webDash.bucketLow': { es: '< 40%', en: '< 40%', pt: '< 40%' },
+  'webDash.bucketNone': { es: 'Sin esperados', en: 'No expected', pt: 'Sem esperados' },
+  'webDash.mapNoGeoTitle': { es: 'Este proyecto aún no tiene mapa', en: 'This project has no map yet', pt: 'Este projeto ainda não tem mapa' },
+  'webDash.mapNoGeoBody': { es: 'Carga sectores, una ortofoto o captura GPS en los ensayos para ver el mapa operativo.', en: 'Upload sectors, an orthophoto or capture GPS on tests to see the operational map.', pt: 'Carregue setores, uma ortofoto ou capture GPS nos ensaios para ver o mapa operativo.' },
+  'webDash.mapNoGeoCta': { es: 'Configurar geolocalización', en: 'Set up geolocation', pt: 'Configurar geolocalização' },
+
+  // ── Dashboard rediseñado: portafolio + drill-down ──
+  'webDash.portfolioSubtitle': { es: 'Portafolio de obras', en: 'Works portfolio', pt: 'Portfólio de obras' },
+  'webDash.backToPortfolio': { es: 'Portafolio', en: 'Portfolio', pt: 'Portfólio' },
+  'webDash.rankingTitle': { es: 'Avance por proyecto', en: 'Progress by project', pt: 'Avanço por projeto' },
+  'webDash.rankingHint': { es: 'Toca una obra para ver su dashboard', en: 'Tap a project to open its dashboard', pt: 'Toque numa obra para ver seu painel' },
+  'webDash.noLocation': { es: 'Sin ubicación', en: 'No location', pt: 'Sem localização' },
+  'webDash.portfolioNoGeoTitle': { es: 'Ninguna obra tiene ubicación aún', en: 'No project has a location yet', pt: 'Nenhuma obra tem localização ainda' },
+  'webDash.portfolioNoGeoBody': { es: 'El mapa se activa cuando una obra tiene ortofoto, sectores o ensayos con GPS.', en: 'The map activates when a project has an orthophoto, sectors or GPS-tagged tests.', pt: 'O mapa é ativado quando uma obra tem ortofoto, setores ou ensaios com GPS.' },
+
   // ── Tablas Resumen: gráfico SVG ──
   'webDash.noDataToPlot': { es: 'Sin datos para graficar.', en: 'No data to plot.', pt: 'Sem dados para plotar.' },
   'webDash.axisTimeDate': { es: 'Tiempo (Fecha)', en: 'Time (Date)', pt: 'Tempo (Data)' },
