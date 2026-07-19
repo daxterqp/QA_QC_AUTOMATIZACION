@@ -20,7 +20,8 @@ import type { LeafletBounds } from '@lib/orthophoto';
 import KpiTile from './KpiTile';
 import ProjectDashboard from './ProjectDashboard';
 
-const SectorMap = dynamic(() => import('@components/sectors/SectorMap'), {
+// v94 — motor GL (MapLibre: basemap oscuro + 3D + animaciones).
+const GLMap = dynamic(() => import('@components/map/GLMap'), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full min-h-[240px] bg-surface rounded-xl text-xs text-gray-400">
@@ -29,8 +30,9 @@ const SectorMap = dynamic(() => import('@components/sectors/SectorMap'), {
   ),
 });
 
-/** Duración del flyTo (0.8s en SectorMap) + margen antes de montar el detalle. */
-const FLY_MS = 900;
+/** FALLBACK del drill-down: el camino normal es onFocusEnd (moveend del flyTo
+ *  de 1.4s); este timer solo dispara si el evento no llega. */
+const FLY_MS = 1800;
 
 export default function PortfolioDashboard() {
   const { t } = useI18n();
@@ -39,26 +41,37 @@ export default function PortfolioDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flyBounds, setFlyBounds] = useState<LeafletBounds | null>(null);
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingId = useRef<string | null>(null);
   useEffect(() => () => { if (flyTimer.current) clearTimeout(flyTimer.current); }, []);
+
+  // Resuelve el drill-down UNA sola vez (gana el primero: moveend o timer).
+  function resolveDrill() {
+    const id = pendingId.current;
+    if (!id) return;
+    pendingId.current = null;
+    if (flyTimer.current) { clearTimeout(flyTimer.current); flyTimer.current = null; }
+    setSelectedId(id);
+    setFlyBounds(null);
+  }
 
   function openProject(id: string) {
     if (flyTimer.current) clearTimeout(flyTimer.current);
     const b = boundsByProject[id];
     if (!b) {
       // Obra sin geo: drill-down directo sin animación.
+      pendingId.current = null;
       setSelectedId(id);
       setFlyBounds(null);
       return;
     }
+    pendingId.current = id;
     setFlyBounds(b);
-    flyTimer.current = setTimeout(() => {
-      setSelectedId(id);
-      setFlyBounds(null);
-    }, FLY_MS);
+    flyTimer.current = setTimeout(resolveDrill, FLY_MS);
   }
 
   function backToPortfolio() {
     if (flyTimer.current) clearTimeout(flyTimer.current);
+    pendingId.current = null;
     setSelectedId(null);
     setFlyBounds(null);
   }
@@ -109,11 +122,12 @@ export default function PortfolioDashboard() {
         ) : (
           // z-0 + isolate: los panes de Leaflet no flotan sobre modales.
           <div className="relative z-0 isolate bg-white rounded-xl shadow-subtle overflow-hidden h-[420px] lg:h-[62vh] lg:min-h-[480px]">
-            <SectorMap
+            <GLMap
               sectors={[]}
               bubbles={bubbles}
               onBubbleClick={openProject}
               focusBounds={flyBounds}
+              onFocusEnd={resolveDrill}
               height="100%"
             />
           </div>

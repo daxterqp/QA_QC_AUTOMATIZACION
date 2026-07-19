@@ -161,6 +161,14 @@ export const STRINGS_WEB_DASH: Record<string, { es: string; en: string; pt: stri
   'webDash.mapNoGeoBody': { es: 'Carga sectores, una ortofoto o captura GPS en los ensayos para ver el mapa operativo.', en: 'Upload sectors, an orthophoto or capture GPS on tests to see the operational map.', pt: 'Carregue setores, uma ortofoto ou capture GPS nos ensaios para ver o mapa operativo.' },
   'webDash.mapNoGeoCta': { es: 'Configurar geolocalización', en: 'Set up geolocation', pt: 'Configurar geolocalização' },
 
+  // ── Mapa GL (v94): basemaps + 3D + cine ──
+  'webDash.mapBaseDark': { es: 'Oscuro', en: 'Dark', pt: 'Escuro' },
+  'webDash.mapBaseSat': { es: 'Satélite', en: 'Satellite', pt: 'Satélite' },
+  'webDash.mapBaseLight': { es: 'Claro', en: 'Light', pt: 'Claro' },
+  'webDash.map3d': { es: '3D', en: '3D', pt: '3D' },
+  'webDash.mapCine': { es: 'Cine', en: 'Cinema', pt: 'Cinema' },
+  'webDash.mapWebglMissing': { es: 'El mapa interactivo no está disponible en este equipo (WebGL desactivado). Actualiza los drivers de video o usa otro navegador.', en: 'The interactive map is not available on this device (WebGL disabled). Update your video drivers or use another browser.', pt: 'O mapa interativo não está disponível neste dispositivo (WebGL desativado). Atualize os drivers de vídeo ou use outro navegador.' },
+
   // ── Dashboard rediseñado: portafolio + drill-down ──
   'webDash.portfolioSubtitle': { es: 'Portafolio de obras', en: 'Works portfolio', pt: 'Portfólio de obras' },
   'webDash.backToPortfolio': { es: 'Portafolio', en: 'Portfolio', pt: 'Portfólio' },

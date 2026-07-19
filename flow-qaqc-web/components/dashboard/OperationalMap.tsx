@@ -25,7 +25,9 @@ import type { MapMarker, MapSector } from '@components/sectors/SectorMap';
 import type { SectorRow } from '@hooks/useFileUpload';
 import type { Protocol, Project, Location } from '@/types';
 
-const SectorMap = dynamic(() => import('@components/sectors/SectorMap'), {
+// v94 — motor GL (MapLibre: basemap oscuro + 3D + animaciones). Leaflet queda
+// solo en SectoresTab. Los tipos de datos siguen viviendo en SectorMap.
+const GLMap = dynamic(() => import('@components/map/GLMap'), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full min-h-[240px] bg-surface rounded-xl text-xs text-gray-400">
@@ -117,7 +119,7 @@ export default function OperationalMap({
     // z-0 + isolate: los panes internos de Leaflet (z ~1000) quedan atrapados en
     // este stacking context y no flotan sobre los modales fixed z-50 de los charts.
     <div className={cn('relative z-0 isolate bg-white rounded-xl shadow-subtle overflow-hidden', className)}>
-      <SectorMap
+      <GLMap
         sectors={mapSectors}
         orthophotos={orthophotos}
         markers={markers}

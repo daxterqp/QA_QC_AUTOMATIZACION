@@ -25,6 +25,30 @@ html, body {
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* ── v94 — Mapa GL: halo pulsante de las burbujas de obra ── */
+@keyframes gl-bubble-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.gl-bubble-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor; /* color del bucket vía style={{ color }} */
+  animation: gl-bubble-pulse 2.2s ease-out infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gl-bubble-pulse { animation: none; opacity: 0; }
+}
+/* Popup de MapLibre: card propio (sin el padding default) */
+.maplibregl-popup-content {
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 /* ── v89 — Entradas de modal/sheet (antes aparecian de golpe: teleport) ── */
 @keyframes modalIn {
   from { opacity: 0; transform: scale(0.96); }
