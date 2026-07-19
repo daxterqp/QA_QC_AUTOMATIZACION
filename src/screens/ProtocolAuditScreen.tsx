@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal,
-  Alert, ActivityIndicator, ScrollView, Image, TextInput,
+  Alert, ActivityIndicator, ScrollView, Image, TextInput, RefreshControl,
   FlatList, useWindowDimensions,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -35,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { notifyProtocolApproved, notifyProtocolRejected } from '@services/NotificationService';
-import { pushProjectToSupabase, pushProtocolStatus } from '@services/SupabaseSyncService';
+import { pushProjectToSupabase, pushProtocolStatus, refreshProtocolFromCloud } from '@services/SupabaseSyncService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { SyncWorker } from '@services/SyncWorker';
 import { Linking } from 'react-native';
@@ -167,6 +167,15 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   const [xrefReasons, setXrefReasons] = useState<string[]>([]);
   const [refreshingXref, setRefreshingXref] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // v98d — Pull-to-refresh en el AUDIT (las fichas enviadas abren aquí, no en
+  // Fill): recarga puntual desde la nube + re-congelado de huecos + re-lee local.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const onPullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try { await refreshProtocolFromCloud(protocolId); } catch { /* offline → solo re-lee local */ }
+    setReloadKey(k => k + 1);
+    setPullRefreshing(false);
+  }, [protocolId]);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [fullscreenPhotos, setFullscreenPhotos] = useState<string[]>([]);
   const [fullscreenInitIdx, setFullscreenInitIdx] = useState(0);
@@ -533,7 +542,9 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
       />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 60 }, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}>{/* #4 — separar del nav bar de Android */}
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} />}
+        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 60 }, (!numericMode && zoom.scale !== 1) ? { transform: [{ scale: zoom.scale }] } : null]}>{/* #4 — separar del nav bar de Android */}
         {/* Encabezado formal tipo Dossier PDF */}
         <View style={styles.dossierHeader}>
           {/* Top bar — IZQ: nombre del ensayo + proyecto + estado debajo.
