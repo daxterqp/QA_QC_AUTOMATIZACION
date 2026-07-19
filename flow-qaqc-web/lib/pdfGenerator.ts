@@ -532,6 +532,19 @@ function croquisBlockFor(
   return { block: { html, weight }, placement: cro.placement === 'start' ? 'start' : 'end' };
 }
 
+// v98 — id permanente → código correlativo (PRM-260001). Las celdas xref
+// congeladas guardan el ID (renumber-safe); el PDF debe mostrar el CÓDIGO.
+// Espejo del mismo mecanismo en DossierExportService (móvil).
+let _pdfProtoCodes: Record<string, string> = {};
+
+function xrefCommentsForPdf(vm: string | null, comments: string | null): string | null {
+  if (!comments || !vm || vm.indexOf('xref-') < 0) return comments;
+  return comments.split('//').map(cell => cell.split(',').map(tok => {
+    const k = tok.trim();
+    return _pdfProtoCodes[k] ?? k;
+  }).join(', ')).join(' // ');
+}
+
 function numericProtoBlocks(
   full: DossierProtocolFull,
   xrefValues?: XrefValues,
@@ -546,7 +559,7 @@ function numericProtoBlocks(
     item_description: it.item_description,
     validation_method: it.validation_method,
     partida_item: it.partida_item,
-    comments: it.comments,
+    comments: xrefCommentsForPdf(it.validation_method, it.comments),
     section: it.section,
   })), {
     xrefValues, auxTables,
@@ -1128,6 +1141,11 @@ async function fetchAuxTablesMap(projectId: string): Promise<AuxTables> {
 export async function exportFullDossier(opts: DossierExportOptions): Promise<void> {
   const { projectId, projectName, projectCreatedAt, signerName, signerUserId, logoS3Key, protocols, locations, preloaded, onProgress, includeQrCodes, includeEquipment } = opts;
   const auxTablesForPdf = await fetchAuxTablesMap(projectId);   // v41 — para BUSCAR() en el PDF
+  // v98 — mapa id→código para mostrar códigos normales en celdas xref del PDF.
+  _pdfProtoCodes = {};
+  for (const p of protocols as { id: string; protocol_code?: string | null }[]) {
+    if (p.protocol_code) _pdfProtoCodes[p.id] = p.protocol_code;
+  }
   const qrEnabled = includeQrCodes === true;
   // Por defecto incluimos equipos (true) si el caller no especificó; los callers
   // nuevos deberían pasar explícitamente `includeEquipment: flags.equipment_catalog`.
@@ -1418,6 +1436,17 @@ export async function exportSingleProtocolPdf(
   ]);
 
   const full = await fetchDossierProtocolFull(protocolId, locMap, userMap);
+
+  // v98 — mapa id→código del proyecto (celdas xref del PDF muestran el código).
+  _pdfProtoCodes = {};
+  try {
+    const { data: codeRows } = await supabase
+      .from('protocols').select('id, protocol_code')
+      .eq('project_id', full.protocol.project_id).not('protocol_code', 'is', null);
+    for (const r of (codeRows ?? []) as { id: string; protocol_code: string }[]) {
+      _pdfProtoCodes[r.id] = r.protocol_code;
+    }
+  } catch { /* sin códigos → el PDF mostrará el id */ }
 
   // Per-approver signature: use the specific approver's signature if available
   let signB64 = defaultSignB64;

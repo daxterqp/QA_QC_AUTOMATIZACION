@@ -224,9 +224,12 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
   // la base en cada edición de celda.
   // v45 — incluye `comments`: el scan también detecta el código elegido en celdas
   // `xref`, así la firma cambia (y se re-resuelve) al confirmar un código nuevo.
+  // v98 — La firma se calcula TAMBIÉN en modo frozen: el Audit necesita el mapa
+  // id→código (xrefDisplay) para mostrar "PRM-260001" y no el ID interno. Los
+  // VALORES siguen sin usarse en frozen (se leen de comments congelados).
   const xrefSig = useMemo(
-    () => (frozen ? '' : scanXrefs(items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })), expandRaw).map(r => `${r.code}.${r.key}`).sort().join('|')),
-    [frozen, items, expandRaw],
+    () => scanXrefs(items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })), expandRaw).map(r => `${r.code}.${r.key}`).sort().join('|'),
+    [items, expandRaw],
   );
   useEffect(() => {
     if (!projectId || xrefSig === '') { setXrefValues({}); setXrefDisplay({}); return; }
@@ -234,11 +237,16 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
     // `items` (closure) solo se usa para re-escanear refs (== xrefSig); los valores
     // vienen de la base, así que una referencia "vieja" de items no afecta.
     resolveXrefs(projectId, items.map(it => ({ validation_method: it.validation_method, comments: it.comments, partida_item: it.partida_item })), expandRaw)
-      .then(r => { if (!cancelled) { setXrefValues(r.values); setXrefDisplay(r.displayByRef); } })
+      .then(r => {
+        if (cancelled) return;
+        // v98 — frozen: SOLO display (los valores congelados viven en comments).
+        setXrefValues(frozen ? {} : r.values);
+        setXrefDisplay(r.displayByRef);
+      })
       .catch(() => { if (!cancelled) { setXrefValues({}); setXrefDisplay({}); } });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, xrefSig]);
+  }, [projectId, xrefSig, frozen]);
   const parsedRows = useMemo(() => items.map(it => ({
     item: it,
     spec: parseNumericRow(it.validation_method),

@@ -51,9 +51,17 @@ let _pdfAuxTables: import('@utils/formulaEval').AuxTables = {};
 // v43.4 — Flags del proyecto cargados al inicio de cada export, para leer la config
 // de impresión por tipo de ensayo (getTemplatePrintConfig).
 let _pdfFlags: ProjectFeatureFlags | null = null;
+// v98 — id permanente → código correlativo del ensayo (PRM-260001). Las celdas
+// xref congeladas guardan el ID (renumber-safe); el PDF debe mostrar el CÓDIGO.
+let _pdfProtoCodes: Record<string, string> = {};
 async function loadPdfAuxTables(projectId: string): Promise<void> {
   _pdfAuxTables = {};
   _pdfFlags = null;
+  _pdfProtoCodes = {};
+  try {
+    const prots = await protocolsCollection.query(Q.where('project_id', projectId)).fetch();
+    for (const p of prots as any[]) if (p.protocolCode) _pdfProtoCodes[p.id] = p.protocolCode;
+  } catch { /* sin códigos → el PDF mostrará el id */ }
   try {
     const tbls = await labAuxTablesCollection.query(Q.where('project_id', projectId)).fetch();
     for (const t of tbls as any[]) {
@@ -624,6 +632,17 @@ const ROWS_PER_PAGE = 20;
 
 // ── Parte B: protocolos numéricos → PDF con el formato del audit screen ──────
 
+/** v98 — En celdas xref, comments guarda el ID permanente del ensayo fuente;
+ *  el PDF debe mostrar el CÓDIGO normal. Reemplazo token a token (solo tokens
+ *  que son ids conocidos; valores numéricos/vacíos quedan igual). */
+function xrefCommentsForPdf(vm: string | null, comments: string | null): string | null {
+  if (!comments || !vm || vm.indexOf('xref-') < 0) return comments;
+  return comments.split('//').map(cell => cell.split(',').map(tok => {
+    const k = tok.trim();
+    return _pdfProtoCodes[k] ?? k;
+  }).join(', ')).join(' // ');
+}
+
 /** Mapea los modelos WatermelonDB (camelCase) al shape plano del helper. */
 function toNumericPdfItems(items: ProtocolItem[]): NumericPdfItem[] {
   return items.map(it => ({
@@ -631,7 +650,7 @@ function toNumericPdfItems(items: ProtocolItem[]): NumericPdfItem[] {
     item_description: it.itemDescription,
     validation_method: it.validationMethod,
     partida_item: it.partidaItem,
-    comments: it.comments,
+    comments: xrefCommentsForPdf(it.validationMethod, it.comments),
     section: it.section,
   }));
 }

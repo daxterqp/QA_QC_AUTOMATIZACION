@@ -229,6 +229,30 @@ proyecto, summary_config refs, values_json keys) → reescritura total en el JSO
 migrar `values_json` de summary_rows (rekey `"vieja:L"` → `"nueva:L"` con
 jsonb) → verificación exhaustiva. Documentar el mapeo en el label del backup.
 
+### 4.9 RECETA ESTÁNDAR: dictámenes en TEXTO (Sí/No · CONFORME/NO CONFORME)
+
+Aplicada ya a DCC, GRA, CBR, MAR y TMA (jul 2026). El motor de fórmulas NO
+acepta strings — el patrón es: cálculo 1/0 en fila OCULTA + celda visible
+`lookup` que traduce con matrices internas.
+
+1. Identificar filas visibles con `SI(...,1,0)` y descripciones "(1=Sí, 0=No)".
+2. Por cada una: crear fila OCULTA nueva (partida entera libre) con la fórmula
+   original + `:oculto` (fila 100% oculta → no se renderiza NI numera).
+   ⚠ Si el dictamen referencia a las otras filas Sí/No, su fórmula oculta debe
+   apuntar a las PARTIDAS OCULTAS nuevas (las visibles pasan a ser lookup =
+   TEXTO, ya no entran al scope numérico).
+3. Fila visible → `lookup-[#<partidaOculta>A, _MSN, A, B]` (o `_MCF` para el
+   dictamen) + descripción limpia sin "(1=Sí, 0=No)".
+4. Añadir matrices al final (sección "Catálogos internos"; el prefijo `_` las
+   oculta del botón "Ver tablas"):
+   `matrix-[_MSN] // col-[A][Codigo] // col-[B][Texto]` + `val-[0] // val-[No]`
+   + `val-[1] // val-[Sí]`; ídem `_MCF` con NO CONFORME/CONFORME.
+5. Aplicar a template + instancias (update visibles + insert nuevas) + bump.
+6. Verificación mecánica SQL: refs `#N` de filas nuevas existen + cada lookup
+   tiene su `matrix-[...]` (query de refs_rotas — ver historial v96/v98).
+Nota: el validador headless da 2 falsos positivos conocidos en fichas con
+xref (refs a celdas xref) — comparar contra la ficha SIN editar.
+
 ## 5. Reglas de oro
 
 - **NUNCA** editar sin backup previo (aunque sea 1 carácter).
@@ -240,7 +264,65 @@ jsonb) → verificación exhaustiva. Documentar el mapeo en el label del backup.
   en el móvil antes de operaciones sobre instancias con datos en curso.
 - Después de aplicar: el usuario recarga la app (pull) y revisa la ficha.
 
-## 6. Piezas del flujo
+## 6. CONFIG DE PDF POR ENSAYO (cómo la edito por SQL)
+
+La config del PDF NO vive en protocol_templates: vive en
+**`projects.feature_flags` → `print_configs[<id_protocolo>]`** (por tipo) +
+`print_header_color` (global). La leen AMBOS generadores (móvil
+`DossierExportService` / web `pdfGenerator`) vía `getTemplatePrintConfig`
+(tipos canónicos: `src/utils/featureFlags.ts`, espejo `flow-qaqc-web/lib/printConfig.ts`).
+
+Claves por template: `two_column` (bool) · `font_level` y `graph_size`
+(`normal|compact|xcompact`) · `show_photos` · `header_size` · `header_fields`
+(orden/campos de Datos generales: proyecto, fecha, supervisor, f_realizacion,
+f_aprobacion, id_protocolo, ubicacion, especialidad) · `show_qr` ·
+`split_tables` · `col_budget` (12–80, def 39) · `croquis` {show, placement
+start|end|photos, map_type, show_orthophoto, base_opacity, point_size}.
+El CONTENIDO por celda lo controla el DSL (`:nopdf`, `:oculto`, `alto:` de
+gráficos). "Orientación horizontal" NO existe aún (extensión futura:
+`orientation` en TemplatePrintConfig ×2 espejos + CSS @page en ambos frames).
+
+**Receta SQL (merge — JAMÁS pisar el resto de feature_flags):**
+```sql
+UPDATE projects SET
+  feature_flags = jsonb_set(coalesce(feature_flags,'{}'::jsonb),
+    '{print_configs,⟨ID_PROTOCOLO⟩}',
+    coalesce(feature_flags#>'{print_configs,⟨ID_PROTOCOLO⟩}','{}'::jsonb) || '⟨{"two_column":true,...}⟩'::jsonb),
+  updated_at = (extract(epoch from now())*1000)::bigint
+WHERE id='⟨PROJECT_ID⟩';
+```
+Backup previo: `SELECT feature_flags FROM projects WHERE id=...` guardado en
+el label de un backup o en el scratchpad. La UI edita esto mismo desde la
+"tuerca" del Dossier (solo CREATOR) — respetar sus valores.
+
+## 7. VOLCADO de plantillas a OTRO proyecto (checklist completo)
+
+Copiar template+items NO basta. Para que la ficha funcione Y su PDF salga
+IGUAL en el proyecto destino, llevar las 8 piezas:
+
+1. `protocol_templates` (name, **id_protocolo** — debe conservarse: es la
+   clave de print_configs, codificación correlativa y filtros xref —,
+   summary_config_json, is_hidden) + `protocol_template_items` (ids NUEVOS,
+   DSL íntegro).
+2. `projects.feature_flags.print_configs[<id_protocolo>]` → merge en los
+   flags del proyecto DESTINO (receta §6).
+3. `print_header_color` + flags que afectan render: `numeric_protocols`,
+   `protocol_codes` (+ máscaras `coding_*`), `equipment_catalog`/
+   `traceability_module`, `coordinate_system`.
+4. `lab_aux_tables` del proyecto (capas_pavimento, moldes, taras…) — sin
+   ellas BUSCAR() sale vacío.
+5. Logo: `projects.logo_s3_key` + archivo en S3.
+6. Croquis (si `croquis.show`): `project_sectors` + ortofoto (columnas
+   orthophoto_* + archivos S3).
+7. Firmas de aprobadores (S3 `signatures/<userId>/signature.jpg`) si el
+   destino tiene otros usuarios.
+8. Xref: copiar TODAS las fichas del grafo (DCC/CBR llaman a PRM por
+   id_protocolo) — el filtro viaja solo si los códigos coinciden.
+NO copiar: protocols/protocol_items (instancias), protocol_summary_rows,
+protocol_code_counters (secuencias arrancan de cero en destino).
+Verificar en destino: crear 1 instancia de prueba de cada ficha + export PDF.
+
+## 8. Piezas del flujo
 
 - Respaldo/rollback: tabla `ficha_edit_backups` (Supabase, RLS cerrado).
 - Validador headless: `scripts/fichaValidate.ts` (npx tsx; motor real de la app).
