@@ -973,7 +973,10 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
                       disabled={readOnly}
                       onPress={() => { setPickerSearch(''); setListPicker({ inputKey, options: resolveListOptionsMobile(cell.source, matrices, auxTables), itemId: it.id, spec }); }}
                     >
-                      <Text style={[styles.computedText, dynFont, { color: (localValues[inputKey] ?? '') ? Colors.success : Colors.textSecondary }]} numberOfLines={1}>
+                      {/* v96c — textos largos ("Subbase Granular"): 2 líneas + letra menor */}
+                      <Text style={[styles.computedText, dynFont,
+                        (localValues[inputKey] ?? '').length > 8 ? { fontSize: fs(10), lineHeight: fs(12) } : null,
+                        { color: (localValues[inputKey] ?? '') ? Colors.success : Colors.textSecondary }]} numberOfLines={2}>
                         {localValues[inputKey] || '—'}
                       </Text>
                     </TouchableOpacity>
@@ -993,7 +996,10 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
                       { width: cellWidth - 8 },
                       err ? styles.computedBad : (textValues[cellKey] ? { backgroundColor: '#eef2fa', borderColor: Colors.primary } : null),
                     ]}>
-                      <Text style={[styles.computedText, dynFont, { color: err ? Colors.danger : (textValues[cellKey] ? Colors.textPrimary : Colors.textSecondary) }]} numberOfLines={1}>
+                      {/* v96c — resultados en texto ("NO CONFORME"): 2 líneas + letra menor */}
+                      <Text style={[styles.computedText, dynFont,
+                        (textValues[cellKey] ?? '').length > 8 ? { fontSize: fs(10), lineHeight: fs(12) } : null,
+                        { color: err ? Colors.danger : (textValues[cellKey] ? Colors.textPrimary : Colors.textSecondary) }]} numberOfLines={2}>
                         {err ? '⚠' : (textValues[cellKey] || '—')}
                       </Text>
                     </View>
