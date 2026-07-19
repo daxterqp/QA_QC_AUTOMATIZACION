@@ -2871,6 +2871,22 @@ export async function refreshProtocolFromCloud(protocolId: string): Promise<{ he
     await database.write(async () => { await database.batch(...prepares); });
   }
 
+  // 1b. RECONCILIACIÓN (v96b): tras un fetch remoto EXITOSO de items, los
+  //     locales `synced` que YA NO existen en la nube se eliminan — así el
+  //     pull-to-refresh limpia duplicados (carrera reparación-nube vs
+  //     auto-reparación) y filas fantasma. Items con cambios locales
+  //     pendientes (_status != 'synced') NO se tocan.
+  if (Array.isArray(iRes.data) && !iRes.error) {
+    const remoteIds = new Set((iRes.data as any[]).map(r => String(r.id)));
+    const localsAfter = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+    const zombies = (localsAfter as any[]).filter(l => !remoteIds.has(l.id) && l._raw?._status === 'synced');
+    if (zombies.length > 0) {
+      await database.write(async () => {
+        for (const z of zombies) await z.destroyPermanently();
+      });
+    }
+  }
+
   // 2. Auto-reparación SOLO si la ficha quedó totalmente vacía (0 items): con
   //    items presentes no tocamos nada (diferencias legítimas por expansión
   //    paramétrica / versiones de template).
@@ -2893,6 +2909,12 @@ export async function refreshProtocolFromCloud(protocolId: string): Promise<{ he
   );
   const newIds: string[] = [];
   await database.write(async () => {
+    // v96b — RE-CHEQUEO dentro del write (los writers de Watermelon
+    // serializan): si otro writer (el pull del proyecto en segundo plano)
+    // sembró items entre nuestro conteo y este write, abortar el heal — esta
+    // carrera fue la que duplicó PRM-260004/260005.
+    const check = await protocolItemsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+    if (check.length > 0) return;
     for (const tmplItem of expanded as any[]) {
       const rec = await protocolItemsCollection.create((item: any) => {
         item.protocolId = protocolId;

@@ -838,12 +838,21 @@ const NumericTable = React.forwardRef<NumericTableHandle, Props>(function Numeri
                       onFocus={() => { setFocusedKey(inputKey); onFocusCell?.(inputRefs.current[inputKey]); }}
                       onBlur={() => { setFocusedKey(null); commitRow(it.id, spec); }}
                       keyboardType="decimal-pad"
+                      // v96 — El botón de acción del teclado numérico salta a la
+                      // SIGUIENTE celda vacía (mismo patrón que las celdas free/text;
+                      // antes aquí decía "Realizado" y solo cerraba el teclado).
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => {
+                        commitRow(it.id, spec);
+                        const nxt = nextEmptyKey(inputKey);
+                        if (nxt) focusKey(nxt);
+                      }}
                       editable={!readOnly}
                       placeholder="—"
                       placeholderTextColor="#bbb"
                       // v42c — números largos (>5 díg.) continúan en una 2ª línea, igual
-                      // que las celdas calculadas. El teclado decimal no tiene Enter, así
-                      // que multiline no afecta la navegación (que va por la barra Play).
+                      // que las celdas calculadas.
                       multiline
                       numberOfLines={2}
                     />
