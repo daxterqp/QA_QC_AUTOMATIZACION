@@ -295,9 +295,18 @@ silencio, no pesa). Palancas para caber: `font_level` compact/xcompact sube
 perCol (más filas por columna), `graph_size` compact/xcompact achica gráficos,
 `col_budget` (12-80, def 39) sube el tope por columna. Las tablas ANCHAS
 (GRA 7 cols, CBR 3 moldes) necesitan `font_level:compact` para no desbordar el
-ancho de media hoja en 2 columnas. Config aplicada a Proyecto_Pruebas
-(9 ensayos): two_column + croquis end/hybrid + font normal (PRM/DCC/MAR/TMA) o
-compact (GRA/CBR/CAD/CCD/PRD) + col_budget 42-44.
+ancho de media hoja en 2 columnas.
+
+⚠ **SER CONSERVADOR con col_budget (feedback usuario 20-jul-26):** los pesos
+SUBESTIMAN las tablas anchas/con secciones, así que un budget alto "cabe" en el
+modelo pero se CORTA contra el pie de página en el PDF real (pasó con GRA a 44).
+Rangos seguros: **compact 32-36, normal 38-40**; >40 solo verificando el render.
+El objetivo es DOBLE: (1) no pasar de 1 hoja Y (2) usar toda la hoja sin dejar
+columnas medio vacías — si tras calzar sobra espacio, la palanca correcta es
+SUBIR `graph_size` (gráficos más grandes) o el croquis full_width, NO subir el
+budget. Config Proyecto_Pruebas: col_budget 42-44 (revisada por el usuario);
+Proyecto_Carreteras (recalibrada): GRA/CBR 34 compact + graph normal,
+DCC/MAR/TMA 40 normal, PRM 35 normal.
 
 **Receta SQL (merge — JAMÁS pisar el resto de feature_flags):**
 ```sql

@@ -47,6 +47,24 @@ export default function PdfConfigPanel({
           </TouchableOpacity>
         ))}
       </View>
+      {/* Presupuesto por columna + QR arriba (los knobs más usados al afinar en vivo). */}
+      <View style={styles.pcRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pcLabel}>{t('dossier.colBudgetLabel')}</Text>
+          <Text style={styles.pcBudgetHint}>{t('dossier.colBudgetHint')}</Text>
+        </View>
+        <TextInput
+          style={styles.pcNumInput}
+          keyboardType="number-pad"
+          defaultValue={String(c.col_budget)}
+          maxLength={2}
+          onChangeText={(text) => {
+            const n = parseInt(text, 10);
+            if (Number.isFinite(n)) onCfg({ col_budget: n });
+          }}
+        />
+      </View>
+      <View style={styles.pcRow}><Text style={styles.pcLabel}>{t('dossier.showQr')}</Text><Switch value={c.show_qr} onValueChange={v => onCfg({ show_qr: v })} /></View>
       <View style={styles.pcRow}><Text style={styles.pcLabel}>{t('dossier.includePhotoPanels')}</Text><Switch value={c.show_photos} onValueChange={v => onCfg({ show_photos: v })} /></View>
       <Text style={styles.pcLabel}>{t('dossier.headerRows')}</Text>
       <View style={styles.pcSeg}>
@@ -71,25 +89,7 @@ export default function PdfConfigPanel({
           </TouchableOpacity>
         );
       })}
-      <View style={styles.pcRow}><Text style={styles.pcLabel}>{t('dossier.showQr')}</Text><Switch value={c.show_qr} onValueChange={v => onCfg({ show_qr: v })} /></View>
       <View style={styles.pcRow}><Text style={styles.pcLabel}>{t('dossier.splitTables')}</Text><Switch value={c.split_tables} onValueChange={v => onCfg({ split_tables: v })} /></View>
-      {/* Presupuesto de altura por columna (clave para calzar en una hoja). */}
-      <View style={styles.pcRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pcLabel}>{t('dossier.colBudgetLabel')}</Text>
-          <Text style={styles.pcBudgetHint}>{t('dossier.colBudgetHint')}</Text>
-        </View>
-        <TextInput
-          style={styles.pcNumInput}
-          keyboardType="number-pad"
-          defaultValue={String(c.col_budget)}
-          maxLength={2}
-          onChangeText={(text) => {
-            const n = parseInt(text, 10);
-            if (Number.isFinite(n)) onCfg({ col_budget: n });
-          }}
-        />
-      </View>
 
       {/* Croquis (mapa con sectores + ensayo ploteado) */}
       <View style={styles.pcDivider} />
