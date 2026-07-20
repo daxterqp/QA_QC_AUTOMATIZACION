@@ -38,7 +38,8 @@ import type User from '@db/models/User';
 import type SampleModel from '@db/models/Sample';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { generateProtocolQrImg } from '@utils/qrCode';
-import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, type ProjectFeatureFlags } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@utils/featureFlags';
+import { formatProgresiva, subtramoRangeLabel } from '@utils/CoordinateSystem';
 import {
   buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfItem, type NumericPdfBlock,
 } from '@utils/numericPdfHtml';
@@ -54,10 +55,14 @@ let _pdfFlags: ProjectFeatureFlags | null = null;
 // v98 — id permanente → código correlativo del ensayo (PRM-260001). Las celdas
 // xref congeladas guardan el ID (renumber-safe); el PDF debe mostrar el CÓDIGO.
 let _pdfProtoCodes: Record<string, string> = {};
+// v100b — Obra lineal: sectores=tramos con sus progresivas, para las celdas
+// Tramo/Subtramo/Progresiva del PDF (solo se cargan si el proyecto es lineal).
+let _pdfLinearSectors: Map<string, { name: string; stationStart: number | null; stationEnd: number | null }> = new Map();
 async function loadPdfAuxTables(projectId: string): Promise<void> {
   _pdfAuxTables = {};
   _pdfFlags = null;
   _pdfProtoCodes = {};
+  _pdfLinearSectors = new Map();
   try {
     const prots = await protocolsCollection.query(Q.where('project_id', projectId)).fetch();
     for (const p of prots as any[]) if (p.protocolCode) _pdfProtoCodes[p.id] = p.protocolCode;
@@ -72,6 +77,30 @@ async function loadPdfAuxTables(projectId: string): Promise<void> {
     const proj: any = (await projectsCollection.query(Q.where('id', projectId)).fetch())[0];
     _pdfFlags = parseFeatureFlagsJson(proj?.featureFlags);
   } catch { _pdfFlags = null; }
+  // v100b — En obra lineal, cargar los tramos (sector + progresivas) para el PDF.
+  try {
+    if (_pdfFlags && isLinearProject(_pdfFlags)) {
+      const secs = await projectSectorsCollection.query(Q.where('project_id', projectId)).fetch();
+      for (const s of secs as any[]) {
+        _pdfLinearSectors.set(s.id, { name: s.name, stationStart: s.stationStart ?? null, stationEnd: s.stationEnd ?? null });
+      }
+    }
+  } catch { /* sin tramos → celdas lineales con '—' */ }
+}
+
+/** v100b — Celdas Tramo/Subtramo/Progresiva del PDF (solo en obra lineal). El
+ *  tramo es el sector del ensayo; subtramo/progresiva vienen calculados de coords. */
+function _linearHeaderCells(protocol: Protocol): { tramo: string; subtramo: string; progresiva: string } | null {
+  if (!_pdfFlags || !isLinearProject(_pdfFlags)) return null;
+  const pa = protocol as any;
+  const sec = pa.sectorId ? _pdfLinearSectors.get(pa.sectorId) : null;
+  const tramo = sec?.name ?? '—';
+  const progresiva = (typeof pa.progresiva === 'number' && Number.isFinite(pa.progresiva)) ? formatProgresiva(pa.progresiva) : '—';
+  let subtramo = '—';
+  if (sec && typeof pa.subtramoIndex === 'number' && sec.stationStart != null && sec.stationEnd != null) {
+    subtramo = subtramoRangeLabel(sec.stationStart, pa.subtramoIndex, linearSubtramoLength(_pdfFlags), sec.stationEnd);
+  }
+  return { tramo, subtramo, progresiva };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -817,6 +846,14 @@ function buildProtocolPages(
       especialidad: !isNumeric && specialty ? cell('Especialidad', specialty) : '',
     };
     const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
+    // v100b — Obra lineal: Tramo/Subtramo/Progresiva SIEMPRE (independiente de
+    // header_fields), en numéricos y clásicos.
+    const lin = _linearHeaderCells(protocol);
+    if (lin) {
+      cells.push(cell('Tramo', lin.tramo));
+      cells.push(cell('Subtramo', lin.subtramo));
+      cells.push(cell('Progresiva', lin.progresiva));
+    }
     const nRows = PRINT_HEADER_ROWS[cfg.header_size];
     // Repartir los campos en nRows filas, lo más parejo posible.
     const perRow = Math.max(1, Math.ceil(cells.length / nRows));

@@ -213,6 +213,169 @@ export function findSectorByPointWithTolerance(
   return null;
 }
 
+// ─── v100b — Progresivas de OBRA LINEAL (chainage) ──────────────────────────
+// El "tramo" de un ensayo = su sector (point-in-polygon). Dentro del tramo, la
+// progresiva se obtiene PROYECTANDO el punto sobre el EJE del polígono del tramo
+// y escalando por la LONGITUD DECLARADA (station_end - station_start). Así la
+// imperfección geométrica del polígono no altera la progresiva declarada.
+//
+// ESPEJO EXACTO en flow-qaqc-web/lib/coordinateTopo.ts — mantener sincronizado.
+
+export interface TramoInfo {
+  id: string;
+  name: string;
+  points: LatLng[] | null;
+  stationStart: number | null;   // progresiva de inicio (m, continua en el corredor)
+  stationEnd: number | null;     // progresiva de fin (m)
+}
+export interface ChainageResult {
+  tramoId: string;
+  tramoName: string;
+  progresiva: number;            // m a lo largo del corredor
+  subtramoIndex: number;         // 0-based dentro del tramo
+}
+
+type LocalPt = { x: number; y: number };
+const _finiteTramo = (t: TramoInfo): boolean =>
+  !!t.points && t.points.length >= 3 &&
+  typeof t.stationStart === 'number' && Number.isFinite(t.stationStart) &&
+  typeof t.stationEnd === 'number' && Number.isFinite(t.stationEnd) &&
+  (t.stationEnd as number) > (t.stationStart as number);
+
+/** Centroide de un tramo en metros locales (origen dado). */
+function _centroidLocal(points: LatLng[], origin: LatLng): LocalPt {
+  let sx = 0, sy = 0;
+  for (const p of points) { const m = llToLocalMeters(p, origin); sx += m.x; sy += m.y; }
+  return { x: sx / points.length, y: sy / points.length };
+}
+
+/** Eje principal (fallback PCA) de una nube de puntos locales: extremos = puntos
+ *  de proyección mín/máx sobre el eigenvector principal. */
+function _principalAxis(pts: LocalPt[]): [LocalPt, LocalPt] {
+  const n = pts.length;
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p.x; my += p.y; }
+  mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ux = Math.cos(theta), uy = Math.sin(theta);
+  let tmin = Infinity, tmax = -Infinity, pmin = pts[0], pmax = pts[0];
+  for (const p of pts) {
+    const t = (p.x - mx) * ux + (p.y - my) * uy;
+    if (t < tmin) { tmin = t; pmin = p; }
+    if (t > tmax) { tmax = t; pmax = p; }
+  }
+  return [pmin, pmax];
+}
+
+/** Eje (en metros locales, origen dado) del polígono de un tramo, SIN orientar.
+ *  Cuadrilátero alargado → puntos medios del par de aristas OPUESTAS más cortas
+ *  (secciones transversales). Otros polígonos → eje principal (PCA). */
+function _tramoAxisLocal(points: LatLng[], origin: LatLng): [LocalPt, LocalPt] {
+  const pts = points.map((p) => llToLocalMeters(p, origin));
+  if (pts.length === 4) {
+    const len = (a: LocalPt, b: LocalPt) => Math.hypot(a.x - b.x, a.y - b.y);
+    const mid = (a: LocalPt, b: LocalPt): LocalPt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    // Aristas: e0=[0,1] e1=[1,2] e2=[2,3] e3=[3,0]. Pares opuestos (e0,e2),(e1,e3).
+    const sum02 = len(pts[0], pts[1]) + len(pts[2], pts[3]);
+    const sum13 = len(pts[1], pts[2]) + len(pts[3], pts[0]);
+    // El par MÁS CORTO son las secciones transversales; su eje conecta sus centros.
+    return sum02 <= sum13
+      ? [mid(pts[0], pts[1]), mid(pts[2], pts[3])]
+      : [mid(pts[1], pts[2]), mid(pts[3], pts[0])];
+  }
+  return _principalAxis(pts);
+}
+
+/** Nº de subtramos de un tramo dada la longitud de subtramo. */
+export function subtramoCount(stationStart: number, stationEnd: number, subLenM: number): number {
+  const len = stationEnd - stationStart;
+  const sub = (subLenM > 0 && Number.isFinite(subLenM)) ? subLenM : len;
+  return Math.max(1, Math.ceil(len / sub - 1e-9));
+}
+
+/**
+ * Progresiva + subtramo de un punto en una obra lineal.
+ * 1. tramo = primer tramo (con geometría + stations) que CONTIENE el punto.
+ * 2. eje del tramo, orientado por la dirección global del corredor (centroide del
+ *    tramo de menor station → el de mayor). entry = extremo de menor proyección.
+ * 3. progresiva = station_start + t·(station_end − station_start), t∈[0,1].
+ * 4. subtramo_index = clamp(floor((progresiva−station_start)/subLen), 0, nSub−1).
+ * Devuelve null si el punto no cae en ningún tramo válido.
+ */
+export function computeChainage(
+  point: LatLng,
+  tramos: TramoInfo[],
+  subtramoLengthM: number,
+): ChainageResult | null {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+  const valid = tramos.filter(_finiteTramo);
+  if (valid.length === 0) return null;
+
+  // 1 — tramo contenedor.
+  const container = valid.find((t) => pointInPolygon(point, t.points as LatLng[]));
+  if (!container) return null;
+
+  // Frame local con origen en el propio punto (el punto queda en (0,0)).
+  const origin = point;
+
+  // 2 — dirección del corredor.
+  const ordered = [...valid].sort((a, b) => (a.stationStart as number) - (b.stationStart as number));
+  let dir: LocalPt;
+  if (ordered.length >= 2) {
+    const c0 = _centroidLocal(ordered[0].points as LatLng[], origin);
+    const cN = _centroidLocal(ordered[ordered.length - 1].points as LatLng[], origin);
+    dir = { x: cN.x - c0.x, y: cN.y - c0.y };
+  } else {
+    const [a, b] = _tramoAxisLocal(container.points as LatLng[], origin);
+    dir = { x: b.x - a.x, y: b.y - a.y };
+  }
+  if (dir.x === 0 && dir.y === 0) dir = { x: 1, y: 0 };
+
+  // 3 — eje del tramo contenedor, orientado (entry = station_start).
+  let [A, B] = _tramoAxisLocal(container.points as LatLng[], origin);
+  if ((B.x - A.x) * dir.x + (B.y - A.y) * dir.y < 0) { const tmp = A; A = B; B = tmp; }
+
+  const abx = B.x - A.x, aby = B.y - A.y;
+  const len2 = abx * abx + aby * aby;
+  // El punto está en (0,0); t = proj de (P−A) sobre (B−A).
+  let t = len2 > 0 ? ((-A.x) * abx + (-A.y) * aby) / len2 : 0;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+
+  const s0 = container.stationStart as number;
+  const s1 = container.stationEnd as number;
+  const progresiva = s0 + t * (s1 - s0);
+
+  const subLen = (subtramoLengthM > 0 && Number.isFinite(subtramoLengthM)) ? subtramoLengthM : (s1 - s0);
+  const nSub = subtramoCount(s0, s1, subLen);
+  let idx = Math.floor((progresiva - s0) / subLen);
+  if (idx < 0) idx = 0; else if (idx > nSub - 1) idx = nSub - 1;
+
+  return { tramoId: container.id, tramoName: container.name, progresiva, subtramoIndex: idx };
+}
+
+/** Formatea una progresiva en metros al convención "km+mmm(.d)": 12.5→"0+012.5",
+ *  375→"0+375", 1080→"1+080". */
+export function formatProgresiva(m: number): string {
+  if (!Number.isFinite(m)) return '—';
+  const neg = m < 0;
+  const rounded = Math.round(Math.abs(m) * 10) / 10;
+  const km = Math.floor(rounded / 1000);
+  const rest = rounded - km * 1000;
+  const rInt = Math.floor(rest);
+  const dec = Math.round((rest - rInt) * 10);
+  const decStr = dec > 0 ? `.${dec}` : '';
+  return `${neg ? '-' : ''}${km}+${String(rInt).padStart(3, '0')}${decStr}`;
+}
+
+/** Rango de progresivas de un subtramo, ej "0+000 – 0+060". */
+export function subtramoRangeLabel(stationStart: number, idx: number, subLenM: number, stationEnd: number): string {
+  const s = stationStart + idx * subLenM;
+  const e = Math.min(stationStart + (idx + 1) * subLenM, stationEnd);
+  return `${formatProgresiva(s)} – ${formatProgresiva(e)}`;
+}
+
 // ─── v44 — Coordenadas topográficas → WGS84 lat/lng (para el motor de sector) ──
 
 /** Zona UTM + hemisferio del proyecto, derivados del CENTROIDE de los polígonos de

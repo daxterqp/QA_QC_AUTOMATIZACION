@@ -24,6 +24,8 @@ import {
   type ResolvedPrintConfig,
 } from '@lib/printConfig';
 import { buildCroquisFigureHtml, type CroquisSectorIn, type CroquisOrtho } from '@lib/croquisHtml';
+import { mergeFeatureFlags, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@/types';
+import { formatProgresiva, subtramoRangeLabel } from '@lib/coordinateTopo';
 
 const supabase = createClient();
 
@@ -462,6 +464,37 @@ function equipmentSectionInner(equipment: NonNullable<DossierProtocolFull['equip
 /** Config por defecto (todos los campos resueltos) cuando el caller no pasa una. */
 const DEFAULT_PRINT_CFG: ResolvedPrintConfig = getTemplatePrintConfig({}, null);
 
+// v100b — Obra lineal: estado de módulo para las celdas Tramo/Subtramo/Progresiva
+// del PDF (espejo de src/services/DossierExportService.ts _pdfLinearSectors/_pdfFlags).
+let _webPdfFlags: ProjectFeatureFlags = mergeFeatureFlags({});
+let _webLinearSectors: Map<string, { name: string; station_start: number | null; station_end: number | null }> = new Map();
+/** Carga los tramos (con progresivas) del proyecto para el PDF; no-op si no es lineal. */
+async function loadLinearSectors(projectId: string, flags: ProjectFeatureFlags): Promise<void> {
+  _webPdfFlags = flags;
+  _webLinearSectors = new Map();
+  if (!isLinearProject(flags)) return;
+  try {
+    const { data } = await supabase.from('project_sectors').select('id, name, station_start, station_end').eq('project_id', projectId);
+    for (const s of (data ?? []) as { id: string; name: string; station_start: number | null; station_end: number | null }[]) {
+      _webLinearSectors.set(s.id, { name: s.name, station_start: s.station_start ?? null, station_end: s.station_end ?? null });
+    }
+  } catch { /* sin tramos → celdas con '—' */ }
+}
+/** Celdas Tramo/Subtramo/Progresiva del PDF (solo en obra lineal). El tramo es el
+ *  sector del ensayo; subtramo/progresiva vienen calculados de las coords. */
+function linearHeaderCells(p: unknown): { tramo: string; subtramo: string; progresiva: string } | null {
+  if (!isLinearProject(_webPdfFlags)) return null;
+  const pp = p as { sector_id?: string | null; progresiva?: number | null; subtramo_index?: number | null };
+  const sec = pp.sector_id ? _webLinearSectors.get(pp.sector_id) : null;
+  const tramo = sec?.name ?? '—';
+  const progresiva = (typeof pp.progresiva === 'number' && Number.isFinite(pp.progresiva)) ? formatProgresiva(pp.progresiva) : '—';
+  let subtramo = '—';
+  if (sec && typeof pp.subtramo_index === 'number' && sec.station_start != null && sec.station_end != null) {
+    subtramo = subtramoRangeLabel(sec.station_start, pp.subtramo_index, linearSubtramoLength(_webPdfFlags), sec.station_end);
+  }
+  return { tramo, subtramo, progresiva };
+}
+
 /** v43.6 — Sectores del proyecto CON geometría (para el croquis). */
 async function loadGeomSectors(projectId: string): Promise<CroquisSectorIn[]> {
   try {
@@ -695,6 +728,14 @@ function buildProtocolPages(
       especialidad: (!isNumeric && loc?.specialty) ? cell('Especialidad', loc.specialty) : '',
     };
     const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
+    // v100b — Obra lineal: Tramo/Subtramo/Progresiva SIEMPRE (independiente de
+    // header_fields), en numéricos y clásicos. Espejo del móvil.
+    const lin = linearHeaderCells(p);
+    if (lin) {
+      cells.push(cell('Tramo', lin.tramo));
+      cells.push(cell('Subtramo', lin.subtramo));
+      cells.push(cell('Progresiva', lin.progresiva));
+    }
     const nRows = PRINT_HEADER_ROWS[cfg.header_size];
     const perRow = Math.max(1, Math.ceil(cells.length / nRows));
     let rows = '';
@@ -1165,6 +1206,8 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
     orthoRow = pr as typeof orthoRow;
   } catch { /* sin flags → defaults */ }
   const headerColor = getPrintHeaderColor(projectFlags);
+  // v100b — Obra lineal: tramos con progresivas para las celdas del PDF.
+  await loadLinearSectors(projectId, mergeFeatureFlags(projectFlags as Partial<ProjectFeatureFlags>));
 
   // v43.6 — Croquis: sectores con geometría + ortofoto (base64 + bounds) del proyecto.
   // Se cargan UNA vez; el croquis se dibuja vectorial (sin Google Maps) sobre la ortofoto.
@@ -1479,6 +1522,8 @@ export async function exportSingleProtocolPdf(
   } catch { /* defaults */ }
   const cfg = getTemplatePrintConfig(projectFlags, idProto);
   const headerColor = getPrintHeaderColor(projectFlags);
+  // v100b — Obra lineal: tramos con progresivas para las celdas del PDF.
+  await loadLinearSectors(full.protocol.project_id, mergeFeatureFlags(projectFlags as Partial<ProjectFeatureFlags>));
   // v43.6 — Croquis (sectores + ortofoto del proyecto).
   const [geomSectorsS, croquisOrthoS] = await Promise.all([
     loadGeomSectors(full.protocol.project_id),

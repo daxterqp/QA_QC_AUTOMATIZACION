@@ -53,6 +53,10 @@ export default class Protocol extends Model {
   @field('coord_backup_captured_at') coordBackupCapturedAt!: number | null;
   @field('sector_id') sectorId!: string | null;
   @field('sector_assigned_manually') sectorAssignedManually!: boolean;
+  // v100b — Obra lineal: progresiva (m a lo largo del corredor) + subtramo (índice
+  // 0-based dentro del tramo=sector_id). Calculados de las coords al capturar GPS.
+  @field('progresiva') progresiva!: number | null;
+  @field('subtramo_index') subtramoIndex!: number | null;
   // v31 — modos de llenado + codificación correlativa (Partes D+E)
   /** Código correlativo del ensayo (p.ej. PR-260032). Único por proyecto. */
   @field('protocol_code') protocolCode!: string | null;

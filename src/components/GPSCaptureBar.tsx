@@ -29,8 +29,8 @@ import type { GpsAveragedResult } from '@utils/gpsAveraging';
 import { useAuth } from '@context/AuthContext';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { pullProjectSectors, pullProjectSettings } from '@services/SupabaseSyncService';
-import { formatCoords, findSectorByPoint, type LatLng } from '@utils/CoordinateSystem';
-import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { formatCoords, findSectorByPoint, computeChainage, type LatLng, type TramoInfo } from '@utils/CoordinateSystem';
+import { parseFeatureFlagsJson, isLinearProject, linearSubtramoLength } from '@utils/featureFlags';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius } from '../theme/colors';
 import type ProjectSector from '@db/models/ProjectSector';
@@ -147,6 +147,23 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
       { lat: gps.lat, lng: gps.lng },
       liveSectors.map(s => ({ id: s.id, name: s.name, points: s.points })),
     );
+    // v100b — Obra lineal: calcular progresiva + subtramo de las coords. Se lee el
+    // flag fresco (puede haber cambiado). La progresiva es geometría pura → siempre
+    // se recalcula (no respeta sectorAssignedManually, que solo aplica al sector).
+    let linear = false;
+    let chain: ReturnType<typeof computeChainage> = null;
+    try {
+      const proj: any = await projectsCollection.find(protocol.projectId);
+      const flags = parseFeatureFlagsJson(proj?.featureFlags);
+      linear = isLinearProject(flags);
+      if (linear) {
+        const tramos: TramoInfo[] = liveSectors.map(s => ({
+          id: s.id, name: s.name, points: s.points,
+          stationStart: s.stationStart ?? null, stationEnd: s.stationEnd ?? null,
+        }));
+        chain = computeChainage({ lat: gps.lat, lng: gps.lng }, tramos, linearSubtramoLength(flags));
+      }
+    } catch { /* sin flags → no lineal */ }
     await database.write(async () => {
       await (protocol as any).update((p: any) => {
         if (keepBackup) {
@@ -171,6 +188,12 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
         if (sectorAuto && !p.sectorAssignedManually) {
           p.sectorId = sectorAuto.id;
           p.sectorAssignedManually = false;
+        }
+        // v100b — Obra lineal: progresiva + subtramo (null si el punto no cae en
+        // ningún tramo con geometría/stations). Solo se tocan en proyectos lineales.
+        if (linear) {
+          p.progresiva = chain ? chain.progresiva : null;
+          p.subtramoIndex = chain ? chain.subtramoIndex : null;
         }
       });
     });

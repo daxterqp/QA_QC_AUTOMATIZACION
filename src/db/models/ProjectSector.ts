@@ -20,6 +20,10 @@ export default class ProjectSector extends Model {
   @field('source_system') sourceSystem!: string | null;
   // v29 — Orden del Excel (rowIndex+1 al importar). null para legacy.
   @field('sort_order') sortOrder!: number | null;
+  // v100b — Obra lineal: progresivas de inicio/fin del tramo (m, continuas en el
+  // corredor). null fuera de obra lineal.
+  @field('station_start') stationStart!: number | null;
+  @field('station_end') stationEnd!: number | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

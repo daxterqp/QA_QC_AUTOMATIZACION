@@ -25,7 +25,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  *      sin abusar de protocol_item_id.
  */
 export const schema = appSchema({
-  version: 45,
+  version: 46,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -167,6 +167,10 @@ export const schema = appSchema({
         { name: 'coord_backup_captured_at', type: 'number', isOptional: true },
         { name: 'sector_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'sector_assigned_manually', type: 'boolean' },
+        // v100b — Obra lineal: progresiva (m a lo largo del corredor) + subtramo
+        // (índice 0-based dentro del tramo=sector_id). Calculados de las coords.
+        { name: 'progresiva', type: 'number', isOptional: true },
+        { name: 'subtramo_index', type: 'number', isOptional: true },
         // v31 — modos de llenado + codificación correlativa (Partes D+E)
         { name: 'protocol_code', type: 'string', isOptional: true, isIndexed: true },
         { name: 'ensayo_date', type: 'string', isOptional: true, isIndexed: true },
@@ -438,6 +442,10 @@ export const schema = appSchema({
         { name: 'source_system', type: 'string', isOptional: true },
         // v29 — Orden del Excel (rowIndex+1 al importar). null/0 para legacy.
         { name: 'sort_order', type: 'number', isOptional: true },
+        // v100b — Obra lineal: progresivas de inicio/fin del tramo (m, continuas
+        // en el corredor). null fuera de obra lineal.
+        { name: 'station_start', type: 'number', isOptional: true },
+        { name: 'station_end', type: 'number', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

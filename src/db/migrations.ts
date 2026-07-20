@@ -1012,5 +1012,25 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      // v46 — Obra lineal: progresiva/subtramo del ensayo + progresivas del tramo.
+      toVersion: 46,
+      steps: [
+        addColumns({
+          table: 'protocols',
+          columns: [
+            { name: 'progresiva', type: 'number', isOptional: true },
+            { name: 'subtramo_index', type: 'number', isOptional: true },
+          ],
+        }),
+        addColumns({
+          table: 'project_sectors',
+          columns: [
+            { name: 'station_start', type: 'number', isOptional: true },
+            { name: 'station_end', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

@@ -66,6 +66,144 @@ export function findSectorByPointWithTolerance(
   return null;
 }
 
+// ─── v100b — Progresivas de OBRA LINEAL (chainage) ──────────────────────────
+// ESPEJO EXACTO de src/utils/CoordinateSystem.ts — mantener sincronizado.
+// El "tramo" de un ensayo = su sector (point-in-polygon). La progresiva se obtiene
+// proyectando el punto sobre el EJE del polígono del tramo y escalando por la
+// LONGITUD DECLARADA (station_end − station_start).
+
+export interface TramoInfo {
+  id: string;
+  name: string;
+  points: LatLng[] | null;
+  stationStart: number | null;
+  stationEnd: number | null;
+}
+export interface ChainageResult {
+  tramoId: string;
+  tramoName: string;
+  progresiva: number;
+  subtramoIndex: number;
+}
+
+type LocalPt = { x: number; y: number };
+const _finiteTramo = (t: TramoInfo): boolean =>
+  !!t.points && t.points.length >= 3 &&
+  typeof t.stationStart === 'number' && Number.isFinite(t.stationStart) &&
+  typeof t.stationEnd === 'number' && Number.isFinite(t.stationEnd) &&
+  (t.stationEnd as number) > (t.stationStart as number);
+
+function _centroidLocal(points: LatLng[], origin: LatLng): LocalPt {
+  let sx = 0, sy = 0;
+  for (const p of points) { const m = llToLocalMeters(p, origin); sx += m.x; sy += m.y; }
+  return { x: sx / points.length, y: sy / points.length };
+}
+
+function _principalAxis(pts: LocalPt[]): [LocalPt, LocalPt] {
+  const n = pts.length;
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p.x; my += p.y; }
+  mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ux = Math.cos(theta), uy = Math.sin(theta);
+  let tmin = Infinity, tmax = -Infinity, pmin = pts[0], pmax = pts[0];
+  for (const p of pts) {
+    const t = (p.x - mx) * ux + (p.y - my) * uy;
+    if (t < tmin) { tmin = t; pmin = p; }
+    if (t > tmax) { tmax = t; pmax = p; }
+  }
+  return [pmin, pmax];
+}
+
+function _tramoAxisLocal(points: LatLng[], origin: LatLng): [LocalPt, LocalPt] {
+  const pts = points.map((p) => llToLocalMeters(p, origin));
+  if (pts.length === 4) {
+    const len = (a: LocalPt, b: LocalPt) => Math.hypot(a.x - b.x, a.y - b.y);
+    const mid = (a: LocalPt, b: LocalPt): LocalPt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    const sum02 = len(pts[0], pts[1]) + len(pts[2], pts[3]);
+    const sum13 = len(pts[1], pts[2]) + len(pts[3], pts[0]);
+    return sum02 <= sum13
+      ? [mid(pts[0], pts[1]), mid(pts[2], pts[3])]
+      : [mid(pts[1], pts[2]), mid(pts[3], pts[0])];
+  }
+  return _principalAxis(pts);
+}
+
+export function subtramoCount(stationStart: number, stationEnd: number, subLenM: number): number {
+  const len = stationEnd - stationStart;
+  const sub = (subLenM > 0 && Number.isFinite(subLenM)) ? subLenM : len;
+  return Math.max(1, Math.ceil(len / sub - 1e-9));
+}
+
+export function computeChainage(
+  point: LatLng,
+  tramos: TramoInfo[],
+  subtramoLengthM: number,
+): ChainageResult | null {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+  const valid = tramos.filter(_finiteTramo);
+  if (valid.length === 0) return null;
+
+  const container = valid.find((t) => pointInPolygon(point, t.points as LatLng[]));
+  if (!container) return null;
+
+  const origin = point;
+
+  const ordered = [...valid].sort((a, b) => (a.stationStart as number) - (b.stationStart as number));
+  let dir: LocalPt;
+  if (ordered.length >= 2) {
+    const c0 = _centroidLocal(ordered[0].points as LatLng[], origin);
+    const cN = _centroidLocal(ordered[ordered.length - 1].points as LatLng[], origin);
+    dir = { x: cN.x - c0.x, y: cN.y - c0.y };
+  } else {
+    const [a, b] = _tramoAxisLocal(container.points as LatLng[], origin);
+    dir = { x: b.x - a.x, y: b.y - a.y };
+  }
+  if (dir.x === 0 && dir.y === 0) dir = { x: 1, y: 0 };
+
+  let [A, B] = _tramoAxisLocal(container.points as LatLng[], origin);
+  if ((B.x - A.x) * dir.x + (B.y - A.y) * dir.y < 0) { const tmp = A; A = B; B = tmp; }
+
+  const abx = B.x - A.x, aby = B.y - A.y;
+  const len2 = abx * abx + aby * aby;
+  let t = len2 > 0 ? ((-A.x) * abx + (-A.y) * aby) / len2 : 0;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+
+  const s0 = container.stationStart as number;
+  const s1 = container.stationEnd as number;
+  const progresiva = s0 + t * (s1 - s0);
+
+  const subLen = (subtramoLengthM > 0 && Number.isFinite(subtramoLengthM)) ? subtramoLengthM : (s1 - s0);
+  const nSub = subtramoCount(s0, s1, subLen);
+  let idx = Math.floor((progresiva - s0) / subLen);
+  if (idx < 0) idx = 0; else if (idx > nSub - 1) idx = nSub - 1;
+
+  return { tramoId: container.id, tramoName: container.name, progresiva, subtramoIndex: idx };
+}
+
+/** Formatea una progresiva en metros al convención "km+mmm(.d)": 12.5→"0+012.5",
+ *  375→"0+375", 1080→"1+080". */
+export function formatProgresiva(m: number): string {
+  if (!Number.isFinite(m)) return '—';
+  const neg = m < 0;
+  const rounded = Math.round(Math.abs(m) * 10) / 10;
+  const km = Math.floor(rounded / 1000);
+  const rest = rounded - km * 1000;
+  const rInt = Math.floor(rest);
+  const dec = Math.round((rest - rInt) * 10);
+  const decStr = dec > 0 ? `.${dec}` : '';
+  return `${neg ? '-' : ''}${km}+${String(rInt).padStart(3, '0')}${decStr}`;
+}
+
+/** Rango de progresivas de un subtramo, ej "0+000 – 0+060". */
+export function subtramoRangeLabel(stationStart: number, idx: number, subLenM: number, stationEnd: number): string {
+  const s = stationStart + idx * subLenM;
+  const e = Math.min(stationStart + (idx + 1) * subLenM, stationEnd);
+  return `${formatProgresiva(s)} – ${formatProgresiva(e)}`;
+}
+
 // ─── v44 — Conversión de coordenadas topográficas → WGS84 (espejo del móvil) ───
 import proj4 from 'proj4';
 

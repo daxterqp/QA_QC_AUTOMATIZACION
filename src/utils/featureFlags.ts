@@ -194,7 +194,23 @@ export interface TopoColumn {
   show_in_ficha: boolean;
 }
 
+// ── v100b — Tipos de proyecto y config de obra lineal ──────────────────────
+export type ProjectType = 'edificaciones' | 'obra_lineal' | 'mineria';
+/** Longitud de subtramo por defecto (m) cuando el proyecto lineal no la define. */
+export const LINEAR_DEFAULT_SUBTRAMO_M = 20;
+/** Un ítem del juego de ensayos: tipo (id_protocolo) + cuántos por subtramo. */
+export interface LinearTestSetItem { id_protocolo: string; count: number }
+
 export interface ProjectFeatureFlags {
+  // ── v100b — Tipo de proyecto ────────────────────────────────────────────
+  /** Tipo de obra. Default 'edificaciones' (= comportamiento actual). 'obra_lineal'
+   *  activa tramos + subtramos + progresivas; 'mineria' reservado (resúmenes, futuro). */
+  project_type?: ProjectType;
+  /** Obra lineal: longitud de subtramo en metros (uniforme). Default LINEAR_DEFAULT_SUBTRAMO_M. */
+  linear_subtramo_length_m?: number;
+  /** Obra lineal: juego de ensayos uniforme por subtramo (tipo + cantidad por subtramo). */
+  linear_test_set?: LinearTestSetItem[];
+
   // ── Configuración de Protocolos ────────────────────────────────────────
   classic_protocols: boolean;
   numeric_protocols: boolean;
@@ -314,6 +330,7 @@ export interface ProjectFeatureFlags {
 }
 
 export const DEFAULT_FEATURE_FLAGS: ProjectFeatureFlags = {
+  project_type: 'edificaciones',
   classic_protocols: true,
   numeric_protocols: false,
   parametric_templates: false,
@@ -420,6 +437,41 @@ export function isGpsCaptureSubjectiveEnabled(flags: ProjectFeatureFlags): boole
 
 export function isGpsCaptureNumericEnabled(flags: ProjectFeatureFlags): boolean {
   return !!flags.map_enabled && !!flags.gps_capture_numeric;
+}
+
+// ── v100b — Tipo de proyecto + obra lineal ─────────────────────────────────
+/** Tipo de obra, con default seguro para proyectos legacy (sin el flag). */
+export function getProjectType(flags: ProjectFeatureFlags | null | undefined): ProjectType {
+  const t = (flags as any)?.project_type;
+  return (t === 'obra_lineal' || t === 'mineria') ? t : 'edificaciones';
+}
+
+/** true si la obra es lineal (carretera/canal/vía) → tramos + subtramos + progresivas. */
+export function isLinearProject(flags: ProjectFeatureFlags | null | undefined): boolean {
+  return getProjectType(flags) === 'obra_lineal';
+}
+
+/** Longitud de subtramo (m) del proyecto lineal, acotada a un rango razonable. */
+export function linearSubtramoLength(flags: ProjectFeatureFlags | null | undefined): number {
+  const n = (flags as any)?.linear_subtramo_length_m;
+  return (typeof n === 'number' && Number.isFinite(n) && n > 0) ? n : LINEAR_DEFAULT_SUBTRAMO_M;
+}
+
+/** Juego de ensayos uniforme por subtramo (saneado: cantidades enteras ≥1). */
+export function linearTestSet(flags: ProjectFeatureFlags | null | undefined): LinearTestSetItem[] {
+  const raw = (flags as any)?.linear_test_set;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x: any) => x && typeof x.id_protocolo === 'string' && x.id_protocolo.trim())
+    .map((x: any) => ({ id_protocolo: String(x.id_protocolo).trim(), count: Math.max(1, Math.round(Number(x.count) || 1)) }));
+}
+
+/** Término de la unidad territorial según el tipo de proyecto: 'Tramo' en obra
+ *  lineal, 'Sector' en el resto. Usado para rotular la UI y el PDF. */
+export function unitTerm(flags: ProjectFeatureFlags | null | undefined): { sing: string; plur: string; singLower: string; plurLower: string } {
+  return isLinearProject(flags)
+    ? { sing: 'Tramo', plur: 'Tramos', singLower: 'tramo', plurLower: 'tramos' }
+    : { sing: 'Sector', plur: 'Sectores', singLower: 'sector', plurLower: 'sectores' };
 }
 
 // ── v44 — Módulo "Carga de datos topográficos" ────────────────────────────
