@@ -197,7 +197,7 @@ export interface TopoColumn {
 // ── v100b — Tipos de proyecto y config de obra lineal ──────────────────────
 export type ProjectType = 'edificaciones' | 'obra_lineal' | 'mineria';
 /** Longitud de subtramo por defecto (m) cuando el proyecto lineal no la define. */
-export const LINEAR_DEFAULT_SUBTRAMO_M = 20;
+export const LINEAR_DEFAULT_SUBTRAMO_M = 60;
 /** Un ítem del juego de ensayos: tipo (id_protocolo) + cuántos por subtramo. */
 export interface LinearTestSetItem { id_protocolo: string; count: number }
 
