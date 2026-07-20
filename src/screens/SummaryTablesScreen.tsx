@@ -7,7 +7,7 @@
  * el freeze de la 1ª columna se eliminó por errores visuales.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Modal, RefreshControl, TextInput, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -48,8 +48,34 @@ interface Row {
 }
 
 type Trend = 'linear' | 'quad' | 'cubic';
-type ChartCfg = { id: string; yKey: string; trend: Trend };
+/** v100d — Config por gráfico (persistida): ejes manuales + fechas verticales.
+ *  yMin/yMax null/undefined = automático; xMin/xMax = YYYY-MM-DD o null. */
+type ChartCfg = {
+  id: string; yKey: string; trend: Trend;
+  yMin?: number | null; yMax?: number | null;
+  xMin?: string | null; xMax?: string | null;
+  xVertical?: boolean;
+};
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+
+/** v100d — Rango Y "bonito": centra los valores TÍPICOS (cuantiles 10-90, los
+ *  atípicos no participan del centrado) + padding 25% a cada lado. Overrides
+ *  manuales (cfg) mandan. Degenerado (todos iguales) → abre una ventana mínima. */
+function niceYRange(ys: number[], yMinCfg?: number | null, yMaxCfg?: number | null): { lo: number; hi: number } {
+  const sorted = ys.filter(Number.isFinite).sort((a, b) => a - b);
+  let lo = 0, hi = 1;
+  if (sorted.length > 0) {
+    const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
+    lo = q(0.1); hi = q(0.9);
+    if (hi - lo <= 0) { const base = Math.max(Math.abs(hi) * 0.01, 0.5); lo -= base; hi += base; }
+    const pad = (hi - lo) * 0.25;
+    lo -= pad; hi += pad;
+  }
+  if (yMinCfg != null && Number.isFinite(yMinCfg)) lo = yMinCfg;
+  if (yMaxCfg != null && Number.isFinite(yMaxCfg)) hi = yMaxCfg;
+  if (hi <= lo) hi = lo + 1;
+  return { lo, hi };
+}
 
 function num(v: unknown): number {
   if (typeof v === 'number') return v;
@@ -351,11 +377,38 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const yOptions = useMemo(() => chartYOptions(dataCols), [dataCols]);
   const yLabelOf = (yKey: string) => yOptions.find(o => o.key === yKey)?.label ?? t('summary.value');
 
-  // Puntos de un gráfico (X = fecha → tiempo; Y = columna).
-  const buildPts = useCallback((yKey: string) => filtered
-    .map(r => ({ x: r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN, y: num(r.values[yKey]), code: r.protocolCode ?? '' }))
+  // Puntos de un gráfico (X = fecha → tiempo; Y = columna). v100d — respeta el
+  // rango de fechas configurado por gráfico (xMin/xMax).
+  const buildPts = useCallback((ch: ChartCfg) => filtered
+    .filter(r => (!ch.xMin || (r.ensayoDate ?? '') >= ch.xMin) && (!ch.xMax || (r.ensayoDate ?? '') <= ch.xMax))
+    .map(r => ({ x: r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN, y: num(r.values[ch.yKey]), code: r.protocolCode ?? '' }))
     .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
     .sort((a, b) => a.x - b.x), [filtered]);
+  // v100d — decimales de la columna del eje Y (los ticks usan los MISMOS decimales).
+  const decimalsOf = useCallback((yKey: string) => dataCols.find(c => c.key === yKey)?.decimals, [dataCols]);
+
+  // v100d — Config de ejes por gráfico (mantener presionado el gráfico / ruedita).
+  const [axisChart, setAxisChart] = useState<ChartCfg | null>(null);
+  const [axYMin, setAxYMin] = useState(''); const [axYMax, setAxYMax] = useState('');
+  const [axXMin, setAxXMin] = useState(''); const [axXMax, setAxXMax] = useState('');
+  const [axVert, setAxVert] = useState(false);
+  const [axDatePick, setAxDatePick] = useState<null | 'from' | 'to'>(null);
+  const openAxisCfg = useCallback((ch: ChartCfg) => {
+    setAxisChart(ch);
+    setAxYMin(ch.yMin != null ? String(ch.yMin) : '');
+    setAxYMax(ch.yMax != null ? String(ch.yMax) : '');
+    setAxXMin(ch.xMin ?? ''); setAxXMax(ch.xMax ?? '');
+    setAxVert(!!ch.xVertical); setAxDatePick(null);
+  }, []);
+  const saveAxisCfg = useCallback(() => {
+    if (!axisChart) return;
+    const numOrNull = (s: string) => { const n = Number(String(s).trim().replace(',', '.')); return s.trim() !== '' && Number.isFinite(n) ? n : null; };
+    setCharts(prev => prev.map(c => c.id === axisChart.id ? {
+      ...c, yMin: numOrNull(axYMin), yMax: numOrNull(axYMax),
+      xMin: axXMin || null, xMax: axXMax || null, xVertical: axVert,
+    } : c));
+    setAxisChart(null);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert]);
 
   const toggleStatus = (k: string) => setStatusFilter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const activeFilterCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sectorFilter ? 1 : 0) + (statusFilter.size !== 3 ? 1 : 0);
@@ -480,13 +533,19 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carousel} contentContainerStyle={{ gap: 10, padding: 10 }}>
               {charts.map(ch => {
-                const data = buildPts(ch.yKey);
+                const data = buildPts(ch);
                 return (
-                  <View key={ch.id} style={styles.chartCard}>
-                    <Text style={styles.chartTitle} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
-                    {data.length > 0 ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend} />
+                  /* v100d — mantener presionado (o la ruedita) abre la config de ejes del gráfico */
+                  <TouchableOpacity key={ch.id} style={styles.chartCard} activeOpacity={0.9} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={[styles.chartTitle, { flex: 1 }]} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
+                      <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8}><Ionicons name="settings-outline" size={15} color={Colors.textMuted} /></TouchableOpacity>
+                    </View>
+                    {data.length > 0
+                      ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
+                          decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical} />
                       : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </ScrollView>
@@ -666,6 +725,61 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
           </View>
         </GestureHandlerRootView>
       </Modal>
+
+      {/* v100d — Modal: EJES del gráfico (mantener presionado / ruedita). Se persiste por gráfico. */}
+      <Modal visible={!!axisChart} transparent animationType="fade" onRequestClose={() => setAxisChart(null)}>
+        <View style={styles.modalBg}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAxisChart(null)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeadRow}>
+              <Text style={styles.modalTitle}>Ejes del gráfico</Text>
+              <TouchableOpacity onPress={() => setAxisChart(null)} hitSlop={8}><Ionicons name="close" size={20} color={Colors.textMuted} /></TouchableOpacity>
+            </View>
+            <Text style={styles.smallMuted}>{axisChart ? yLabelOf(axisChart.yKey) : ''}</Text>
+
+            <Text style={styles.filterLabel}>Eje Y — límites (vacío = automático)</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <View style={styles.dateField}>
+                <Text style={styles.dateFieldLabel}>Mínimo</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axYMin} onChangeText={setAxYMin} placeholder="auto" />
+              </View>
+              <View style={styles.dateField}>
+                <Text style={styles.dateFieldLabel}>Máximo</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axYMax} onChangeText={setAxYMax} placeholder="auto" />
+              </View>
+            </View>
+
+            <Text style={styles.filterLabel}>Eje X — rango de fechas (vacío = automático)</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'from' ? null : 'from')}>
+                <Text style={styles.dateFieldLabel}>Inicial</Text>
+                <Text style={styles.dateFieldValue}>{axXMin || '—'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'to' ? null : 'to')}>
+                <Text style={styles.dateFieldLabel}>Final</Text>
+                <Text style={styles.dateFieldValue}>{axXMax || '—'}</Text>
+              </TouchableOpacity>
+            </View>
+            {axDatePick && (
+              <CalendarPicker
+                value={(axDatePick === 'from' ? axXMin : axXMax) || undefined}
+                onSelect={d => { if (axDatePick === 'from') setAxXMin(d); else setAxXMax(d); setAxDatePick(null); }}
+                onClear={() => { if (axDatePick === 'from') setAxXMin(''); else setAxXMax(''); setAxDatePick(null); }}
+              />
+            )}
+
+            <View style={[styles.modalHeadRow, { marginTop: 10 }]}>
+              <Text style={styles.dateRowText}>Fechas del eje X en vertical</Text>
+              <Switch value={axVert} onValueChange={setAxVert} />
+            </View>
+
+            <View style={styles.modalFootRow}>
+              <TouchableOpacity onPress={() => setAxisChart(null)}><Text style={styles.clearText}>Cancelar</Text></TouchableOpacity>
+              <TouchableOpacity onPress={saveAxisCfg} style={styles.genBtn}><Text style={styles.genBtnText}>Guardar</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -710,32 +824,50 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 }
 
 // ── Gráfico de dispersión (react-native-svg) con tendencia ───────────────────
-function ScatterChartRN({ data, yLabel, trend }: { data: { x: number; y: number; code: string }[]; yLabel: string; trend: 'linear' | 'quad' | 'cubic' }) {
+// v100d — Eje Y: rango centrado en los valores TÍPICOS (atípicos fuera del
+// centrado, se dibujan recortados al borde), ticks con los MISMOS decimales de
+// la columna (subiendo precisión solo si el paso lo exige). Overrides yMin/yMax
+// y fechas verticales vienen de la config por gráfico.
+function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical }: {
+  data: { x: number; y: number; code: string }[]; yLabel: string; trend: 'linear' | 'quad' | 'cubic';
+  decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
+}) {
   const { t } = useI18n();
-  const W = 320, H = 230, padL = 40, padR = 10, padT = 10, padB = 38;
+  const W = 320, H = 230, padL = 44, padR = 10, padT = 10, padB = xVertical ? 56 : 38;
   const xs = data.map(d => d.x), ys = data.map(d => d.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) || minX + 1;
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const dx = maxX - minX || 1, dy = (maxY - minY) || 1;
+  const dx = maxX - minX || 1;
+  const { lo, hi } = niceYRange(ys, yMin, yMax);
+  const dy = hi - lo;
   const sx = (x: number) => padL + ((x - minX) / dx) * (W - padL - padR);
-  const sy = (y: number) => H - padB - ((y - minY) / dy) * (H - padT - padB);
+  const syRaw = (y: number) => H - padB - ((y - lo) / dy) * (H - padT - padB);
+  // Atípicos fuera del rango → recortados al borde del área de ploteo.
+  const sy = (y: number) => Math.max(padT, Math.min(H - padB, syRaw(y)));
+  // Decimales de los ticks: los de la columna; si el paso entre ticks es más fino
+  // (rango chico), sube la precisión lo justo para que no salgan repetidos.
+  const step = dy / 4;
+  const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
+  const tickDec = Math.max(decimals ?? 0, needed);
   const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : 3;
   const nx = xs.map(x => (x - minX) / dx);
   const coef = polyfit(nx, ys, degree);
   const trendPts: string[] = [];
   if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; trendPts.push(`${sx(minX + tt * dx).toFixed(1)},${sy(polyval(coef, tt)).toFixed(1)}`); }
   const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
+  const xTicks = [minX, (minX + maxX) / 2, maxX];
   return (
     <View>
       <Svg width={W} height={H}>
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
-        {Array.from({ length: 5 }, (_, i) => { const yv = minY + (dy * i) / 4; const yy = sy(yv); return (
+        {Array.from({ length: 5 }, (_, i) => { const yv = lo + (dy * i) / 4; const yy = syRaw(yv); return (
           <React.Fragment key={i}>
             <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="#eef2f7" strokeWidth={1} />
-            <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{Math.abs(yv) >= 100 ? yv.toFixed(0) : yv.toFixed(1)}</SvgText>
+            <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
           </React.Fragment>); })}
-        {[minX, (minX + maxX) / 2, maxX].map((xv, i) => <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
+        {xTicks.map((xv, i) => xVertical
+          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={8} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
+          : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
         {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill="#1a4f7a" opacity={0.8} />)}
         {coef ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={2} /> : null}
         <SvgText x={W / 2} y={H - 4} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
@@ -786,6 +918,8 @@ const styles = StyleSheet.create({
   dateField: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: Colors.white, marginTop: 4 },
   dateFieldLabel: { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase' },
   dateFieldValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginTop: 2 },
+  // v100d — inputs numéricos del modal de ejes.
+  axisInput: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, paddingVertical: 2, padding: 0, marginTop: 2 },
 
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, padding: 14, width: '100%', maxWidth: 380 },
