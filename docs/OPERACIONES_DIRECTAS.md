@@ -3,8 +3,10 @@
 > Objetivo: el usuario pide en lenguaje natural ("aprueba tal ensayo", "dale
 > acceso a X", "activa la codificación", "crea la tabla de moldes") y Claude lo
 > ejecuta directo en la base de datos, con el mismo efecto que la app.
-> Complementa: docs/FLUJO_EDICION_FICHAS.md (editar fichas + PDF + volcado) y
-> docs/FLAGS_MAPA.md (catálogo completo de feature_flags).
+> Complementa: docs/FLUJO_EDICION_FICHAS.md (editar fichas + PDF + volcado),
+> docs/CARGA_DIRECTA.md (**CREAR desde cero**: fichas nuevas, ubicaciones,
+> equipos lab/maquinaria, sectores, planos, proyectos) y docs/FLAGS_MAPA.md
+> (catálogo completo de feature_flags).
 > Regla universal: TODA escritura bumpea `updated_at` (bigint, epoch ms:
 > `(extract(epoch from now())*1000)::bigint`) para que el sync LWW del móvil
 > la adopte. Operar con la obra sincronizada.
