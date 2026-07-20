@@ -224,7 +224,12 @@ Todo con `updated_at` bumpeado (LWW). Backup no aplica (destino vacío; solo INS
     (CBR 36, DCC 31, GRA 37, MAR 22, PRM 16, TMA 25).
   - 4 tramos con progresivas continuas 0–1440; 6 print_configs copiados.
   - Total esperado = 4 tramos × 6 subtramos × 8 = **192 ensayos** (sin instancias aún).
-- Revisión adversarial (workflow) de paridad de espejos + integración: en curso.
+- **Revisión adversarial (2 rondas de workflow) COMPLETADA** ✔: ronda 1 halló 6
+  bugs reales (orientación por cuerda global → invertía progresiva en herraduras;
+  subtramo_index congelado inconsistente al cambiar longitud / reasignar tramo) —
+  todos corregidos. Ronda 2 (sobre los fixes) halló 1 más: el BORRADO de tramo no
+  limpiaba progresiva/subtramo — corregido. Fix F1 revalidado con corredor en U
+  (extremo del tramo de vuelta da progresiva correcta, antes espejada).
 
 ## 8. Estado de implementación
 
