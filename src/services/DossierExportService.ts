@@ -1481,6 +1481,10 @@ ${protocolPages}
 
 // ── Exportar un único protocolo como PDF ─────────────────────────────────────
 
+// v100 — Cache del croquis capturado por protocolo, para poder REGENERAR el PDF
+// (vista previa con panel de config en vivo) sin re-capturar el mapa a PNG.
+const _lastSingleCroquis = new Map<string, CroquisResult | null>();
+
 export async function exportSingleProtocolPdf(
   protocolId: string,
   projectId: string,
@@ -1488,7 +1492,12 @@ export async function exportSingleProtocolPdf(
   currentUserId: string,
   /** v43.5 — croquis (mapa→PNG + leyenda) del ensayo, capturado antes de exportar. */
   croquis: CroquisResult | null = null,
+  /** v100 — Config de PDF RESUELTA para regenerar EN VIVO desde la vista previa
+   *  (panel de config del tipo) sin escribir a la BD. Si viene, tiene prioridad
+   *  sobre la config guardada en feature_flags. */
+  cfgOverride?: ReturnType<typeof getTemplatePrintConfig>,
 ): Promise<string> {
+  _lastSingleCroquis.set(protocolId, croquis);
   const croquisB64 = croquis?.img ?? null;
   const croquisLegend = croquis?.legend ?? null;
   await loadPdfAuxTables(projectId);   // v41 — BUSCAR() en el PDF
@@ -1566,7 +1575,8 @@ export async function exportSingleProtocolPdf(
   const template = protocol.templateId ? templateMap.get(protocol.templateId) : undefined;
   const idProtocolo = template?.idProtocolo ?? null;
 
-  const cfgP = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
+  // v100 — override en vivo (panel de la vista previa) tiene prioridad sobre la BD.
+  const cfgP = cfgOverride ?? getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo);
   const hasCoords = (protocol as any).latitude != null && (protocol as any).longitude != null;
   const croquisInline = !!croquisB64 && cfgP.croquis.show && (cfgP.croquis.placement === 'start' || cfgP.croquis.placement === 'end') && hasCoords;
   const croquisForPhotos = !!croquisB64 && cfgP.croquis.show && cfgP.croquis.placement === 'photos';
@@ -1634,6 +1644,21 @@ ${protocolHtml}${photoHtml}
   try { await FileSystem.deleteAsync(targetUri, { idempotent: true }); } catch {}
   await FileSystem.moveAsync({ from: uri, to: targetUri });
   return targetUri;
+}
+
+/** v100 — Regenera el PDF de UN ensayo con una config RESUELTA override (el panel
+ *  de config de la vista previa), reutilizando el croquis ya capturado en el
+ *  export inicial. No escribe a la BD. Devuelve la uri (misma ruta; el visor
+ *  se refresca con key+cache:false). */
+export async function reexportSingleProtocolPdf(
+  protocolId: string,
+  projectId: string,
+  projectName: string,
+  currentUserId: string,
+  cfgOverride: ReturnType<typeof getTemplatePrintConfig>,
+): Promise<string> {
+  const croquis = _lastSingleCroquis.get(protocolId) ?? null;
+  return exportSingleProtocolPdf(protocolId, projectId, projectName, currentUserId, croquis, cfgOverride);
 }
 
 // ── Dossier de MUESTRA (agrupación de ensayos) ───────────────────────────────

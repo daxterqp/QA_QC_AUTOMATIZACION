@@ -61,7 +61,13 @@ export type RootStackParamList = {
   PhoneContacts: { projectId: string; projectName: string };
 
   // ── PDF Preview ────────────────────────────────────────────────────────────
-  DossierPreview: { pdfUri: string; projectName: string };
+  // pdfConfig (opcional): presente SOLO cuando se previsualiza UN ensayo único,
+  // habilita el panel de config del PDF de ese tipo (v100).
+  DossierPreview: {
+    pdfUri: string;
+    projectName: string;
+    pdfConfig?: { protocolId: string; projectId: string; idProtocolo: string };
+  };
 
   // ── v26 — GIS ─────────────────────────────────────────────────────────────
   ProjectMap: { projectId: string; projectName: string };

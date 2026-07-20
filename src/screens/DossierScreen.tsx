@@ -44,7 +44,7 @@ interface Props {
   projectName: string;
   onBack: () => void;
   onOpenProtocol: (protocolId: string, status: string) => void;
-  onPreviewPdf?: (pdfUri: string) => void;
+  onPreviewPdf?: (pdfUri: string, pdfConfig?: { protocolId: string; projectId: string; idProtocolo: string }) => void;
   /** v77 — FLOW abre el dossier con filtros ya aplicados. */
   initialFilters?: { desde?: string; hasta?: string; templateId?: string; sectorId?: string; estado?: string };
 }
@@ -276,7 +276,15 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     try {
       const croquisMap = await captureCroquisForExport([protocol.id]);
       const uri = await exportSingleProtocolPdf(protocol.id, projectId, projectName, currentUser.id, croquisMap[protocol.id] ?? null);
-      if (onPreviewPdf) onPreviewPdf(uri);
+      // v100 — Resuelve idProtocolo del tipo para habilitar el panel de config
+      // del PDF (por-tipo) dentro de la vista previa del ensayo único.
+      let idProtocolo: string | null = null;
+      try {
+        const tpl = await protocolTemplatesCollection.find((protocol as any).templateId).catch(() => null);
+        idProtocolo = (tpl as any)?.idProtocolo ?? null;
+      } catch { /* sin tipo → la vista previa se abre sin panel */ }
+      const pdfConfig = idProtocolo ? { protocolId: protocol.id, projectId, idProtocolo } : undefined;
+      if (onPreviewPdf) onPreviewPdf(uri, pdfConfig);
     } catch (e) {
       Alert.alert(t('dossier.error'), t('dossier.exportPdfError', { error: String(e) }));
     } finally {

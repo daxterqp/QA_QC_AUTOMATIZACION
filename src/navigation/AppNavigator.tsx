@@ -437,7 +437,7 @@ function DossierScreenWrapper({
         status === 'REJECTED' ? 'ProtocolFill' : 'ProtocolAudit',
         { protocolId }
       )}
-      onPreviewPdf={(pdfUri) => navigation.navigate('DossierPreview', { pdfUri, projectName: route.params.projectName })}
+      onPreviewPdf={(pdfUri, pdfConfig) => navigation.navigate('DossierPreview', { pdfUri, projectName: route.params.projectName, pdfConfig })}
     />
   );
 }

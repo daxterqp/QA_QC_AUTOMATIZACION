@@ -48,6 +48,47 @@ const dossierPrev: Record<string, { es: string; en: string; pt: string }> = {
     en: 'The PDF was saved to the selected folder.',
     pt: 'O PDF foi salvo na pasta selecionada.',
   },
+  // ── v100 — Panel de configuración del PDF dentro de la vista previa ─────────
+  'dossierPrev.cfgTitle': {
+    es: 'Configuración del PDF',
+    en: 'PDF settings',
+    pt: 'Configuração do PDF',
+  },
+  'dossierPrev.cfgHint': {
+    es: 'Ajusta viendo el resultado en vivo. Aplica a TODOS los ensayos de este tipo.',
+    en: 'Tune it while seeing the live result. Applies to ALL tests of this type.',
+    pt: 'Ajuste vendo o resultado ao vivo. Aplica-se a TODOS os ensaios deste tipo.',
+  },
+  'dossierPrev.cfgCroquisHint': {
+    es: 'La imagen del croquis (mapa) se regenera al re-exportar; aquí ajustas su posición en el PDF.',
+    en: 'The croquis (map) image regenerates on re-export; here you adjust its placement in the PDF.',
+    pt: 'A imagem do croqui (mapa) é regenerada ao re-exportar; aqui você ajusta sua posição no PDF.',
+  },
+  'dossierPrev.cfgSave': {
+    es: 'Guardar para este tipo',
+    en: 'Save for this type',
+    pt: 'Salvar para este tipo',
+  },
+  'dossierPrev.cfgSavedTitle': {
+    es: 'Configuración guardada',
+    en: 'Settings saved',
+    pt: 'Configuração salva',
+  },
+  'dossierPrev.cfgSavedMsg': {
+    es: 'Se aplicará a todos los ensayos de este tipo.',
+    en: 'It will apply to all tests of this type.',
+    pt: 'Será aplicada a todos os ensaios deste tipo.',
+  },
+  'dossierPrev.cfgClose': {
+    es: 'Cerrar',
+    en: 'Close',
+    pt: 'Fechar',
+  },
+  'dossierPrev.regenerating': {
+    es: 'Regenerando…',
+    en: 'Regenerating…',
+    pt: 'Regenerando…',
+  },
 };
 
 export default dossierPrev;
