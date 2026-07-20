@@ -211,10 +211,30 @@ Todo con `updated_at` bumpeado (LWW). Backup no aplica (destino vacío; solo INS
 - Llenado en masa de los 192 ensayos (siguiente tanda).
 - Rename de sector→tramo en pantallas secundarias (trazabilidad, tour, sync-modal).
 
-## 7. Verificación
+## 7. Verificación — RESULTADOS
 
-- `npx tsc --noEmit` móvil = 0, `next build`/tsc web = 0.
-- Revisión adversarial (workflow) de: paridad de espejos, correctitud del chainage
-  (proyección/orientación/subtramo), gating por tipo, PDF ambas ramas, y el volcado.
-- Chequeo numérico del volcado: 6 plantillas + sus items copiados, 4 tramos con station,
-  flags correctos, juego = 192 esperados.
+- `npx tsc --noEmit` móvil = **0** ✔ ; tsc web = **0** ✔ (varias corridas).
+- **Motor de chainage validado empíricamente** (script standalone con la geometría
+  real de los 4 tramos): los 4 centroides dan progresiva = el medio EXACTO de su
+  rango (180 / 540 / 900 / 1260), PRM-260007 → Tramo 1 prog 0+180, `formatProgresiva`
+  correcto (12.5→0+012.5, 375→0+375, 1080→1+080, 0→0+000), puntos fuera → null. ✔
+- **Volcado a Proyecto_Carreteras (uhGnc5GSyU6yt8zu) verificado** ✔:
+  - project_type=obra_lineal, subtramo=60 m, juego (6 tipos)=8/subtramo.
+  - 6 plantillas (DCC/PRM/GRA/CBR/MAR/TMA) con ítems IDÉNTICOS al origen
+    (CBR 36, DCC 31, GRA 37, MAR 22, PRM 16, TMA 25).
+  - 4 tramos con progresivas continuas 0–1440; 6 print_configs copiados.
+  - Total esperado = 4 tramos × 6 subtramos × 8 = **192 ensayos** (sin instancias aún).
+- Revisión adversarial (workflow) de paridad de espejos + integración: en curso.
+
+## 8. Estado de implementación
+
+HECHO ✔: flag project_type + helpers (ambos espejos) · motor chainage (ambos
+espejos, validado) · DB v46 (nube + móvil + tipos web) + sync · GPSCaptureBar ·
+PDF Datos Generales (móvil + web) · UI config (móvil completo, web
+selector+lectura del juego) · helper de avance (ambos espejos) · título "Tramos"
+en obra lineal · volcado a Proyecto_Carreteras.
+
+FOLLOW-UP (documentado, no bloqueante): rename sector→tramo en pantallas
+secundarias (contenido de sectores, mapa, filtros ensayos/dossier, GPS bar, tour,
+trazabilidad) · editor detallado del juego en web · dashboard de avance por tramo ·
+comportamiento de minería · carga de eje explícito.
