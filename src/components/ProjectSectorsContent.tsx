@@ -178,7 +178,9 @@ export default function ProjectSectorsContent({ projectId }: Props) {
               await database.write(async () => {
                 const ops: any[] = [];
                 for (const p of assigned) {
-                  ops.push((p as any).prepareUpdate((r: any) => { r.sectorId = null; }));
+                  // v100b — al desasignar el tramo, limpiar también progresiva/subtramo
+                  // (obra lineal) para no dejarlos huérfanos ligados a un tramo borrado.
+                  ops.push((p as any).prepareUpdate((r: any) => { r.sectorId = null; r.progresiva = null; r.subtramoIndex = null; }));
                 }
                 ops.push((sector as any).prepareDestroyPermanently());
                 await database.batch(ops);

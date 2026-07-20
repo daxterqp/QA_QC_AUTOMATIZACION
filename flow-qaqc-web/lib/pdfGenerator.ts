@@ -487,7 +487,9 @@ function linearHeaderCells(p: unknown): { tramo: string; subtramo: string; progr
   const pp = p as { sector_id?: string | null; progresiva?: number | null; subtramo_index?: number | null };
   const sec = pp.sector_id ? _webLinearSectors.get(pp.sector_id) : null;
   const tramo = sec?.name ?? '—';
-  const progresiva = (typeof pp.progresiva === 'number' && Number.isFinite(pp.progresiva)) ? formatProgresiva(pp.progresiva) : '—';
+  // Progresiva solo si hay tramo asignado (espejo del móvil): sin sector la
+  // progresiva no tiene referencia.
+  const progresiva = (sec && typeof pp.progresiva === 'number' && Number.isFinite(pp.progresiva)) ? formatProgresiva(pp.progresiva) : '—';
   let subtramo = '—';
   // Subtramo SIEMPRE derivado de la progresiva guardada + la longitud vigente
   // (espejo del móvil) — nunca del subtramo_index congelado.

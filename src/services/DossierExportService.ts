@@ -95,7 +95,9 @@ function _linearHeaderCells(protocol: Protocol): { tramo: string; subtramo: stri
   const pa = protocol as any;
   const sec = pa.sectorId ? _pdfLinearSectors.get(pa.sectorId) : null;
   const tramo = sec?.name ?? '—';
-  const progresiva = (typeof pa.progresiva === 'number' && Number.isFinite(pa.progresiva)) ? formatProgresiva(pa.progresiva) : '—';
+  // Progresiva solo si hay tramo asignado: sin sector, la progresiva no tiene
+  // referencia (evita imprimir una progresiva huérfana de un tramo inexistente).
+  const progresiva = (sec && typeof pa.progresiva === 'number' && Number.isFinite(pa.progresiva)) ? formatProgresiva(pa.progresiva) : '—';
   let subtramo = '—';
   // Subtramo SIEMPRE derivado de la progresiva guardada (geometría pura) + la
   // longitud de subtramo VIGENTE — nunca del subtramo_index congelado (que puede

@@ -1010,6 +1010,13 @@ export async function deleteSector(sectorId: string): Promise<{ unassigned: numb
   const { count } = await supabase.from('protocols')
     .select('id', { count: 'exact', head: true })
     .eq('sector_id', sectorId);
+  // v100b — Limpiar progresiva/subtramo (obra lineal) ANTES de borrar el tramo,
+  // mientras los protocolos aún son alcanzables por sector_id; si no, quedarían
+  // huérfanos (progresiva de un tramo ya inexistente). El FK ON DELETE SET NULL
+  // se encarga de sector_id al borrar.
+  await supabase.from('protocols')
+    .update({ progresiva: null, subtramo_index: null, updated_at: Date.now() })
+    .eq('sector_id', sectorId);
   const { error } = await supabase.from('project_sectors')
     .delete().eq('id', sectorId);
   if (error) throw new Error(error.message);
