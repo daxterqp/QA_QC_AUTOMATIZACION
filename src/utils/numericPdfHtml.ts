@@ -153,6 +153,19 @@ function cellInner(
       // derecho); `ok` sigue alimentando ese veredicto.
       return { html: `<b style="color:#222;">${fmtNum(v, cell.decimals)}${pct}</b>`, ok };
     }
+    case 'xref': {
+      // v100c — llamados entre ensayos (frozen): `get` muestra el VALOR congelado
+      // (comments / scope); selector muestra el CÓDIGO (comments ya llega mapeado
+      // id→código por xrefCommentsForPdf). Antes caía al default y salía '—'.
+      const xr = cell as { mode?: string; decimals?: number };
+      if (xr.mode === 'get') {
+        let v = scope[key];
+        if (v == null && raw !== '') { const n = Number(String(raw).replace(',', '.')); if (isFinite(n)) v = n; }
+        if (v == null || !isFinite(v)) return { html: escHtml(raw || '—'), ok: null };
+        return { html: `<b style="color:#222;">${fmtNum(v, xr.decimals)}</b>`, ok: null };
+      }
+      return { html: raw ? `<b style="color:${NAVY};letter-spacing:0.3px;">${escHtml(raw)}</b>` : '—', ok: null };
+    }
     default:
       return { html: '—', ok: null };
   }
@@ -258,6 +271,12 @@ export function buildNumericProtocolBlocks(
       else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
       else if (cell.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: cell.refKey, matrixId: cell.matrixId, searchCol: cell.searchCol, returnCol: cell.returnCol });
       else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
+      // v100c — celdas xref: el PDF usa el valor CONGELADO en comments (v45.2: el
+      // freeze escribe el valor resuelto en el slot de las celdas `get`). Entrar
+      // como 'manual' pone ese valor en el scope para que las fórmulas que las
+      // referencian (#3A, #4A…) computen. Selectoras: raw no-numérico → null (nadie
+      // las referencia numéricamente). Sin esto, las fórmulas dependientes daban ⚠.
+      else if (cell.kind === 'xref') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
     }
   }
   let scope: Scope = {};
