@@ -27,14 +27,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /** Versión del esquema de values_json (paridad con web). Subir → backfill rehace filas viejas.
  *  v4 (v100c): celdas xref (selector = CÓDIGO legible, no el id; get entra al scope),
- *  subtramo/progresiva en obra lineal. */
-export const SUMMARY_ROW_VERSION = 4;
+ *  subtramo/progresiva en obra lineal. v5: orden determinista por partida
+ *  en extractValues (lección v98e — sin él, las matrices se armaban corruptas
+ *  y el resumen salía casi vacío). */
+export const SUMMARY_ROW_VERSION = 5;
 
 /** Construye el mapa de valores de la ficha: ingresados Y calculados (recomputa
  *  el scope de fórmulas/lookups). Antes solo guardaba los ingresados.
  *  `displayByRef` (v100c): ref guardada en celdas xref selectoras (id permanente)
  *  → código a MOSTRAR (PRM-260016). */
 function extractValues(items: { partidaItem: string | null; id: string; validationMethod: string | null; comments: string | null }[], auxTables?: import('@utils/formulaEval').AuxTables, xrefValues?: XrefValues, displayByRef?: Record<string, string>): Record<string, string> {
+  // v100c (lección v98e) — ORDEN DETERMINISTA por partida: los items llegan en
+  // orden de fetch ARBITRARIO y extractMatrices es POSICIONAL (las val- deben
+  // SEGUIR a su matrix-). Con orden revuelto, filas normales se tragaban como
+  // "matrices" y el resumen salía casi VACÍO (solo PRM, sin matrices, salía bien).
+  items = [...items].sort((a, b) =>
+    String(a.partidaItem ?? '').localeCompare(String(b.partidaItem ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validationMethod) }));
   const { mainRows, matrices } = extractMatrices(parsed);
   // Keyear por item.id (NO por partida): dos filas con el mismo partida_item no
@@ -166,6 +174,17 @@ export async function upsertSummaryRow(protocolId: string, opts?: { xrefValues?:
     });
 
     const existing = await summaryRowsCollection.query(Q.where('protocol_id', protocolId)).fetch();
+    // v100c — Guard anti-degradación: si esta extracción no obtuvo NINGÚN valor
+    // de ficha (típico: items locales aún sin sincronizar) y la fila previa SÍ
+    // tenía, conservar la previa — un celular desincronizado no debe pisar una
+    // fila buena (local o bajada de la nube) con una vacía.
+    if (Object.keys(JSON.parse(valuesJson)).length === 0 && existing[0]) {
+      try {
+        const FIXED = new Set(['project_name', 'sector_name', 'location_name', 'protocol_code', 'ensayo_date', 'realizado_por', 'aprobado_por', 'estado', 'fecha_aprobacion', 'subtramo', 'progresiva', '_sv']);
+        const prev = JSON.parse((existing[0] as any).valuesJson ?? '{}');
+        if (Object.keys(prev).some(k => !FIXED.has(k))) return;
+      } catch { /* fila previa corrupta → seguir y reescribir */ }
+    }
     const assign = (r: any) => {
       r.projectId = protocol.projectId;
       r.templateId = protocol.templateId ?? null;

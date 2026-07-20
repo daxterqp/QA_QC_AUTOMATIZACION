@@ -201,8 +201,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [headerH, setHeaderH] = useState(0);
 
   const load = useCallback(async () => {
-    if (!didBackfill.current) { didBackfill.current = true; await backfillLocalSummary(projectId); }
+    // v100c — PULL PRIMERO: si la nube ya tiene filas frescas (_sv al día), el
+    // backfill las ve y NO regenera desde datos locales posiblemente stale.
     await pullSummaryRows(projectId);
+    if (!didBackfill.current) { didBackfill.current = true; await backfillLocalSummary(projectId); }
     const recs: any[] = await summaryRowsCollection.query(Q.where('project_id', projectId)).fetch();
     const rows: Row[] = recs.map(r => {
       let values: Record<string, unknown> = {};

@@ -15,8 +15,10 @@ const supabase = createClient();
 /** Versión del esquema de values_json. Subir cuando cambie la extracción → el
  *  backfill re-construye las filas viejas (responsables, estado, calculados…).
  *  v4 (v100c): celdas xref (selector = CÓDIGO legible; get entra al scope) +
- *  subtramo/progresiva en obra lineal. */
-export const SUMMARY_ROW_VERSION = 4;
+ *  subtramo/progresiva en obra lineal. v5: orden determinista por partida
+ *  en extractValues (lección v98e — sin él, las matrices se armaban corruptas
+ *  y el resumen salía casi vacío). */
+export const SUMMARY_ROW_VERSION = 5;
 
 type ItemLite = { partida_item: string | null; id: string; validation_method: string | null; comments: string | null };
 
@@ -24,6 +26,11 @@ type ItemLite = { partida_item: string | null; id: string; validation_method: st
  *  (fórmula/lookup), recomputando el scope. Antes solo guardaba los ingresados,
  *  por lo que las columnas calculadas no aparecían/ploteaban. */
 function extractValues(items: ItemLite[], auxTables?: import('@lib/formulaEval').AuxTables, xrefValues?: XrefValues, displayByRef?: Record<string, string>): Record<string, string> {
+  // v100c (lección v98e) — ORDEN DETERMINISTA por partida: extractMatrices es
+  // POSICIONAL (las val- deben SEGUIR a su matrix-); con orden de fetch arbitrario
+  // filas normales se tragaban como "matrices" y el resumen salía casi vacío.
+  items = [...items].sort((a, b) =>
+    String(a.partida_item ?? '').localeCompare(String(b.partida_item ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
   const { mainRows, matrices } = extractMatrices(parsed);
   // Keyear por item.id (NO por partida): dos filas con el mismo partida_item no
