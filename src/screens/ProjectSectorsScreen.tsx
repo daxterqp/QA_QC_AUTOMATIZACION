@@ -6,7 +6,7 @@
  * lógica. Esta pantalla solo monta el AppHeader + el componente.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,6 +16,8 @@ import ProjectSectorsContent from '@components/ProjectSectorsContent';
 import { useAuth } from '@context/AuthContext';
 import { useTour } from '@context/TourContext';
 import { useI18n } from '@i18n/index';
+import { projectsCollection } from '@db/index';
+import { parseFeatureFlagsJson, isLinearProject } from '@utils/featureFlags';
 import { Colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProjectSectors'>;
@@ -26,6 +28,14 @@ export default function ProjectSectorsScreen({ route, navigation }: Props) {
   const isCreator = currentUser?.role === 'CREATOR';
   const { jumpToStep, isActive: tourActive, isContextual, dismissTour } = useTour();
   const { t } = useI18n();
+
+  // v100b — En obra lineal, la unidad territorial se llama "Tramo".
+  const [isLinear, setIsLinear] = useState(false);
+  useEffect(() => {
+    projectsCollection.find(projectId)
+      .then((p: any) => setIsLinear(isLinearProject(parseFeatureFlagsJson(p?.featureFlags))))
+      .catch(() => {});
+  }, [projectId]);
 
   useEffect(() => {
     if (!isCreator) {
@@ -47,7 +57,7 @@ export default function ProjectSectorsScreen({ route, navigation }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-        title={t('sectors.headerTitle')}
+        title={isLinear ? 'Tramos del proyecto' : t('sectors.headerTitle')}
         subtitle={projectName}
         onBack={() => navigation.goBack()}
         rightContent={
