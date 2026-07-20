@@ -46,6 +46,7 @@ import NumericTable from '@components/NumericTable';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { isProtocolConforming } from '@utils/protocolConformance';
 import { checkProtocolXrefStale, refreshProtocolXrefs } from '@services/XrefRefresh';
+import { getOrDownloadSignatureUri } from '@services/UserSignatureService';
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { useEnsayoZoom, ZoomHeaderButtons } from '@components/ZoomControls';
 import { printProtocolLabel } from '@services/LabelPrintService';
@@ -347,9 +348,20 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
   // v33 — Ejecuta la aprobación. `reason` se guarda en approval_reason cuando
   // el ensayo se aprueba fuera de rango (override del jefe); null si conforme.
   const doApprove = useCallback(async (reason: string | null) => {
+    // v99 — Gate de firma: el PDF estampa la firma del aprobador; sin firma
+    // registrada la línea sale vacía en el reporte oficial.
+    if (currentUser?.id) {
+      const sig = await getOrDownloadSignatureUri(currentUser.id).catch(() => null);
+      if (!sig) { Alert.alert(t('dossier.noSignatureTitle'), t('dossier.noSignatureMsg')); return; }
+    }
     setSaving(true);
     let updatedProto: any = null;
+    let raced = false;
     await database.write(async () => {
+      // v99 — CAS: si otro usuario ya decidió mientras esta pantalla estaba
+      // abierta (estado stale), no pisar su decisión.
+      const freshP: any = await protocolsCollection.find(protocolId);
+      if (freshP.status !== 'SUBMITTED') { raced = true; return; }
       updatedProto = await protocol!.update((p) => {
         p.status = 'APPROVED';
         p.isLocked = true;
@@ -362,6 +374,12 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
         p.rejectionReason = null;
       });
     });
+    if (raced) {
+      setSaving(false);
+      Alert.alert(t('dossier.alreadyProcessedTitle'), t('dossier.alreadyProcessedMsg'));
+      onPullRefresh().catch(() => {});
+      return;
+    }
     // v25 — Push inmediato (si hay red) + enqueue (garantía offline).
     if (updatedProto) {
       pushProtocolStatus(updatedProto).catch(() => {});
@@ -396,13 +414,23 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
     setSaving(true);
     setShowRejectModal(false);
     let updatedProto: any = null;
+    let raced = false;
     await database.write(async () => {
+      // v99 — CAS: no pisar la decisión de otro usuario (estado stale).
+      const freshP: any = await protocolsCollection.find(protocolId);
+      if (freshP.status !== 'SUBMITTED') { raced = true; return; }
       updatedProto = await protocol!.update((p) => {
         p.status = 'REJECTED';
         p.correctionsAllowed = true;
         p.rejectionReason = rejectReason.trim();
       });
     });
+    if (raced) {
+      setSaving(false);
+      Alert.alert(t('dossier.alreadyProcessedTitle'), t('dossier.alreadyProcessedMsg'));
+      onPullRefresh().catch(() => {});
+      return;
+    }
     const locOnly = (location as any)?.locationOnly ?? null;
     const spec = (location as any)?.specialty ?? null;
     const protName = ((protocol as any).protocolCode ? `${(protocol as any).protocolCode} · ` : '') + ((protocol as any).protocolNumber ?? '');

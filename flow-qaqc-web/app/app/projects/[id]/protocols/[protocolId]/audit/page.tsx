@@ -127,12 +127,15 @@ export default function ProtocolAuditPage() {
 
   // v29 — protocol_linking deprecated, siempre activo.
   const xrefsEnabled = true;
-  const { data: xrefValuesForAudit } = useXrefValues(
+  const { data: xrefValuesForAudit, isLoading: xrefLoading } = useXrefValues(
     projectId,
     fillData?.items ?? [],
     xrefsEnabled,
   );
-  const { data: auxTablesForAudit } = useLabAuxTables(projectId); // v41 — BUSCAR()
+  const { data: auxTablesForAudit, isLoading: auxLoading } = useLabAuxTables(projectId); // v41 — BUSCAR()
+  // v99 — mientras cargan aux/xrefs, la conformidad daría un falso "no conforme"
+  // transitorio (BUSCAR sin tablas → error): gatear el veredicto hasta tenerlos.
+  const conformanceLoading = auxLoading || xrefLoading;
 
   // v24 — Equipos calibrados. Si el flag está activo, mostramos selector y
   //       bloqueamos la firma cuando hay equipos NO firmables asociados:
@@ -317,8 +320,12 @@ export default function ProtocolAuditPage() {
     const parsedRows = [...items]
       .sort((a, b) => String(a.partida_item ?? '').localeCompare(String(b.partida_item ?? ''), undefined, { numeric: true, sensitivity: 'base' }))
       .map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
-    const { matrices } = extractMatrices(parsedRows);
-    for (const { item, spec } of parsedRows) {
+    // v99 — iterar mainRows (NO parsedRows): extractMatrices reinterpreta las
+    // filas todo-val previas a las matrices como filas de datos (fix v35) — con
+    // parsedRows esos literales no entraban al scope y las fórmulas que los
+    // referencian daban "no conforme" falso SOLO en web (paridad con el móvil).
+    const { mainRows, matrices } = extractMatrices(parsedRows);
+    for (const { item, spec } of mainRows) {
       if (spec?.kind !== 'row') continue;
       const partida = item.partida_item ?? '';
       const cellVals = splitRowComments(item.comments, spec.cells.length);
@@ -331,6 +338,11 @@ export default function ProtocolAuditPage() {
         if (cell.kind === 'manual' || cell.kind === 'percent' || cell.kind === 'bool' || cell.kind === 'free') scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
         else if (cell.kind === 'list' || cell.kind === 'date' || cell.kind === 'time' || cell.kind === 'equipment' || cell.kind === 'text') scopeCells.push({ key, kind: 'list', raw: cellVals[i] ?? '' });
         else if (cell.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: cell.refKey, matrixId: cell.matrixId, searchCol: cell.searchCol, returnCol: cell.returnCol });
+        // v99 — fórmulas con '@' (xref en la expresión): usar el valor CONGELADO
+        // de comments igual que el móvil (protocolConformance L60). Evaluarlas en
+        // vivo divergía: si la fuente se desaprueba/renumera tras el envío, la
+        // web exigía observación donde el móvil aprueba con el valor horneado.
+        else if (cell.kind === 'formula' && cell.expr?.includes('@')) scopeCells.push({ key, kind: 'manual', raw: cellVals[i] ?? '' });
         else if (cell.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: cell.expr });
         else if (cell.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: cell.literal });
         // v98b — celdas XREF al scope con su valor CONGELADO (comments): las `get`
@@ -343,7 +355,7 @@ export default function ProtocolAuditPage() {
 
     let ok = items.length > 0;
     outer:
-    for (const { item, spec } of parsedRows) {
+    for (const { item, spec } of mainRows) {   // v99 — mismas filas que el scope (mainRows)
       if (!spec) {
         // Items SIN método (encabezados de sección, v31) no bloquean la
         // aprobación — solo bloquea un método presente que NO parsea.
@@ -396,7 +408,8 @@ export default function ProtocolAuditPage() {
   // rango): el jefe puede aprobar con justificación. Solo los equipos
   // descalibrados (v24) siguen bloqueando la firma como salvaguarda de calibración.
   const canApprove = !equipmentBlock;
-  const requiresApprovalReason = !isConforming;
+  // v99 — mientras cargan aux/xrefs no declarar "no conforme" (falso transitorio).
+  const requiresApprovalReason = !conformanceLoading && !isConforming;
 
   // Build section-interleaved rows
   const rows: Row[] = [];
@@ -853,7 +866,8 @@ export default function ProtocolAuditPage() {
         )}
 
         {/* ── Action buttons — only jefe + status SUBMITTED ─────────────── */}
-        {isJefe && (status === 'SUBMITTED' || status === 'IN_PROGRESS') && (
+        {/* v99 — solo SUBMITTED (paridad móvil): un ensayo en llenado no se aprueba. */}
+        {isJefe && status === 'SUBMITTED' && (
           <div className="flex gap-3 pt-2 pb-6">
             {canApprove && (
               <button

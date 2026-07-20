@@ -57,6 +57,21 @@ export function useProtocolApprovals(protocolId: string) {
   });
 }
 
+/** v99 — Al RE-ENVIAR un protocolo (tras rechazo o corrección) TODA la cadena
+ *  de niveles debe volver a firmarse: resetea las filas no-PENDING a PENDING.
+ *  Sin esto, un nivel REJECTED quedaba pegado para siempre (useApproveLevel
+ *  exige status PENDING) y el ensayo era inaprobable tras el reenvío.
+ *  Llamar SOLO desde el submit/re-submit — nunca en medio de una cadena. */
+export async function resetApprovalRowsForResubmit(protocolId: string): Promise<void> {
+  const now = Date.now();
+  const { error } = await supabase
+    .from('protocol_approvals')
+    .update({ status: 'PENDING', signer_id: null, signed_at: null, rejection_reason: null, approval_reason: null, updated_at: now })
+    .eq('protocol_id', protocolId)
+    .neq('status', 'PENDING');
+  if (error) throw error;
+}
+
 /** Asegura que existen N filas PENDING para el protocolo (idempotente).
  *  Llamar al hacer SUBMIT con N = approval_levels del proyecto. */
 export async function ensureApprovalRows(protocolId: string, levels: 1 | 2 | 3): Promise<void> {
@@ -95,7 +110,9 @@ export function useApproveLevel(protocolId: string) {
       //    protege contra re-aprobaciones accidentales (idempotencia).
       const { data: updRows, error: e1 } = await supabase
         .from('protocol_approvals')
-        .update({ signer_id: signerId, signed_at: now, status: 'APPROVED', updated_at: now })
+        // v99 — el motivo del nivel queda registrado POR NIVEL (antes los
+        // intermedios lo descartaban; solo el último llegaba a protocols).
+        .update({ signer_id: signerId, signed_at: now, status: 'APPROVED', approval_reason: reason ?? null, updated_at: now })
         .eq('protocol_id', protocolId)
         .eq('level', level)
         .eq('status', 'PENDING')
@@ -123,11 +140,16 @@ export function useApproveLevel(protocolId: string) {
             rejection_reason: null,          // bug-fix — al aprobar, el motivo de rechazo previo queda levantado
             updated_at: now,
           })
-          .eq('id', protocolId);
+          .eq('id', protocolId)
+          .eq('status', 'SUBMITTED');   // v99 — CAS: no pisar un rechazo concurrente
         if (e2) throw e2;
         const ctx = await getProtocolContext(protocolId);
         if (ctx) pushProtocolApproved(ctx.projectId, ctx.locationOnly, ctx.specialty, ctx.protocolName, protocolId);
       }
+      // v99 — la fila de Tablas Resumen refleja el avance de la cadena (antes
+      // los niveles no la refrescaban y estado/firmante quedaban viejos).
+      const { upsertSummaryRowWeb } = await import('@lib/summaryRow');
+      void upsertSummaryRowWeb(protocolId);
       return { allApproved };
     },
     onSuccess: () => {
@@ -161,11 +183,15 @@ export function useRejectLevel(protocolId: string) {
       // 2. Marcar el protocolo como REJECTED
       const { error: e2 } = await supabase
         .from('protocols')
-        .update({ status: 'REJECTED', rejection_reason: reason, updated_at: now })
-        .eq('id', protocolId);
+        .update({ status: 'REJECTED', rejection_reason: reason, corrections_allowed: true, updated_at: now })
+        .eq('id', protocolId)
+        .eq('status', 'SUBMITTED');   // v99 — CAS: no pisar una decisión concurrente
       if (e2) throw e2;
       const ctx = await getProtocolContext(protocolId);
       if (ctx) pushProtocolRejected(ctx.projectId, ctx.locationOnly, ctx.specialty, ctx.protocolName, protocolId);
+      // v99 — refrescar la fila resumen (paridad con los hooks legacy).
+      const { upsertSummaryRowWeb } = await import('@lib/summaryRow');
+      void upsertSummaryRowWeb(protocolId);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['protocol-fill', protocolId] });
@@ -192,14 +218,17 @@ export function useApproveProtocol(protocolId: string) {
       // Garantizar al menos 1 nivel y aprobarlo.
       await ensureApprovalRows(protocolId, 1);
       const now = Date.now();
-      // Actualiza level=1 + protocol en una sola pasada
+      // Actualiza level=1 + protocol en una sola pasada.
+      // v99 — CAS en ambas escrituras: dos jefes simultáneos (o una UI stale)
+      // no deben pisarse; el patrón es el mismo de useApproveLevel.
       const { error: e1 } = await supabase
         .from('protocol_approvals')
-        .update({ signer_id: signedById, signed_at: now, status: 'APPROVED', updated_at: now })
+        .update({ signer_id: signedById, signed_at: now, status: 'APPROVED', approval_reason: reason, updated_at: now })
         .eq('protocol_id', protocolId)
-        .eq('level', 1);
+        .eq('level', 1)
+        .eq('status', 'PENDING');
       if (e1) throw e1;
-      const { error: e2 } = await supabase
+      const { data: updProto, error: e2 } = await supabase
         .from('protocols')
         .update({
           status: 'APPROVED',
@@ -212,8 +241,13 @@ export function useApproveProtocol(protocolId: string) {
           rejection_reason: null,          // bug-fix — al aprobar, el motivo de rechazo previo queda levantado
           updated_at: now,
         })
-        .eq('id', protocolId);
+        .eq('id', protocolId)
+        .eq('status', 'SUBMITTED')   // v99 — CAS: solo se aprueba lo que sigue enviado
+        .select('id');
       if (e2) throw e2;
+      if (!updProto || updProto.length === 0) {
+        throw new Error('Este ensayo ya no está en revisión — alguien más lo procesó. Recarga la página.');
+      }
       const ctx = await getProtocolContext(protocolId);
       if (ctx) pushProtocolApproved(ctx.projectId, ctx.locationOnly, ctx.specialty, ctx.protocolName, protocolId);
       // Tablas Resumen — refresca el estado en la fila resumen del ensayo.
@@ -234,11 +268,16 @@ export function useRejectProtocol(protocolId: string) {
   return useMutation({
     mutationFn: async (reason: string) => {
       const now = Date.now();
-      const { error } = await supabase
+      const { data: updProto, error } = await supabase
         .from('protocols')
-        .update({ status: 'REJECTED', rejection_reason: reason, updated_at: now })
-        .eq('id', protocolId);
+        .update({ status: 'REJECTED', rejection_reason: reason, corrections_allowed: true, updated_at: now })
+        .eq('id', protocolId)
+        .eq('status', 'SUBMITTED')   // v99 — CAS: no pisar decisiones concurrentes
+        .select('id');
       if (error) throw error;
+      if (!updProto || updProto.length === 0) {
+        throw new Error('Este ensayo ya no está en revisión — alguien más lo procesó. Recarga la página.');
+      }
       const ctx = await getProtocolContext(protocolId);
       if (ctx) pushProtocolRejected(ctx.projectId, ctx.locationOnly, ctx.specialty, ctx.protocolName, protocolId);
       // Tablas Resumen — refresca el estado en la fila resumen del ensayo.

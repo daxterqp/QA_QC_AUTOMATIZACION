@@ -25,6 +25,13 @@ import { Q } from '@nozbe/watermelondb';
 import type Protocol from '@models/Protocol';
 import { exportDossierPdf, exportSingleProtocolPdf } from '@services/DossierExportService';
 import { pushProtocolStatus, mergeAndSaveFeatureFlags, pullProjectFromCloud } from '@services/SupabaseSyncService';
+// v99 — blindaje de la aprobación/rechazo inline (auditoría 19-jul): retry
+// offline, notificaciones, firma, frescura de xrefs y CAS de estado.
+import { enqueue as enqueueSync } from '@services/SyncQueueService';
+import { SyncWorker } from '@services/SyncWorker';
+import { notifyProtocolApproved, notifyProtocolRejected } from '@services/NotificationService';
+import { checkProtocolXrefStale } from '@services/XrefRefresh';
+import { getOrDownloadSignatureUri } from '@services/UserSignatureService';
 import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { parseFeatureFlagsJson, getTemplatePrintConfig, PRINT_HEADER_COLORS, DEFAULT_HEADER_COLOR, PRINT_HEADER_FIELDS, CROQUIS_MAP_TYPES, CROQUIS_PLACEMENTS, type TemplatePrintConfig, type PrintFontLevel, type PrintGraphSize, type PrintHeaderSize } from '@utils/featureFlags';
 import { upsertSummaryRow } from '@services/SummaryRowService';
@@ -74,6 +81,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   // Modal de "Aprobar con observación" (motivo obligatorio) desde el Dossier.
   const [observeProtocol, setObserveProtocol] = useState<Protocol | null>(null);
   const [observeReason, setObserveReason] = useState('');
+  // v99 — modal de RECHAZO con motivo obligatorio (antes era un Alert sin motivo).
+  const [rejectTarget, setRejectTarget] = useState<Protocol | null>(null);
+  const [rejectReasonDossier, setRejectReasonDossier] = useState('');
   // Catálogos para los filtros (dinámicos según configuración del proyecto).
   const [typeOptions, setTypeOptions] = useState<{ id: string; label: string }[]>([]);
   const [locOptions, setLocOptions] = useState<{ id: string; label: string }[]>([]);
@@ -425,22 +435,53 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
   // recarga solo (sin tocar nada) mientras esta pantalla está abierta.
   useRealtimeProjectPull(projectId, loadData);
 
-  /** Aplica la aprobación. `reason` != null → aprobado CON observación (no conforme). */
+  /** Aplica la aprobación. `reason` != null → aprobado CON observación (no conforme).
+   *  v99 — blindada (paridad con doApprove del audit): firma disponible, xrefs
+   *  frescos, CAS de estado (no pisar decisiones ajenas), correctionsAllowed
+   *  apagado, retry offline (enqueue) y notificación push al equipo. */
   const applyApproval = async (protocol: Protocol, reason: string | null) => {
+    // Gate 1: el aprobador debe tener firma registrada (el PDF la estampa).
+    if (currentUser?.id) {
+      const sig = await getOrDownloadSignatureUri(currentUser.id).catch(() => null);
+      if (!sig) { Alert.alert(t('dossier.noSignatureTitle'), t('dossier.noSignatureMsg')); return; }
+    }
+    // Gate 2: llamados entre ensayos desactualizados → revisar en el audit.
+    try {
+      const s = await checkProtocolXrefStale(protocol.id);
+      if (s.stale) { Alert.alert(t('dossier.xrefStaleTitle'), t('dossier.xrefStaleMsg')); return; }
+    } catch { /* sin xrefs → sigue */ }
+
     let updated: Protocol | null = null;
+    let raced = false;
     await database.write(async () => {
-      updated = await protocol.update((p) => {
+      // CAS: re-leer DENTRO del write — si otro jefe ya decidió, abortar.
+      const fresh: any = await protocolsCollection.find(protocol.id);
+      if (fresh.status !== 'SUBMITTED') { raced = true; return; }
+      updated = await fresh.update((p: any) => {
         p.status = 'APPROVED';
         p.isLocked = true;
+        p.correctionsAllowed = false;
         p.signedById = currentUser?.id ?? null;
-        (p as any).signedAt = Date.now();
-        (p as any).approvalReason = reason;
+        p.signedAt = Date.now();
+        p.approvalReason = reason;
         // Bug-fix — al aprobar, el motivo de rechazo previo queda levantado.
         p.rejectionReason = null;
       });
     });
-    if (updated) pushProtocolStatus(updated).catch(() => {});
+    if (raced) {
+      Alert.alert(t('dossier.alreadyProcessedTitle'), t('dossier.alreadyProcessedMsg'));
+      await loadData();
+      return;
+    }
+    if (updated) {
+      pushProtocolStatus(updated).catch(() => {});
+      enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: protocol.id, projectId })
+        .then(() => SyncWorker.forceTick())
+        .catch(() => {});
+    }
     upsertSummaryRow(protocol.id).catch(() => {});
+    const protName = ((protocol as any).protocolCode ? `${(protocol as any).protocolCode} · ` : '') + ((protocol as any).protocolNumber ?? '');
+    notifyProtocolApproved(projectId, '', null, null, protName, protocol.id);
     await loadData();
   };
 
@@ -465,29 +506,50 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
     if (proto) await applyApproval(proto, reason);
   };
 
+  // v99 — el rechazo inline ahora exige MOTIVO (modal espejo del de observación;
+  // el audit siempre lo exigió) y queda blindado igual que applyApproval.
   const handleReject = (protocol: Protocol) => {
-    Alert.alert(
-      t('dossier.rejectTitle'),
-      t('dossier.rejectMessage', { number: protocol.protocolNumber }),
-      [
-        { text: t('dossier.cancel'), style: 'cancel' },
-        {
-          text: t('dossier.reject'), style: 'destructive',
-          onPress: async () => {
-            let updated: Protocol | null = null;
-            await database.write(async () => {
-              updated = await protocol.update((p) => {
-                p.status = 'REJECTED';
-                p.correctionsAllowed = true;
-              });
-            });
-            if (updated) pushProtocolStatus(updated).catch(() => {});
-            upsertSummaryRow(protocol.id).catch(() => {});
-            await loadData();
-          },
-        },
-      ]
-    );
+    setRejectTarget(protocol);
+    setRejectReasonDossier('');
+  };
+
+  const confirmRejectDossier = async () => {
+    const reason = rejectReasonDossier.trim();
+    if (!reason) {
+      Alert.alert(t('protoAudit.reasonRequiredTitle'), t('protoAudit.reject.reasonRequiredMsg'));
+      return;
+    }
+    const protocol = rejectTarget;
+    setRejectTarget(null);
+    setRejectReasonDossier('');
+    if (!protocol) return;
+
+    let updated: Protocol | null = null;
+    let raced = false;
+    await database.write(async () => {
+      const fresh: any = await protocolsCollection.find(protocol.id);
+      if (fresh.status !== 'SUBMITTED') { raced = true; return; }
+      updated = await fresh.update((p: any) => {
+        p.status = 'REJECTED';
+        p.correctionsAllowed = true;
+        p.rejectionReason = reason;
+      });
+    });
+    if (raced) {
+      Alert.alert(t('dossier.alreadyProcessedTitle'), t('dossier.alreadyProcessedMsg'));
+      await loadData();
+      return;
+    }
+    if (updated) {
+      pushProtocolStatus(updated).catch(() => {});
+      enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: protocol.id, projectId })
+        .then(() => SyncWorker.forceTick())
+        .catch(() => {});
+    }
+    upsertSummaryRow(protocol.id).catch(() => {});
+    const protName = ((protocol as any).protocolCode ? `${(protocol as any).protocolCode} · ` : '') + ((protocol as any).protocolNumber ?? '');
+    notifyProtocolRejected(projectId, '', null, null, protName, protocol.id);
+    await loadData();
   };
 
   const statusColor: Record<string, string> = {
@@ -755,6 +817,33 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
               </TouchableOpacity>
               <TouchableOpacity style={styles.obsConfirmBtn} onPress={() => { confirmObserve().catch(() => {}); }} activeOpacity={0.7}>
                 <Text style={styles.obsConfirmText}>{t('protoAudit.approveWithObservation')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* v99 — Rechazar desde el Dossier con MOTIVO OBLIGATORIO (espejo del audit). */}
+      <Modal visible={!!rejectTarget} transparent animationType="fade" onRequestClose={() => setRejectTarget(null)}>
+        <View style={styles.obsOverlay}>
+          <View style={styles.obsCard}>
+            <Text style={styles.obsTitle}>{t('dossier.rejectTitle')}</Text>
+            <Text style={styles.obsHint}>{t('protoAudit.reject.reasonRequiredMsg')}</Text>
+            <TextInput
+              style={styles.obsInput}
+              placeholder={t('protoAudit.reject.reasonRequiredMsg')}
+              placeholderTextColor={Colors.textMuted}
+              value={rejectReasonDossier}
+              onChangeText={setRejectReasonDossier}
+              multiline
+              autoFocus
+            />
+            <View style={styles.obsActions}>
+              <TouchableOpacity style={styles.obsCancelBtn} onPress={() => { setRejectTarget(null); setRejectReasonDossier(''); }} activeOpacity={0.7}>
+                <Text style={styles.obsCancelText}>{t('dossier.cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.obsConfirmBtn, { backgroundColor: Colors.danger }]} onPress={() => { confirmRejectDossier().catch(() => {}); }} activeOpacity={0.7}>
+                <Text style={styles.obsConfirmText}>{t('dossier.reject')}</Text>
               </TouchableOpacity>
             </View>
           </View>

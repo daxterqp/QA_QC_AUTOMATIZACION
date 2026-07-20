@@ -329,7 +329,11 @@ export function useSubmitProtocol(protocolId: string) {
             .from('projects').select('feature_flags').eq('id', proto.project_id).single();
           const flags = project?.feature_flags as any;
           if (flags?.multi_level_approval && typeof flags.approval_levels === 'number' && flags.approval_levels > 1) {
-            const { ensureApprovalRows } = await import('@hooks/useProtocolAudit');
+            const { ensureApprovalRows, resetApprovalRowsForResubmit } = await import('@hooks/useProtocolAudit');
+            // v99 — en RE-ENVÍO (tras rechazo/corrección) toda la cadena vuelve a
+            // PENDING: sin esto un nivel REJECTED quedaba pegado y el ensayo era
+            // inaprobable para siempre (useApproveLevel exige PENDING).
+            await resetApprovalRowsForResubmit(protocolId);
             await ensureApprovalRows(protocolId, flags.approval_levels as 1 | 2 | 3);
           }
         }

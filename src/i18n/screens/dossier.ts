@@ -42,6 +42,13 @@ const dossier: Record<string, { es: string; en: string; pt: string }> = {
     pt: 'Rejeitar "{number}"? O supervisor terá que refazê-lo.',
   },
   'dossier.reject': { es: 'Rechazar', en: 'Reject', pt: 'Rejeitar' },
+  // v99 — blindaje de aprobación/rechazo inline
+  'dossier.noSignatureTitle': { es: 'Falta tu firma', en: 'Missing signature', pt: 'Falta sua assinatura' },
+  'dossier.noSignatureMsg': { es: 'Registra tu firma en Mi Cuenta antes de aprobar: el PDF la estampa como Jefe de Calidad.', en: 'Register your signature in My Account before approving: the PDF stamps it as Quality Chief.', pt: 'Registre sua assinatura em Minha Conta antes de aprovar: o PDF a carimba como Chefe de Qualidade.' },
+  'dossier.xrefStaleTitle': { es: 'Datos llamados desactualizados', en: 'Referenced data outdated', pt: 'Dados referenciados desatualizados' },
+  'dossier.xrefStaleMsg': { es: 'Este ensayo hereda valores de otro que cambió después del envío. Ábrelo para revisarlo y actualizar los llamados antes de aprobar.', en: 'This test inherits values from another that changed after submission. Open it to review and refresh the references before approving.', pt: 'Este ensaio herda valores de outro que mudou após o envio. Abra-o para revisar e atualizar as referências antes de aprovar.' },
+  'dossier.alreadyProcessedTitle': { es: 'Ensayo ya procesado', en: 'Test already processed', pt: 'Ensaio já processado' },
+  'dossier.alreadyProcessedMsg': { es: 'Otro usuario ya aprobó o rechazó este ensayo. La lista se actualizó.', en: 'Another user already approved or rejected this test. The list was refreshed.', pt: 'Outro usuário já aprovou ou rejeitou este ensaio. A lista foi atualizada.' },
 
   // Filtros
   'dossier.filters': { es: 'Filtros', en: 'Filters', pt: 'Filtros' },

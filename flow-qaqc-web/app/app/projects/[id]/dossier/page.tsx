@@ -17,7 +17,10 @@ import { useI18n } from '@lib/i18n';
 import { usePageRefresh } from '@hooks/usePageRefresh';
 import { cn } from '@lib/utils';
 import { exportFullDossier, exportSingleProtocolPdf } from '@lib/pdfGenerator';
+import { createClient } from '@lib/supabase/client';
 import type { Location } from '@/types';
+
+const supabase = createClient();
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,15 +110,44 @@ function ProtocolCard({
     }
   }
 
+  // v99 — Aprobar inline BLINDADO (auditoría 19-jul): antes aprobaba directo sin
+  // conformidad, sin motivo, sin multi-nivel y sin chequeo de equipos. Ahora:
+  // los casos que requieren contexto (multi-nivel, no conforme → motivo,
+  // equipos vencidos) se resuelven en la pantalla de revisión; el caso limpio
+  // (conforme, 1 nivel) aprueba directo aquí.
   async function handleApprove() {
     if (!currentUser) return;
-    await approveProtocol.mutateAsync(currentUser.id);
-    onAction();
+    try {
+      const { data: project } = await supabase
+        .from('projects').select('feature_flags').eq('id', projectId).maybeSingle();
+      const flags = (project?.feature_flags ?? {}) as { multi_level_approval?: boolean; approval_levels?: number };
+      if (flags.multi_level_approval && (flags.approval_levels ?? 1) > 1) {
+        router.push(`/app/projects/${projectId}/protocols/${protocol.id}/audit`);
+        return;
+      }
+      const { checkProtocolApprovalGates } = await import('@lib/protocolConformance');
+      const gates = await checkProtocolApprovalGates(protocol.id, projectId);
+      if (!gates.conforming || gates.equipmentBlocked) {
+        // No conforme → el audit exige el motivo (mismo flujo que el móvil);
+        // equipos vencidos → el audit bloquea la firma y lo explica.
+        router.push(`/app/projects/${projectId}/protocols/${protocol.id}/audit`);
+        return;
+      }
+      await approveProtocol.mutateAsync(currentUser.id);
+      onAction();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'No se pudo aprobar el ensayo. Intenta de nuevo.');
+      onAction();
+    }
   }
 
   async function handleReject() {
     if (!rejectReason.trim()) return;
-    await rejectProtocol.mutateAsync(rejectReason.trim());
+    try {
+      await rejectProtocol.mutateAsync(rejectReason.trim());
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'No se pudo rechazar el ensayo. Intenta de nuevo.');
+    }
     setShowRejectModal(false);
     setRejectReason('');
     onAction();
