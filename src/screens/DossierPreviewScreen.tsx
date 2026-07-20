@@ -83,6 +83,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
   // ── Regeneración en vivo (debounce) al cambiar la config ───────────────────
   const regenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regenSeq = useRef(0);
+  const lastBustRef = useRef<string | null>(null);   // archivo -vN mostrado (se limpia al regenerar)
   const skipFirst = useRef(true);   // el primer set (carga) no debe regenerar
   useEffect(() => {
     if (!pdfConfig || !cfg) return;
@@ -96,8 +97,19 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
           pdfConfig.protocolId, pdfConfig.projectId, projectName, currentUser?.id ?? '', cfg,
         );
         if (seq !== regenSeq.current) return;        // llegó una regeneración más nueva
-        setPdfUri(uri);
+        // Cache-bust REAL: el export escribe siempre al MISMO archivo y el visor
+        // nativo no relee un path idéntico aunque remontemos. Copiamos cada
+        // regeneración a un archivo NUEVO (-vN) para forzar la relectura.
+        const base = (route.params.pdfUri.split('/').pop() ?? 'protocolo.pdf').replace(/\.pdf$/i, '');
+        const bust = `${FileSystem.cacheDirectory}${base}-v${seq}.pdf`;
+        try { await FileSystem.deleteAsync(bust, { idempotent: true }); } catch { /* noop */ }
+        await FileSystem.copyAsync({ from: uri, to: bust });
+        if (seq !== regenSeq.current) return;
+        const prev = lastBustRef.current;
+        lastBustRef.current = bust;
+        setPdfUri(bust);
         setPdfKey(k => k + 1);
+        if (prev) { FileSystem.deleteAsync(prev, { idempotent: true }).catch(() => {}); }
       } catch { /* conserva el último PDF bueno */ }
       finally { if (seq === regenSeq.current) setRegenerating(false); }
     }, 450);
@@ -255,7 +267,7 @@ export default function DossierPreviewScreen({ navigation, route }: Props) {
                 <Ionicons name="chevron-down" size={24} color={Colors.white} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.sheetBody} contentContainerStyle={{ padding: 12, paddingBottom: 24 }}>
+            <ScrollView style={styles.sheetBody} contentContainerStyle={{ padding: 12, paddingBottom: 40 }}>
               <Text style={styles.sheetHint}>{t('dossierPrev.cfgHint')}</Text>
               <Text style={styles.sheetHintMuted}>{t('dossierPrev.cfgCroquisHint')}</Text>
               {cfg
@@ -313,7 +325,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 16, backgroundColor: Colors.navy,
   },
   sheetTitle: { color: Colors.white, fontSize: 16, fontWeight: '800' },
-  sheetBody: { paddingHorizontal: 4 },
+  // flexShrink:1 — SIN esto, dentro de un contenedor con maxHeight el ScrollView
+  // toma la altura de su CONTENIDO, empuja el footer (Cerrar/Guardar) fuera del
+  // recorte y el scroll no llega al fondo (las opciones quedaban "enterradas").
+  sheetBody: { paddingHorizontal: 4, flexShrink: 1 },
   sheetHint: { fontSize: 12, color: Colors.textSecondary, marginBottom: 4, paddingHorizontal: 8 },
   sheetHintMuted: { fontSize: 11, color: Colors.textMuted, marginBottom: 10, paddingHorizontal: 8 },
   sheetFooter: {
