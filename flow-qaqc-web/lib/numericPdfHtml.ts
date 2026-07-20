@@ -407,21 +407,13 @@ export function buildNumericProtocolBlocks(
     flushRows();
   }
 
-  // ── Matrices auxiliares (catálogos `matrix-[…]`): anexo compacto ──────────
-  for (const m of Object.values(matrices)) {
-    if (!m.rows.length) continue;
-    const head = m.columnTitles.map(t => `<th style="border:1px solid ${BORDER};background:#eef2f7;color:${NAVY};padding:2px 5px;font-size:8.5px;text-align:left;">${escHtml(t)}</th>`).join('');
-    const body = m.rows.map(row =>
-      `<tr>${row.map(v => `<td style="border:1px solid ${BORDER};padding:1px 5px;font-size:8.5px;color:#444;">${escHtml(v)}</td>`).join('')}</tr>`,
-    ).join('');
-    blocks.push({
-      html: `<div style="margin-top:8px;">
-  <div style="font-size:9px;font-weight:800;color:#666;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">Tabla auxiliar ${escHtml(m.id)}</div>
-  <table style="border-collapse:collapse;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
-</div>`,
-      weight: Math.min(m.rows.length + 3, 18),
-    });
-  }
+  // ── Matrices auxiliares (catálogos `matrix-[…]`): NO se imprimen (v99b) ──
+  // Las matrices son catálogos INTERNOS de la ficha (código→texto de los
+  // dictámenes, tablas de referencia): alimentan BUSCAR()/lookup vía
+  // `extractMatrices` (arriba) pero NO deben salir en el PDF del cliente.
+  // Antes se emitía un anexo "Tabla auxiliar {id}" por cada una; el usuario
+  // pidió que NINGUNA tabla auxiliar aparezca en el reporte exportado.
+  // (Suprimir el anexo no afecta el cálculo — las matrices ya se resolvieron.)
 
   // v43.4 — En 2 columnas el caller empaca los bloques en columnas explícitas
   // (cada columna = altura de página, bloques atómicos), así que aquí NO se envuelve

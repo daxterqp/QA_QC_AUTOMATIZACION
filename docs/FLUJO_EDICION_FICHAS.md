@@ -282,6 +282,23 @@ El CONTENIDO por celda lo controla el DSL (`:nopdf`, `:oculto`, `alto:` de
 gráficos). "Orientación horizontal" NO existe aún (extensión futura:
 `orientation` en TemplatePrintConfig ×2 espejos + CSS @page en ambos frames).
 
+**Matrices NUNCA en el PDF (v99b):** las tablas `matrix-[...]` (catálogos
+internos código→texto de los dictámenes, `_MSN`/`_MCF`, etc.) alimentan
+BUSCAR/lookup pero YA NO se imprimen — el anexo "Tabla auxiliar {id}" fue
+eliminado de `numericPdfHtml.ts` (×2 espejos). No hay opción para reactivarlo.
+
+**Calibrar a UNA hoja (protocolos numéricos):** 1 página física = 2 columnas
+(con `two_column:true`) = `2·col_budget/fontScale` de peso. Pesos aprox por
+bloque: tabla de sección ≈ filas+3 (head+banda); gráfico ≈ 6-8; comentarios 4;
+croquis ≈ 7 (solo si el ensayo TIENE coordenadas — sin coords se omite en
+silencio, no pesa). Palancas para caber: `font_level` compact/xcompact sube
+perCol (más filas por columna), `graph_size` compact/xcompact achica gráficos,
+`col_budget` (12-80, def 39) sube el tope por columna. Las tablas ANCHAS
+(GRA 7 cols, CBR 3 moldes) necesitan `font_level:compact` para no desbordar el
+ancho de media hoja en 2 columnas. Config aplicada a Proyecto_Pruebas
+(9 ensayos): two_column + croquis end/hybrid + font normal (PRM/DCC/MAR/TMA) o
+compact (GRA/CBR/CAD/CCD/PRD) + col_budget 42-44.
+
 **Receta SQL (merge — JAMÁS pisar el resto de feature_flags):**
 ```sql
 UPDATE projects SET
