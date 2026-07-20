@@ -29,7 +29,7 @@ import type { GpsAveragedResult } from '@utils/gpsAveraging';
 import { useAuth } from '@context/AuthContext';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { pullProjectSectors, pullProjectSettings } from '@services/SupabaseSyncService';
-import { formatCoords, findSectorByPoint, computeChainage, type LatLng, type TramoInfo } from '@utils/CoordinateSystem';
+import { formatCoords, findSectorByPoint, chainageForTramo, type LatLng, type TramoInfo } from '@utils/CoordinateSystem';
 import { parseFeatureFlagsJson, isLinearProject, linearSubtramoLength } from '@utils/featureFlags';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius } from '../theme/colors';
@@ -147,11 +147,12 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
       { lat: gps.lat, lng: gps.lng },
       liveSectors.map(s => ({ id: s.id, name: s.name, points: s.points })),
     );
-    // v100b — Obra lineal: calcular progresiva + subtramo de las coords. Se lee el
-    // flag fresco (puede haber cambiado). La progresiva es geometría pura → siempre
-    // se recalcula (no respeta sectorAssignedManually, que solo aplica al sector).
+    // v100b — Obra lineal: progresiva + subtramo calculados contra el TRAMO ASIGNADO
+    // (el auto por point-in-polygon, o el manual si el técnico ya lo fijó), NO contra
+    // el contenedor geométrico — así (sector, progresiva, subtramo) quedan siempre
+    // consistentes entre sí. Se lee el flag fresco.
     let linear = false;
-    let chain: ReturnType<typeof computeChainage> = null;
+    let chain: ReturnType<typeof chainageForTramo> = null;
     try {
       const proj: any = await projectsCollection.find(protocol.projectId);
       const flags = parseFeatureFlagsJson(proj?.featureFlags);
@@ -161,7 +162,9 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
           id: s.id, name: s.name, points: s.points,
           stationStart: s.stationStart ?? null, stationEnd: s.stationEnd ?? null,
         }));
-        chain = computeChainage({ lat: gps.lat, lng: gps.lng }, tramos, linearSubtramoLength(flags));
+        const willAuto = !!sectorAuto && !(protocol as any).sectorAssignedManually;
+        const finalSectorId = willAuto ? sectorAuto!.id : ((protocol as any).sectorId ?? null);
+        chain = finalSectorId ? chainageForTramo({ lat: gps.lat, lng: gps.lng }, finalSectorId, tramos, linearSubtramoLength(flags)) : null;
       }
     } catch { /* sin flags → no lineal */ }
     await database.write(async () => {
@@ -207,10 +210,29 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
    *  "Recalcular asignaciones" del CREATOR (que filtra por manual=false) revierte
    *  silenciosamente la decisión deliberada del técnico de quedar sin sector. */
   const setSectorManual = useCallback(async (sectorId: string | null) => {
+    // v100b — En obra lineal, recalcular progresiva/subtramo contra el NUEVO tramo
+    // (o limpiarlos si no aplica) para no dejar la tripleta (sector, progresiva,
+    // subtramo) inconsistente.
+    let linear = false;
+    let chain: ReturnType<typeof chainageForTramo> = null;
+    try {
+      const proj: any = await projectsCollection.find(protocol.projectId);
+      const flags = parseFeatureFlagsJson(proj?.featureFlags);
+      linear = isLinearProject(flags);
+      if (linear && sectorId && protocol.latitude != null && protocol.longitude != null) {
+        const live = await projectSectorsCollection.query(Q.where('project_id', protocol.projectId)).fetch() as any;
+        const tramos: TramoInfo[] = live.map((s: any) => ({
+          id: s.id, name: s.name, points: s.points,
+          stationStart: s.stationStart ?? null, stationEnd: s.stationEnd ?? null,
+        }));
+        chain = chainageForTramo({ lat: protocol.latitude, lng: protocol.longitude }, sectorId, tramos, linearSubtramoLength(flags));
+      }
+    } catch { /* ignore → limpia progresiva/subtramo abajo */ }
     await database.write(async () => {
       await (protocol as any).update((p: any) => {
         p.sectorId = sectorId;
         p.sectorAssignedManually = true;
+        if (linear) { p.progresiva = chain ? chain.progresiva : null; p.subtramoIndex = chain ? chain.subtramoIndex : null; }
       });
     });
     enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: protocol.id, projectId: protocol.projectId }).catch(() => {});

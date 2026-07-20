@@ -11,7 +11,7 @@
  * Función PURA (sin dependencias de plataforma). ESPEJO EXACTO en
  * flow-qaqc-web/lib/linearProgress.ts — mantener sincronizado.
  */
-import { subtramoCount } from './CoordinateSystem';
+import { subtramoCount, subtramoIndexFor } from './CoordinateSystem';
 
 export interface LinearTramoIn {
   id: string;
@@ -19,8 +19,8 @@ export interface LinearTramoIn {
   stationEnd: number | null;
 }
 export interface LinearProtocolIn {
-  sectorId: string | null;      // = tramo
-  subtramoIndex: number | null;
+  sectorId: string | null;      // = tramo asignado
+  progresiva: number | null;    // m; el subtramo se DERIVA de aquí + la longitud vigente
   idProtocolo: string | null;   // tipo de ensayo (ya resuelto desde templateId)
   status: string;               // 'APPROVED' cuenta como avance
 }
@@ -61,23 +61,28 @@ export function computeLinearProgress(
     typeof t.stationEnd === 'number' && Number.isFinite(t.stationEnd) &&
     (t.stationEnd as number) > (t.stationStart as number));
   const nSubOf = new Map<string, number>();
+  const stationOf = new Map<string, { s0: number; s1: number }>();
   let totalSubtramos = 0;
   for (const t of validTramos) {
     const n = subtramoCount(t.stationStart as number, t.stationEnd as number, subtramoLenM);
     nSubOf.set(t.id, n);
+    stationOf.set(t.id, { s0: t.stationStart as number, s1: t.stationEnd as number });
     totalSubtramos += n;
   }
   const totalExpected = totalSubtramos * juegoSize;
 
-  // Conteo de APROBADOS por (tramo, subtramo, tipo).
+  // Conteo de APROBADOS por (tramo, subtramo, tipo). El subtramo se DERIVA de la
+  // progresiva + la longitud vigente (nunca de un índice congelado).
   const key = (tramoId: string, sub: number, tipo: string) => `${tramoId}::${sub}::${tipo}`;
   const approvedMap = new Map<string, number>();
   for (const p of protocols) {
     if (p.status !== 'APPROVED') continue;
     if (!p.sectorId || p.idProtocolo == null) continue;
-    if (typeof p.subtramoIndex !== 'number' || !Number.isFinite(p.subtramoIndex)) continue;
-    if (!nSubOf.has(p.sectorId)) continue;               // sector que no es un tramo con progresivas
-    const k = key(p.sectorId, p.subtramoIndex, p.idProtocolo);
+    if (typeof p.progresiva !== 'number' || !Number.isFinite(p.progresiva)) continue;
+    const st = stationOf.get(p.sectorId);
+    if (!st) continue;                                   // sector que no es un tramo con progresivas
+    const idx = subtramoIndexFor(p.progresiva, st.s0, st.s1, subtramoLenM);
+    const k = key(p.sectorId, idx, p.idProtocolo);
     approvedMap.set(k, (approvedMap.get(k) ?? 0) + 1);
   }
 

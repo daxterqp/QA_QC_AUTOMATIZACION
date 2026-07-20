@@ -295,64 +295,88 @@ export function subtramoCount(stationStart: number, stationEnd: number, subLenM:
   return Math.max(1, Math.ceil(len / sub - 1e-9));
 }
 
-/**
- * Progresiva + subtramo de un punto en una obra lineal.
- * 1. tramo = primer tramo (con geometría + stations) que CONTIENE el punto.
- * 2. eje del tramo, orientado por la dirección global del corredor (centroide del
- *    tramo de menor station → el de mayor). entry = extremo de menor proyección.
- * 3. progresiva = station_start + t·(station_end − station_start), t∈[0,1].
- * 4. subtramo_index = clamp(floor((progresiva−station_start)/subLen), 0, nSub−1).
- * Devuelve null si el punto no cae en ningún tramo válido.
- */
-export function computeChainage(
-  point: LatLng,
-  tramos: TramoInfo[],
-  subtramoLengthM: number,
-): ChainageResult | null {
-  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
-  const valid = tramos.filter(_finiteTramo);
-  if (valid.length === 0) return null;
+/** Índice de subtramo (0-based) de una progresiva dentro de su tramo, acotado a
+ *  [0, nSub-1] con la longitud de subtramo VIGENTE. Derivar SIEMPRE de la
+ *  progresiva (geometría pura, estable) — nunca confiar en un índice guardado si la
+ *  longitud de subtramo pudo cambiar. */
+export function subtramoIndexFor(progresiva: number, stationStart: number, stationEnd: number, subLenM: number): number {
+  const sub = (subLenM > 0 && Number.isFinite(subLenM)) ? subLenM : (stationEnd - stationStart);
+  const nSub = subtramoCount(stationStart, stationEnd, sub);
+  let idx = Math.floor((progresiva - stationStart) / sub);
+  if (idx < 0) idx = 0; else if (idx > nSub - 1) idx = nSub - 1;
+  return idx;
+}
 
-  // 1 — tramo contenedor.
-  const container = valid.find((t) => pointInPolygon(point, t.points as LatLng[]));
-  if (!container) return null;
-
-  // Frame local con origen en el propio punto (el punto queda en (0,0)).
+/** Proyecta un punto sobre el EJE de UN tramo y devuelve progresiva+subtramo. El
+ *  eje se orienta con los VECINOS por station del tramo (no con una cuerda global),
+ *  robusto en corredores curvos/herraduras. `ordered` = tramos válidos ordenados por
+ *  stationStart. Si el punto cae fuera del tramo, t se acota a [0,1]. */
+function _chainageOnTramo(point: LatLng, tramo: TramoInfo, ordered: TramoInfo[], subLenM: number): { progresiva: number; subtramoIndex: number } {
   const origin = point;
+  const s0 = tramo.stationStart as number;
+  const s1 = tramo.stationEnd as number;
 
-  // 2 — dirección del corredor.
-  const ordered = [...valid].sort((a, b) => (a.stationStart as number) - (b.stationStart as number));
-  let dir: LocalPt;
-  if (ordered.length >= 2) {
-    const c0 = _centroidLocal(ordered[0].points as LatLng[], origin);
-    const cN = _centroidLocal(ordered[ordered.length - 1].points as LatLng[], origin);
-    dir = { x: cN.x - c0.x, y: cN.y - c0.y };
-  } else {
-    const [a, b] = _tramoAxisLocal(container.points as LatLng[], origin);
-    dir = { x: b.x - a.x, y: b.y - a.y };
+  // Dirección LOCAL del corredor en ESTE tramo, por sus vecinos de station.
+  const iInOrder = ordered.findIndex((t) => t.id === tramo.id);
+  const prev = iInOrder > 0 ? ordered[iInOrder - 1] : null;
+  const next = (iInOrder >= 0 && iInOrder < ordered.length - 1) ? ordered[iInOrder + 1] : null;
+  const cThis = _centroidLocal(tramo.points as LatLng[], origin);
+  let dir: LocalPt | null = null;
+  if (prev && next) {
+    const cp = _centroidLocal(prev.points as LatLng[], origin);
+    const cn = _centroidLocal(next.points as LatLng[], origin);
+    dir = { x: cn.x - cp.x, y: cn.y - cp.y };
+  } else if (next) {
+    const cn = _centroidLocal(next.points as LatLng[], origin);
+    dir = { x: cn.x - cThis.x, y: cn.y - cThis.y };
+  } else if (prev) {
+    const cp = _centroidLocal(prev.points as LatLng[], origin);
+    dir = { x: cThis.x - cp.x, y: cThis.y - cp.y };
   }
-  if (dir.x === 0 && dir.y === 0) dir = { x: 1, y: 0 };
+  if (dir && dir.x === 0 && dir.y === 0) dir = null;
 
-  // 3 — eje del tramo contenedor, orientado (entry = station_start).
-  let [A, B] = _tramoAxisLocal(container.points as LatLng[], origin);
-  if ((B.x - A.x) * dir.x + (B.y - A.y) * dir.y < 0) { const tmp = A; A = B; B = tmp; }
+  // Eje del tramo, orientado (entry = station_start) según esa dirección.
+  let [A, B] = _tramoAxisLocal(tramo.points as LatLng[], origin);
+  if (dir && ((B.x - A.x) * dir.x + (B.y - A.y) * dir.y < 0)) { const tmp = A; A = B; B = tmp; }
 
   const abx = B.x - A.x, aby = B.y - A.y;
   const len2 = abx * abx + aby * aby;
-  // El punto está en (0,0); t = proj de (P−A) sobre (B−A).
   let t = len2 > 0 ? ((-A.x) * abx + (-A.y) * aby) / len2 : 0;
   if (t < 0) t = 0; else if (t > 1) t = 1;
 
-  const s0 = container.stationStart as number;
-  const s1 = container.stationEnd as number;
   const progresiva = s0 + t * (s1 - s0);
+  return { progresiva, subtramoIndex: subtramoIndexFor(progresiva, s0, s1, subLenM) };
+}
 
-  const subLen = (subtramoLengthM > 0 && Number.isFinite(subtramoLengthM)) ? subtramoLengthM : (s1 - s0);
-  const nSub = subtramoCount(s0, s1, subLen);
-  let idx = Math.floor((progresiva - s0) / subLen);
-  if (idx < 0) idx = 0; else if (idx > nSub - 1) idx = nSub - 1;
+/**
+ * Progresiva + subtramo de un punto, tomando el tramo que lo CONTIENE
+ * (point-in-polygon). Devuelve null si no cae en ningún tramo válido.
+ */
+export function computeChainage(point: LatLng, tramos: TramoInfo[], subtramoLengthM: number): ChainageResult | null {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+  const valid = tramos.filter(_finiteTramo);
+  if (valid.length === 0) return null;
+  const container = valid.find((t) => pointInPolygon(point, t.points as LatLng[]));
+  if (!container) return null;
+  const ordered = [...valid].sort((a, b) => (a.stationStart as number) - (b.stationStart as number));
+  const r = _chainageOnTramo(point, container, ordered, subtramoLengthM);
+  return { tramoId: container.id, tramoName: container.name, ...r };
+}
 
-  return { tramoId: container.id, tramoName: container.name, progresiva, subtramoIndex: idx };
+/**
+ * Progresiva + subtramo de un punto RESPECTO A UN TRAMO DADO (por id), aunque el
+ * punto no caiga geométricamente dentro (se proyecta y acota). Para reasignación
+ * manual de tramo / recálculo: mantiene progresiva y subtramo CONSISTENTES con el
+ * sector asignado. Devuelve null si el tramo no existe o no tiene progresivas.
+ */
+export function chainageForTramo(point: LatLng, tramoId: string, tramos: TramoInfo[], subtramoLengthM: number): ChainageResult | null {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+  const valid = tramos.filter(_finiteTramo);
+  const tramo = valid.find((t) => t.id === tramoId);
+  if (!tramo) return null;
+  const ordered = [...valid].sort((a, b) => (a.stationStart as number) - (b.stationStart as number));
+  const r = _chainageOnTramo(point, tramo, ordered, subtramoLengthM);
+  return { tramoId: tramo.id, tramoName: tramo.name, ...r };
 }
 
 /** Formatea una progresiva en metros al convención "km+mmm(.d)": 12.5→"0+012.5",

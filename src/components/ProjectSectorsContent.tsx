@@ -16,13 +16,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Colors, Radius } from '../theme/colors';
-import { database, projectSectorsCollection, protocolsCollection } from '@db/index';
+import { database, projectSectorsCollection, protocolsCollection, projectsCollection } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import type ProjectSector from '@models/ProjectSector';
 import { parseSectorFile, type ParsedSector } from '@services/SectorImporter';
 import { pullProjectSectors } from '@services/SupabaseSyncService';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
-import { findSectorByPoint } from '@utils/CoordinateSystem';
+import { findSectorByPoint, chainageForTramo, type TramoInfo } from '@utils/CoordinateSystem';
+import { parseFeatureFlagsJson, isLinearProject, linearSubtramoLength } from '@utils/featureFlags';
 import { SectorCroquis } from './SectorCroquis';
 import { useTourStep } from '@hooks/useTourStep';
 import { useI18n, tx } from '@i18n/index';
@@ -232,6 +233,19 @@ export default function ProjectSectorsContent({ projectId }: Props) {
         )
         .fetch();
       const sectorsForLookup = withGeom.map(s => ({ id: s.id, name: s.name, points: s.points }));
+      // v100b — En obra lineal, además de reasignar el tramo (sector_id) hay que
+      // recalcular progresiva + subtramo contra el tramo nuevo, para no dejarlos
+      // ligados al tramo/geometría anterior.
+      let isLin = false;
+      let subLen = 20;
+      let tramosForChain: TramoInfo[] = [];
+      try {
+        const proj: any = await projectsCollection.find(projectId);
+        const flags = parseFeatureFlagsJson(proj?.featureFlags);
+        isLin = isLinearProject(flags);
+        subLen = linearSubtramoLength(flags);
+        tramosForChain = withGeom.map(s => ({ id: s.id, name: s.name, points: s.points, stationStart: s.stationStart ?? null, stationEnd: s.stationEnd ?? null }));
+      } catch { /* no lineal */ }
       let updated = 0;
       const toPush: any[] = [];
       await database.write(async () => {
@@ -240,7 +254,16 @@ export default function ProjectSectorsContent({ projectId }: Props) {
           if (p.latitude == null || p.longitude == null) continue;
           const match = findSectorByPoint({ lat: p.latitude, lng: p.longitude }, sectorsForLookup);
           const newSectorId = match ? match.id : null;
-          if (newSectorId !== p.sectorId) {
+          if (isLin) {
+            const chain = newSectorId ? chainageForTramo({ lat: p.latitude, lng: p.longitude }, newSectorId, tramosForChain, subLen) : null;
+            const newProg = chain ? chain.progresiva : null;
+            const newSub = chain ? chain.subtramoIndex : null;
+            if (newSectorId !== p.sectorId || newProg !== p.progresiva || newSub !== p.subtramoIndex) {
+              ops.push(p.prepareUpdate((r: any) => { r.sectorId = newSectorId; r.progresiva = newProg; r.subtramoIndex = newSub; }));
+              toPush.push(p);
+              updated++;
+            }
+          } else if (newSectorId !== p.sectorId) {
             ops.push(p.prepareUpdate((r: any) => { r.sectorId = newSectorId; }));
             toPush.push(p);
             updated++;

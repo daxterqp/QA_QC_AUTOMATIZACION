@@ -25,7 +25,7 @@ import {
 } from '@lib/printConfig';
 import { buildCroquisFigureHtml, type CroquisSectorIn, type CroquisOrtho } from '@lib/croquisHtml';
 import { mergeFeatureFlags, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@/types';
-import { formatProgresiva, subtramoRangeLabel } from '@lib/coordinateTopo';
+import { formatProgresiva, subtramoRangeLabel, subtramoIndexFor } from '@lib/coordinateTopo';
 
 const supabase = createClient();
 
@@ -489,8 +489,12 @@ function linearHeaderCells(p: unknown): { tramo: string; subtramo: string; progr
   const tramo = sec?.name ?? '—';
   const progresiva = (typeof pp.progresiva === 'number' && Number.isFinite(pp.progresiva)) ? formatProgresiva(pp.progresiva) : '—';
   let subtramo = '—';
-  if (sec && typeof pp.subtramo_index === 'number' && sec.station_start != null && sec.station_end != null) {
-    subtramo = subtramoRangeLabel(sec.station_start, pp.subtramo_index, linearSubtramoLength(_webPdfFlags), sec.station_end);
+  // Subtramo SIEMPRE derivado de la progresiva guardada + la longitud vigente
+  // (espejo del móvil) — nunca del subtramo_index congelado.
+  if (sec && typeof pp.progresiva === 'number' && Number.isFinite(pp.progresiva) && sec.station_start != null && sec.station_end != null) {
+    const subLen = linearSubtramoLength(_webPdfFlags);
+    const idx = subtramoIndexFor(pp.progresiva, sec.station_start, sec.station_end, subLen);
+    subtramo = subtramoRangeLabel(sec.station_start, idx, subLen, sec.station_end);
   }
   return { tramo, subtramo, progresiva };
 }

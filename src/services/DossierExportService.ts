@@ -39,7 +39,7 @@ import type SampleModel from '@db/models/Sample';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { generateProtocolQrImg } from '@utils/qrCode';
 import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@utils/featureFlags';
-import { formatProgresiva, subtramoRangeLabel } from '@utils/CoordinateSystem';
+import { formatProgresiva, subtramoRangeLabel, subtramoIndexFor } from '@utils/CoordinateSystem';
 import {
   buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfItem, type NumericPdfBlock,
 } from '@utils/numericPdfHtml';
@@ -97,8 +97,13 @@ function _linearHeaderCells(protocol: Protocol): { tramo: string; subtramo: stri
   const tramo = sec?.name ?? '—';
   const progresiva = (typeof pa.progresiva === 'number' && Number.isFinite(pa.progresiva)) ? formatProgresiva(pa.progresiva) : '—';
   let subtramo = '—';
-  if (sec && typeof pa.subtramoIndex === 'number' && sec.stationStart != null && sec.stationEnd != null) {
-    subtramo = subtramoRangeLabel(sec.stationStart, pa.subtramoIndex, linearSubtramoLength(_pdfFlags), sec.stationEnd);
+  // Subtramo SIEMPRE derivado de la progresiva guardada (geometría pura) + la
+  // longitud de subtramo VIGENTE — nunca del subtramo_index congelado (que puede
+  // estar desactualizado si cambió la longitud o se reasignó el tramo).
+  if (sec && typeof pa.progresiva === 'number' && Number.isFinite(pa.progresiva) && sec.stationStart != null && sec.stationEnd != null) {
+    const subLen = linearSubtramoLength(_pdfFlags);
+    const idx = subtramoIndexFor(pa.progresiva, sec.stationStart, sec.stationEnd, subLen);
+    subtramo = subtramoRangeLabel(sec.stationStart, idx, subLen, sec.stationEnd);
   }
   return { tramo, subtramo, progresiva };
 }

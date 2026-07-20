@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import { uploadBlobToS3, sanitizeSegment } from '@lib/s3-upload';
 import type { ProtocolTemplate, ProtocolTemplateItem, Location, Plan, Equipment, EquipmentType, EquipmentCategory } from '@/types';
+import { mergeFeatureFlags, isLinearProject, linearSubtramoLength } from '@/types';
+import { chainageForTramo, type TramoInfo } from '@lib/coordinateTopo';
 import type { ExcelProtocolGroup, ExcelLocation, ExcelEquipment } from '@lib/excelParser';
 
 const supabase = createClient();
@@ -1020,15 +1022,27 @@ export async function recalculateSectorAssignments(
   projectId: string,
 ): Promise<{ updated: number; total: number }> {
   const { data: sectorsData } = await supabase
-    .from('project_sectors').select('id, name, points_json')
+    .from('project_sectors').select('id, name, points_json, station_start, station_end')
     .eq('project_id', projectId);
   const withGeom = (sectorsData ?? []).filter((s: any) =>
     Array.isArray(s.points_json) && s.points_json.length >= 3
   );
   if (withGeom.length === 0) return { updated: 0, total: 0 };
 
+  // v100b — En obra lineal, además de reasignar el tramo hay que recomputar
+  // progresiva/subtramo contra el tramo nuevo (espejo del móvil handleRecalculate).
+  let isLin = false, subLen = 20;
+  let tramosForChain: TramoInfo[] = [];
+  try {
+    const { data: pr } = await supabase.from('projects').select('feature_flags').eq('id', projectId).maybeSingle();
+    const flags = mergeFeatureFlags(((pr as { feature_flags?: unknown } | null)?.feature_flags ?? {}) as Record<string, unknown>);
+    isLin = isLinearProject(flags);
+    subLen = linearSubtramoLength(flags);
+    tramosForChain = (withGeom as any[]).map((s: any) => ({ id: s.id, name: s.name, points: s.points_json, stationStart: s.station_start ?? null, stationEnd: s.station_end ?? null }));
+  } catch { /* no lineal */ }
+
   const { data: protos } = await supabase
-    .from('protocols').select('id, latitude, longitude, sector_id, sector_assigned_manually')
+    .from('protocols').select('id, latitude, longitude, sector_id, sector_assigned_manually, progresiva, subtramo_index')
     .eq('project_id', projectId)
     .or('sector_assigned_manually.is.null,sector_assigned_manually.eq.false');
   const list = (protos ?? []).filter((p: any) =>
@@ -1043,7 +1057,18 @@ export async function recalculateSectorAssignments(
         matchId = s.id; break;
       }
     }
-    if (matchId !== p.sector_id) {
+    if (isLin) {
+      const chain = matchId ? chainageForTramo({ lat: p.latitude, lng: p.longitude }, matchId, tramosForChain, subLen) : null;
+      const newProg = chain ? chain.progresiva : null;
+      const newSub = chain ? chain.subtramoIndex : null;
+      if (matchId !== p.sector_id || newProg !== p.progresiva || newSub !== p.subtramo_index) {
+        const { error } = await supabase.from('protocols')
+          .update({ sector_id: matchId, progresiva: newProg, subtramo_index: newSub, updated_at: Date.now() })
+          .eq('id', p.id);
+        if (error) throw new Error(`Protocolo ${p.id}: ${error.message}`);
+        updated++;
+      }
+    } else if (matchId !== p.sector_id) {
       const { error } = await supabase.from('protocols')
         .update({ sector_id: matchId, updated_at: Date.now() })
         .eq('id', p.id);
