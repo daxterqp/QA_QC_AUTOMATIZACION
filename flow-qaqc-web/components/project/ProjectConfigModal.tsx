@@ -14,7 +14,7 @@
  */
 
 import { useState } from 'react';
-import { X, Settings, Info, FileText, Timer, Map, Sparkles } from 'lucide-react';
+import { X, Settings, Info, FileText, Timer, Map, Sparkles, GitBranch } from 'lucide-react';
 import { cn } from '@lib/utils';
 import type { ProjectFeatureFlags, CoordinateSystem } from '@/types';
 import { DEFAULT_FEATURE_FLAGS } from '@/types';
@@ -134,6 +134,48 @@ export function ProjectConfigModal({
             <p className="text-xs text-textSecondary leading-relaxed"
                dangerouslySetInnerHTML={{ __html: t('webCMisc.cfg.infoText') }} />
           </div>
+
+          {/* ── 0. Tipo de proyecto (v100b) ─────────────────────────── */}
+          <Section icon={<GitBranch size={14} />} title="Tipo de proyecto" tone="primary">
+            <SelectField
+              label="Modelo de obra"
+              helper="Edificaciones: total de ensayos por ubicación (estándar). Obra lineal: tramos + subtramos por progresivas (los sectores se llaman Tramos). Minería: operación por resúmenes (reservado)."
+              value={flags.project_type ?? 'edificaciones'}
+              onChange={v => setFlag('project_type', v as any)}
+              options={[
+                { value: 'edificaciones', label: 'Edificaciones' },
+                { value: 'obra_lineal', label: 'Obra lineal (carretera / canal)' },
+                { value: 'mineria', label: 'Minería (reservado)' },
+              ]}
+            />
+            {flags.project_type === 'obra_lineal' && (
+              <div className="p-2.5 bg-primary/5 rounded border border-primary/20 flex flex-col gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-textPrimary mb-1">Longitud de subtramo (m)</label>
+                  <input
+                    type="number" min={1}
+                    value={flags.linear_subtramo_length_m ?? 20}
+                    onChange={e => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v) && v > 0) setFlag('linear_subtramo_length_m', v); }}
+                    className="w-24 px-2 py-1.5 text-xs rounded border border-border bg-white focus:border-primary focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-textPrimary mb-1">Juego de ensayos por subtramo</p>
+                  {(flags.linear_test_set ?? []).length === 0
+                    ? <p className="text-[11px] text-textMuted">Sin definir. El detalle por tipo (cantidad de cada ensayo) se edita desde la configuración en la app móvil.</p>
+                    : <div className="flex flex-wrap gap-1.5">
+                        {(flags.linear_test_set ?? []).map(it => (
+                          <span key={it.id_protocolo} className="px-2 py-0.5 rounded-full bg-white border border-primary/40 text-[11px] font-bold text-primary">
+                            {it.id_protocolo} ×{it.count}
+                          </span>
+                        ))}
+                      </div>
+                  }
+                  <p className="text-[10px] text-textMuted mt-1">Total esperado del proyecto = nº de subtramos × este juego. El detalle por tipo se edita en la app móvil.</p>
+                </div>
+              </div>
+            )}
+          </Section>
 
           {/* ── 1. Configuración de Protocolos ─────────────────────── */}
           <Section icon={<FileText size={14} />} title={t('projectConfig.sectionProtocols')} tone="ok">

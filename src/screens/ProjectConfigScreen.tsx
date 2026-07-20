@@ -135,6 +135,16 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
   const toggleFlag = (key: keyof ProjectFeatureFlags) =>
     setFlags(prev => ({ ...prev, [key]: !prev[key] }));
 
+  // v100b — Juego de ensayos por subtramo (obra lineal): cantidad por tipo.
+  const linearCountFor = (tipo: string): number =>
+    (flags.linear_test_set ?? []).find(x => x.id_protocolo === tipo)?.count ?? 0;
+  const setLinearCount = (tipo: string, count: number) =>
+    setFlags(prev => {
+      const rest = (prev.linear_test_set ?? []).filter(x => x.id_protocolo !== tipo);
+      const c = Math.max(0, Math.round(count) || 0);
+      return { ...prev, linear_test_set: c > 0 ? [...rest, { id_protocolo: tipo, count: c }] : rest };
+    });
+
   const handleSave = async () => {
     // v31 — Una máscara inválida generaría códigos colisionantes: bloquear el guardado.
     if (flags.protocol_codes) {
@@ -233,6 +243,63 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
             {t('projectConfig.infoText')}
           </Text>
         </View>
+
+        {/* ── 0. Tipo de proyecto (v100b) ───────────────────── */}
+        <SectionBox icon="git-branch-outline" title="Tipo de proyecto" color={Colors.primary}>
+          <Text style={styles.helperText}>
+            Define el modelo de obra y las cualidades específicas que se activan.
+          </Text>
+          {([
+            ['edificaciones', 'Edificaciones', 'Total de ensayos por ubicación (comportamiento estándar).'],
+            ['obra_lineal', 'Obra lineal (carretera / canal)', 'Tramos + subtramos por progresivas; los "sectores" se llaman Tramos.'],
+            ['mineria', 'Minería', 'Operación diaria por resúmenes (reservado; sin cambios por ahora).'],
+          ] as const).map(([val, label, desc]) => {
+            const active = (flags.project_type ?? 'edificaciones') === val;
+            return (
+              <TouchableOpacity key={val} style={[styles.ptRadioRow, active && styles.ptRadioRowActive]} onPress={() => setFlag('project_type', val)}>
+                <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? Colors.primary : Colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.ptRadioLabel}>{label}</Text>
+                  <Text style={styles.ptRadioDesc}>{desc}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          {flags.project_type === 'obra_lineal' && (
+            <View style={styles.ptLinearBox}>
+              <View style={styles.subRow}>
+                <Text style={styles.subRowLabel}>Longitud de subtramo (m)</Text>
+                <TextInput
+                  style={styles.ptNumInput}
+                  keyboardType="number-pad"
+                  defaultValue={String(flags.linear_subtramo_length_m ?? 20)}
+                  onChangeText={(txt) => { const n = parseInt(txt, 10); if (Number.isFinite(n) && n > 0) setFlag('linear_subtramo_length_m', n); }}
+                  maxLength={4}
+                />
+              </View>
+              <Text style={styles.fieldLabel}>Juego de ensayos por subtramo</Text>
+              <Text style={styles.helperText}>
+                Cantidad de cada tipo requerida en CADA subtramo (0 = no aplica). El total
+                esperado del proyecto = nº de subtramos × este juego.
+              </Text>
+              {testTypes.length === 0
+                ? <Text style={styles.helperText}>Aún no hay tipos de ensayo en el proyecto.</Text>
+                : testTypes.map(tt => (
+                    <View key={tt.tipo} style={styles.ptJuegoRow}>
+                      <Text style={styles.ptJuegoName} numberOfLines={1}>{tt.tipo} — {tt.name}</Text>
+                      <TextInput
+                        style={styles.ptNumInput}
+                        keyboardType="number-pad"
+                        defaultValue={String(linearCountFor(tt.tipo))}
+                        onChangeText={(txt) => setLinearCount(tt.tipo, parseInt(txt, 10) || 0)}
+                        maxLength={2}
+                      />
+                    </View>
+                  ))
+              }
+            </View>
+          )}
+        </SectionBox>
 
         {/* ── 1. Configuración de Protocolos ────────────────── */}
         <View ref={configProtocolsRef}>
@@ -680,6 +747,15 @@ const styles = StyleSheet.create({
   radioInner: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: Colors.primary },
   urlInput: { fontSize: 12, padding: 8, borderRadius: 4, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white, fontFamily: 'Courier', color: Colors.textPrimary, marginTop: 4 },
   helperText: { fontSize: 10, color: Colors.textMuted, marginTop: 4, lineHeight: 13 },
+  // v100b — Tipo de proyecto + obra lineal.
+  ptRadioRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 8, borderRadius: 6, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white, marginTop: 6 },
+  ptRadioRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primary + '0D' },
+  ptRadioLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  ptRadioDesc: { fontSize: 10, color: Colors.textMuted, marginTop: 1, lineHeight: 13 },
+  ptLinearBox: { marginTop: 10, padding: 10, borderRadius: 6, backgroundColor: Colors.primary + '08', borderWidth: 1, borderColor: Colors.primary + '22', gap: 4 },
+  ptNumInput: { width: 56, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: 5, paddingHorizontal: 8, textAlign: 'center', fontSize: 14, fontWeight: '800', color: Colors.navy, backgroundColor: Colors.white },
+  ptJuegoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 },
+  ptJuegoName: { fontSize: 12, color: Colors.textPrimary, flex: 1 },
   // v46.1 — codificación correlativa: selector de tokens + vista previa.
   tokenRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
   tokenChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: Colors.primary + '50', backgroundColor: Colors.primary + '0D' },
