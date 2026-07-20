@@ -19,8 +19,9 @@ import Animated, { useSharedValue, useAnimatedStyle, runOnJS } from 'react-nativ
 import AppHeader from '@components/AppHeader';
 import CalendarPicker from '@components/CalendarPicker';
 import { Colors, Radius } from '../theme/colors';
-import { summaryRowsCollection, protocolTemplatesCollection, protocolTemplateItemsCollection } from '@db/index';
+import { summaryRowsCollection, protocolTemplatesCollection, protocolTemplateItemsCollection, projectsCollection } from '@db/index';
 import { pullSummaryRows, backfillLocalSummary } from '@services/SummaryRowService';
+import { parseFeatureFlagsJson, isLinearProject } from '@utils/featureFlags';
 import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import {
   FIXED_SUMMARY_COLUMNS, dynamicColumnsFromRows, parseSummaryConfig, summaryStatus,
@@ -141,6 +142,11 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [labelByTpl, setLabelByTpl] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [templateId, setTemplateId] = useState<string | null>(null);
+  // v100c — Obra lineal: Sector→"Tramo", + Subtramo/Progresiva, − Ubicación.
+  const [isLinear, setIsLinear] = useState(false);
+  // v100c — Ordenamiento por columna. Default: código, el más NUEVO arriba.
+  const [sortKey, setSortKey] = useState('protocol_code');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Filtros
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(['APPROVED', 'SUBMITTED', 'REJECTED']));
@@ -216,6 +222,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       lbl[t.id] = (t as any).idProtocolo || (t as any).name || tx('summary.testTypeFallback');
     }
     setConfigByTpl(cfg); setLabelByTpl(lbl);
+    try {
+      const proj: any = await projectsCollection.find(projectId);
+      setIsLinear(isLinearProject(parseFeatureFlagsJson(proj?.featureFlags)));
+    } catch { /* deja el valor previo */ }
     setLoading(false);
   }, [projectId]);
 
@@ -260,6 +270,31 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     return true;
   }), [rows, statusFilter, sectorFilter, dateFrom, dateTo]);
 
+  // v100c — Al cambiar de tipo, volver al orden default (código más nuevo arriba).
+  useEffect(() => { setSortKey('protocol_code'); setSortDir('desc'); }, [templateId]);
+  const onSort = useCallback((key: string) => {
+    setSortKey(prev => {
+      if (prev === key) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return prev; }
+      // Fechas y código arrancan DESC (lo más nuevo arriba); el resto ASC.
+      setSortDir(key === 'protocol_code' || key === 'ensayo_date' || key === 'fecha_aprobacion' ? 'desc' : 'asc');
+      return key;
+    });
+  }, []);
+
+  // v100c — Columnas FIJAS según tipo de proyecto: en obra lineal el sector se
+  // llama "Tramo", entran Subtramo + Progresiva y sale Ubicación.
+  const fixedCols = useMemo<SummaryColumn[]>(() => {
+    if (!isLinear) return FIXED_SUMMARY_COLUMNS;
+    const base = FIXED_SUMMARY_COLUMNS.filter(c => c.key !== 'location_name')
+      .map(c => (c.key === 'sector_name' ? { ...c, label: 'Tramo' } : c));
+    const i = base.findIndex(c => c.key === 'sector_name');
+    base.splice(i + 1, 0,
+      { key: 'subtramo', label: 'Subtramo', from: 'key:subtramo', kind: 'text', group: 'Identificación' },
+      { key: 'progresiva', label: 'Progresiva', from: 'key:progresiva', kind: 'text', group: 'Identificación' },
+    );
+    return base;
+  }, [isLinear]);
+
   // Columnas (sin reordenar por 1ª columna: ese freeze se eliminó).
   const columns = useMemo<SummaryColumn[]>(() => {
     const cfg = templateId ? configByTpl[templateId] : null;
@@ -267,9 +302,35 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     if (cfg?.columns?.length) data = cfg.columns;
     else if (tplItems.length) data = buildAutoColumns(tplItems);
     else data = dynamicColumnsFromRows(rows.map(r => ({ values_json: r.values })));
-    return [...FIXED_SUMMARY_COLUMNS, ...data];
-  }, [templateId, configByTpl, tplItems, rows]);
-  const dataCols = useMemo(() => columns.filter(c => !FIXED_SUMMARY_COLUMNS.some(f => f.key === c.key)), [columns]);
+    return [...fixedCols, ...data];
+  }, [templateId, configByTpl, tplItems, rows, fixedCols]);
+  const dataCols = useMemo(() => columns.filter(c => !fixedCols.some(f => f.key === c.key)), [columns, fixedCols]);
+
+  // v100c — Filas ORDENADAS por la columna elegida (numérico o alfabético según el
+  // tipo de la columna); celdas vacías siempre al final. Default: código desc.
+  const sorted = useMemo(() => {
+    const col = columns.find(c => c.key === sortKey) ?? columns.find(c => c.key === 'protocol_code');
+    if (!col) return filtered;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      if (col.kind === 'number') {
+        const na = num(a.values[col.key]), nb = num(b.values[col.key]);
+        const aOk = Number.isFinite(na), bOk = Number.isFinite(nb);
+        if (aOk && bOk) return (na - nb) * dir;
+        if (aOk) return -1;
+        if (bOk) return 1;
+        return 0;
+      }
+      const va = cellValue(a, col), vb = cellValue(b, col);
+      if (va === '' && vb === '') return 0;
+      if (va === '') return 1;
+      if (vb === '') return -1;
+      return va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' }) * dir;
+    });
+    return arr;
+  }, [filtered, columns, sortKey, sortDir]);
+
   const groups = useMemo(() => groupSpans(columns), [columns]);
   const hasGroups = groups.some(g => g.title);
   const colWidth = useMemo(() => {
@@ -306,7 +367,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     try {
       const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
       const header = columns.map(c => esc(c.label)).join(',');
-      const lines = filtered.map(r => columns.map(c => esc(cellValue(r, c))).join(','));
+      const lines = sorted.map(r => columns.map(c => esc(cellValue(r, c))).join(','));
       const csv = '﻿' + [header, ...lines].join('\r\n'); // UTF-8 con BOM
       const uri = `${FileSystem.cacheDirectory}dashboard_${(templateId && labelByTpl[templateId]) || 'ensayo'}.csv`;
       await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
@@ -328,9 +389,19 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       </View>
     );
   };
+  // v100c — Encabezados CLICKEABLES: tocar ordena por esa columna (asc↔desc). El
+  // triangulito indica el estado: ▽ tenue = ordenable; ▲/▼ blanco = orden activo.
   const renderNameRow = (cols: SummaryColumn[]) => (
     <View style={{ flexDirection: 'row' }}>
-      {cols.map(c => <View key={c.key} style={[styles.th, { width: widthOf(c) }]}><Text style={styles.thText} numberOfLines={2}>{c.label}</Text></View>)}
+      {cols.map(c => {
+        const active = sortKey === c.key;
+        return (
+          <TouchableOpacity key={c.key} style={[styles.th, { width: widthOf(c) }]} activeOpacity={0.6} onPress={() => onSort(c.key)}>
+            <Text style={styles.thText} numberOfLines={2}>{c.label}</Text>
+            <Text style={[styles.thSort, active && styles.thSortOn]}>{active ? (sortDir === 'asc' ? '▲' : '▼') : '▽'}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
   const renderRowCells = (r: Row, cols: SummaryColumn[]) => cols.map(c => {
@@ -432,7 +503,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                       {hasGroups && renderGroupRow(columns)}
                       {renderNameRow(columns)}
                     </View>
-                    {filtered.map((r, ri) => (
+                    {sorted.map((r, ri) => (
                       <View key={r.id} style={{ flexDirection: 'row', height: ROW_H, backgroundColor: rowBg(ri) }}>{renderRowCells(r, columns)}</View>
                     ))}
                     {measures.map((op, mi) => (
@@ -456,9 +527,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                 </View>
               </ScrollView>
 
-              {/* OVERLAY: encabezado CONGELADO (todas las columnas), refleja el scroll horizontal. */}
+              {/* OVERLAY: encabezado CONGELADO (todas las columnas), refleja el scroll horizontal.
+                  v100c — box-none: los taps caen en los encabezados (ordenar) y el resto pasa. */}
               {headerH > 0 && (
-                <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: headerH }}>
+                <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: headerH }}>
                   <ScrollView horizontal ref={headerRef} scrollEnabled={false} showsHorizontalScrollIndicator={false}>
                     <View>
                       {hasGroups && renderGroupRow(columns)}
@@ -745,6 +817,9 @@ const styles = StyleSheet.create({
   gHeadText: { color: Colors.white, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.2 },
   th: { backgroundColor: Colors.navy, paddingVertical: 6, paddingHorizontal: 5, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
   thText: { color: Colors.white, fontSize: 8.5, fontWeight: '800', textTransform: 'uppercase', textAlign: 'center', lineHeight: 11 },
+  // v100c — indicador de orden: ▽ tenue (ordenable) / ▲▼ blanco (orden activo).
+  thSort: { color: 'rgba(255,255,255,0.4)', fontSize: 7, lineHeight: 9, marginTop: 1 },
+  thSortOn: { color: Colors.white, fontSize: 8, lineHeight: 10, fontWeight: '800' },
   td: { paddingVertical: 6, paddingHorizontal: 5, borderTopWidth: 1, borderTopColor: Colors.border, justifyContent: 'center', alignItems: 'center' },
   tdText: { fontSize: 11, color: Colors.textPrimary, textAlign: 'center' },
   tdFoot: { paddingVertical: 7, paddingHorizontal: 5, borderTopWidth: 2, borderTopColor: Colors.navy, justifyContent: 'center', alignItems: 'center' },

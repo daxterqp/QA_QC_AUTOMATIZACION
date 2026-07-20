@@ -19,16 +19,22 @@ import {
 import { parseNumericRow, extractMatrices, splitRowComments, colLetter, scopeKeyFor } from '@utils/numericProtocol';
 import { resolveScopeCells, type ScopeCell, type XrefValues } from '@utils/formulaEval';
 import { resolveXrefs } from '@services/XrefResolver';
+import { parseFeatureFlagsJson, isLinearProject, linearSubtramoLength } from '@utils/featureFlags';
+import { formatProgresiva, subtramoRangeLabel, subtramoIndexFor } from '@utils/CoordinateSystem';
 import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { supabase } from '@config/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-/** Versión del esquema de values_json (paridad con web). Subir → backfill rehace filas viejas. */
-export const SUMMARY_ROW_VERSION = 3;
+/** Versión del esquema de values_json (paridad con web). Subir → backfill rehace filas viejas.
+ *  v4 (v100c): celdas xref (selector = CÓDIGO legible, no el id; get entra al scope),
+ *  subtramo/progresiva en obra lineal. */
+export const SUMMARY_ROW_VERSION = 4;
 
 /** Construye el mapa de valores de la ficha: ingresados Y calculados (recomputa
- *  el scope de fórmulas/lookups). Antes solo guardaba los ingresados. */
-function extractValues(items: { partidaItem: string | null; id: string; validationMethod: string | null; comments: string | null }[], auxTables?: import('@utils/formulaEval').AuxTables, xrefValues?: XrefValues): Record<string, string> {
+ *  el scope de fórmulas/lookups). Antes solo guardaba los ingresados.
+ *  `displayByRef` (v100c): ref guardada en celdas xref selectoras (id permanente)
+ *  → código a MOSTRAR (PRM-260016). */
+function extractValues(items: { partidaItem: string | null; id: string; validationMethod: string | null; comments: string | null }[], auxTables?: import('@utils/formulaEval').AuxTables, xrefValues?: XrefValues, displayByRef?: Record<string, string>): Record<string, string> {
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validationMethod) }));
   const { mainRows, matrices } = extractMatrices(parsed);
   // Keyear por item.id (NO por partida): dos filas con el mismo partida_item no
@@ -48,6 +54,8 @@ function extractValues(items: { partidaItem: string | null; id: string; validati
       else if (c.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: (c as any).literal ?? '' });
       else if (c.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: (c as any).refKey, matrixId: (c as any).matrixId, searchCol: (c as any).searchCol, returnCol: (c as any).returnCol });
       else if (c.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: (c as any).expr });
+      // v100c — xref al scope con su valor CONGELADO (las fórmulas que las referencian computan).
+      else if (c.kind === 'xref') scopeCells.push({ key, kind: 'manual', raw: arr[i] ?? '' });
     });
   }
 
@@ -67,6 +75,10 @@ function extractValues(items: { partidaItem: string | null; id: string; validati
       if (v === '' && (c.kind === 'formula' || c.kind === 'lookup')) {
         if (textValues[skey]) v = textValues[skey];
         else if (scope[skey] != null) v = String(scope[skey]);
+      }
+      // v100c — selector xref: comments guarda el ID permanente → mostrar el CÓDIGO.
+      if (c.kind === 'xref' && (c as any).mode !== 'get' && v !== '') {
+        v = v.split(',').map(tok => displayByRef?.[tok.trim()] ?? tok.trim()).filter(Boolean).join(', ');
       }
       if (v !== '') values[`${partida}:${colLetter(i)}`] = v;
     });
@@ -111,11 +123,35 @@ export async function upsertSummaryRow(protocolId: string, opts?: { xrefValues?:
     // blanco en el Resumen (degrada solo: pendiente/ambiguo → null, nunca lanza).
     // Si el caller (submit) ya resolvió, reutilizamos su resolución para que el
     // Resumen y el congelado muestren EXACTAMENTE el mismo valor (consistencia).
+    // v100c — además del value necesitamos displayByRef (id→código para el selector).
     let xrefValues: XrefValues = opts?.xrefValues ?? {};
-    if (!opts?.xrefValues) {
-      try { xrefValues = (await resolveXrefs(protocol.projectId, items)).values; } catch { /* sin xrefs */ }
+    let displayByRef: Record<string, string> = {};
+    try {
+      const res = await resolveXrefs(protocol.projectId, items);
+      if (!opts?.xrefValues) xrefValues = res.values;
+      displayByRef = { ...res.displayByRef };
+      // Refs sin resolver (fuente aún no aprobada): displayByRef[ref]=ref. Si la ref
+      // es un ID local, mostrar igual su código (mejor que un id crudo en la tabla).
+      for (const k of Object.keys(displayByRef)) {
+        if (displayByRef[k] !== k) continue;
+        const src: any = await protocolsCollection.find(k).catch(() => null);
+        if (src?.protocolCode) displayByRef[k] = src.protocolCode;
+      }
+    } catch { /* sin xrefs */ }
+    const valuesJson = JSON.stringify(extractValues(items, auxTables, xrefValues, displayByRef));
+    // v100c — Obra lineal: subtramo (rango de progresivas) + progresiva del ensayo.
+    const flags = parseFeatureFlagsJson((projectArr[0] as any)?.featureFlags);
+    let subtramoLabel: string | null = null;
+    let progresivaLabel: string | null = null;
+    if (isLinearProject(flags) && typeof protocol.progresiva === 'number' && Number.isFinite(protocol.progresiva)) {
+      const sec: any = sectorArr[0];
+      if (sec && sec.stationStart != null && sec.stationEnd != null) {
+        progresivaLabel = formatProgresiva(protocol.progresiva);
+        const subLen = linearSubtramoLength(flags);
+        const idx = subtramoIndexFor(protocol.progresiva, sec.stationStart, sec.stationEnd, subLen);
+        subtramoLabel = subtramoRangeLabel(sec.stationStart, idx, subLen, sec.stationEnd);
+      }
     }
-    const valuesJson = JSON.stringify(extractValues(items, auxTables, xrefValues));
     // Incluimos los datos fijos también dentro de values_json (para que la vista
     // tenga todo en un solo objeto), además de en las columnas dedicadas.
     const enriched = JSON.stringify({
@@ -125,6 +161,7 @@ export async function upsertSummaryRow(protocolId: string, opts?: { xrefValues?:
       realizado_por: realizadoPor, aprobado_por: aprobadoPor,
       estado: protocol.status ?? null,
       fecha_aprobacion: protocol.signedAt ? new Date(protocol.signedAt).toLocaleDateString('es-PE') : null,
+      subtramo: subtramoLabel, progresiva: progresivaLabel,
       _sv: SUMMARY_ROW_VERSION,
     });
 

@@ -6,20 +6,24 @@
 import { createClient } from '@lib/supabase/client';
 import { parseNumericRow, extractMatrices, splitRowComments, colLetter, scopeKeyFor } from '@lib/numericProtocol';
 import { resolveScopeCells, type ScopeCell, type XrefValues } from '@lib/formulaEval';
-import { fetchXrefValues } from '@hooks/useXrefs';
+import { fetchXrefResolution } from '@hooks/useXrefs';
+import { mergeFeatureFlags, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@/types';
+import { formatProgresiva, subtramoRangeLabel, subtramoIndexFor } from '@lib/coordinateTopo';
 
 const supabase = createClient();
 
 /** Versión del esquema de values_json. Subir cuando cambie la extracción → el
- *  backfill re-construye las filas viejas (responsables, estado, calculados…). */
-export const SUMMARY_ROW_VERSION = 3;
+ *  backfill re-construye las filas viejas (responsables, estado, calculados…).
+ *  v4 (v100c): celdas xref (selector = CÓDIGO legible; get entra al scope) +
+ *  subtramo/progresiva en obra lineal. */
+export const SUMMARY_ROW_VERSION = 4;
 
 type ItemLite = { partida_item: string | null; id: string; validation_method: string | null; comments: string | null };
 
 /** Extrae TODOS los valores de la ficha: ingresados (manual/lista) Y calculados
  *  (fórmula/lookup), recomputando el scope. Antes solo guardaba los ingresados,
  *  por lo que las columnas calculadas no aparecían/ploteaban. */
-function extractValues(items: ItemLite[], auxTables?: import('@lib/formulaEval').AuxTables, xrefValues?: XrefValues): Record<string, string> {
+function extractValues(items: ItemLite[], auxTables?: import('@lib/formulaEval').AuxTables, xrefValues?: XrefValues, displayByRef?: Record<string, string>): Record<string, string> {
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
   const { mainRows, matrices } = extractMatrices(parsed);
   // Keyear por item.id (NO por partida): dos filas con el mismo partida_item no
@@ -39,6 +43,8 @@ function extractValues(items: ItemLite[], auxTables?: import('@lib/formulaEval')
       else if (c.kind === 'val') scopeCells.push({ key, kind: 'manual', raw: (c as { literal?: string }).literal ?? '' });
       else if (c.kind === 'lookup') scopeCells.push({ key, kind: 'lookup', refKey: (c as any).refKey, matrixId: (c as any).matrixId, searchCol: (c as any).searchCol, returnCol: (c as any).returnCol });
       else if (c.kind === 'formula') scopeCells.push({ key, kind: 'formula', expr: (c as any).expr });
+      // v100c — xref al scope con su valor CONGELADO (las fórmulas que las referencian computan).
+      else if (c.kind === 'xref') scopeCells.push({ key, kind: 'manual', raw: arr[i] ?? '' });
     });
   }
 
@@ -59,6 +65,10 @@ function extractValues(items: ItemLite[], auxTables?: import('@lib/formulaEval')
         if (textValues[skey]) v = textValues[skey];
         else if (scope[skey] != null) v = String(scope[skey]);
       }
+      // v100c — selector xref: comments guarda el ID permanente → mostrar el CÓDIGO.
+      if (c.kind === 'xref' && (c as any).mode !== 'get' && v !== '') {
+        v = v.split(',').map(tok => displayByRef?.[tok.trim()] ?? tok.trim()).filter(Boolean).join(', ');
+      }
       if (v !== '') values[`${partida}:${colLetter(i)}`] = v;
     });
   }
@@ -72,15 +82,15 @@ export async function upsertSummaryRowWeb(protocolId: string, sharedXref?: XrefV
   try {
     const { data: protocol } = await supabase
       .from('protocols')
-      .select('id, project_id, template_id, protocol_code, protocol_number, ensayo_date, sector_id, location_id, status, filled_by_id, signed_by_id, signed_at')
+      .select('id, project_id, template_id, protocol_code, protocol_number, ensayo_date, sector_id, location_id, status, filled_by_id, signed_by_id, signed_at, progresiva')
       .eq('id', protocolId).single();
     if (!protocol) return;
     const p = protocol as Record<string, any>;
 
     const [{ data: items }, { data: project }, sectorRes, locRes, filledRes, signedRes] = await Promise.all([
       supabase.from('protocol_items').select('id, partida_item, validation_method, comments').eq('protocol_id', protocolId),
-      supabase.from('projects').select('name').eq('id', p.project_id).single(),
-      p.sector_id ? supabase.from('project_sectors').select('name').eq('id', p.sector_id).single() : Promise.resolve({ data: null }),
+      supabase.from('projects').select('name, feature_flags').eq('id', p.project_id).single(),
+      p.sector_id ? supabase.from('project_sectors').select('name, station_start, station_end').eq('id', p.sector_id).single() : Promise.resolve({ data: null }),
       p.location_id ? supabase.from('locations').select('name').eq('id', p.location_id).single() : Promise.resolve({ data: null }),
       p.filled_by_id ? supabase.from('users').select('name, apellido').eq('id', p.filled_by_id).single() : Promise.resolve({ data: null }),
       p.signed_by_id ? supabase.from('users').select('name, apellido').eq('id', p.signed_by_id).single() : Promise.resolve({ data: null }),
@@ -107,11 +117,35 @@ export async function upsertSummaryRowWeb(protocolId: string, sharedXref?: XrefV
     } catch { /* sin tablas → BUSCAR vacío en resumen */ }
     // v42 — Resolver llamados entre ensayos `@código.celda` (degrada solo; nunca lanza).
     // Reutiliza la resolución del congelado si se proveyó (consistencia).
+    // v100c — además del value necesitamos displayByRef (id→código para el selector).
     let xrefValues: XrefValues = sharedXref ?? {};
-    if (!sharedXref) {
-      try { xrefValues = await fetchXrefValues(p.project_id, (items ?? []) as any[]); } catch { /* sin xrefs */ }
+    let displayByRef: Record<string, string> = {};
+    try {
+      const res = await fetchXrefResolution(p.project_id, (items ?? []) as any[]);
+      if (!sharedXref) xrefValues = res.values;
+      displayByRef = { ...(res.displayByRef ?? {}) };
+      // Refs sin resolver (fuente aún no aprobada): si la ref es un ID, mostrar su código.
+      const unmapped = Object.keys(displayByRef).filter(k => displayByRef[k] === k);
+      if (unmapped.length > 0) {
+        const { data: srcs } = await supabase.from('protocols').select('id, protocol_code').in('id', unmapped);
+        for (const s of (srcs ?? []) as { id: string; protocol_code: string | null }[]) {
+          if (s.protocol_code) displayByRef[s.id] = s.protocol_code;
+        }
+      }
+    } catch { /* sin xrefs */ }
+    const values = extractValues((items ?? []) as any[], auxTables, xrefValues, displayByRef);
+    // v100c — Obra lineal: subtramo (rango de progresivas) + progresiva del ensayo.
+    const flags = mergeFeatureFlags(((project as { feature_flags?: unknown } | null)?.feature_flags ?? {}) as Partial<ProjectFeatureFlags>);
+    let subtramoLabel: string | null = null;
+    let progresivaLabel: string | null = null;
+    const sec = sectorRes.data as { station_start?: number | null; station_end?: number | null } | null;
+    if (isLinearProject(flags) && typeof p.progresiva === 'number' && Number.isFinite(p.progresiva)
+      && sec && sec.station_start != null && sec.station_end != null) {
+      progresivaLabel = formatProgresiva(p.progresiva);
+      const subLen = linearSubtramoLength(flags);
+      const idx = subtramoIndexFor(p.progresiva, sec.station_start, sec.station_end, subLen);
+      subtramoLabel = subtramoRangeLabel(sec.station_start, idx, subLen, sec.station_end);
     }
-    const values = extractValues((items ?? []) as any[], auxTables, xrefValues);
     const enriched = {
       ...values,
       project_name: projectName, sector_name: sectorName, location_name: locationName,
@@ -119,6 +153,7 @@ export async function upsertSummaryRowWeb(protocolId: string, sharedXref?: XrefV
       realizado_por: realizadoPor, aprobado_por: aprobadoPor,
       estado: p.status ?? null,
       fecha_aprobacion: p.signed_at ? new Date(p.signed_at).toLocaleDateString('es-PE') : null,
+      subtramo: subtramoLabel, progresiva: progresivaLabel,
       _sv: SUMMARY_ROW_VERSION,
     };
 

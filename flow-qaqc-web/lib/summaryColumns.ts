@@ -19,6 +19,10 @@ export interface TemplateItemLite {
 }
 
 const isNumericKind = (k: string) => k === 'manual' || k === 'formula' || k === 'percent';
+// v100c — las celdas xref `get` (DMS/OCH heredados) son NUMÉRICAS con sus :dec.
+// Antes caían a 'text' y el resumen mostraba el valor congelado crudo (17 decimales).
+const isNumericCell = (c: { kind: string; mode?: string }) =>
+  isNumericKind(c.kind) || (c.kind === 'xref' && (c as { mode?: string }).mode === 'get');
 
 export function buildAutoColumns(items: TemplateItemLite[]): SummaryColumn[] {
   const parsed = items.map(it => ({ item: it, spec: parseNumericRow(it.validation_method) }));
@@ -51,12 +55,12 @@ export function buildAutoColumns(items: TemplateItemLite[]): SummaryColumn[] {
       if (reportable.length === 1) {
         // Columna única → el encabezado ES el nombre de la actividad.
         const { c, i } = reportable[0];
-        cols.push({ key: `${partida}:${colLetter(i)}`, label: activity, from: `key:${partida}:${colLetter(i)}`, kind: isNumericKind(c.kind) ? 'number' : 'text' });
+        cols.push({ key: `${partida}:${colLetter(i)}`, label: activity, from: `key:${partida}:${colLetter(i)}`, kind: isNumericCell(c as { kind: string; mode?: string }) ? 'number' : 'text' });
       } else {
         // Múltiples columnas → paraguas (actividad) + sub-encabezado por columna.
         for (const { c, i } of reportable) {
           const sub = colTitle(i) || colLetter(i);
-          cols.push({ key: `${partida}:${colLetter(i)}`, label: sub, group: activity, from: `key:${partida}:${colLetter(i)}`, kind: isNumericKind(c.kind) ? 'number' : 'text' });
+          cols.push({ key: `${partida}:${colLetter(i)}`, label: sub, group: activity, from: `key:${partida}:${colLetter(i)}`, kind: isNumericCell(c as { kind: string; mode?: string }) ? 'number' : 'text' });
         }
       }
     }

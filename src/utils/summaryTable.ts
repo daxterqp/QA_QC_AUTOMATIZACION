@@ -95,7 +95,7 @@ export function parseSummaryConfig(raw: unknown): SummaryConfig | null {
 }
 
 /** Claves "fijas" que NO son columnas de datos de la ficha (van en columnas dedicadas). */
-const FIXED_KEYS = new Set(['project_name', 'sector_name', 'location_name', 'protocol_code', 'ensayo_date', 'realizado_por', 'aprobado_por', 'estado', 'fecha_aprobacion', '_sv']);
+const FIXED_KEYS = new Set(['project_name', 'sector_name', 'location_name', 'protocol_code', 'ensayo_date', 'realizado_por', 'aprobado_por', 'estado', 'fecha_aprobacion', 'subtramo', 'progresiva', '_sv']);
 
 /** Autogenera columnas a partir de las claves presentes en los values_json de
  *  las filas (cuando la plantilla no trae config RESUMEN). Orden estable. */
