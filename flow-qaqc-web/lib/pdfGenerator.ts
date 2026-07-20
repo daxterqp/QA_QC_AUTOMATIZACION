@@ -557,7 +557,8 @@ function croquisBlockFor(
   const cro = cfg.croquis;
   const pa = full.protocol as { latitude?: number | null; longitude?: number | null };
   if (!cro.show || pa.latitude == null || pa.longitude == null) return null;
-  const imgWidth = cfg.two_column ? 150 : 380;
+  const fullWidth = !!cro.full_width;
+  const imgWidth = fullWidth ? (cfg.two_column ? 255 : 380) : (cfg.two_column ? 150 : 380);
   const html = buildCroquisFigureHtml({
     sectors: geomSectors,
     point: { lat: pa.latitude, lng: pa.longitude },
@@ -566,8 +567,10 @@ function croquisBlockFor(
     baseOpacity: cro.base_opacity,
     pointSize: cro.point_size,
     imgWidth,
+    fullWidth,
   });
-  const weight = Math.max(6, Math.round((imgWidth * 0.75 + 22) / 24));
+  // Mapa completo: + la leyenda debajo (~44px) en el peso, para que la paginación cuadre.
+  const weight = Math.max(6, Math.round((imgWidth * 0.75 + (fullWidth ? 44 : 0) + 22) / 24));
   return { block: { html, weight }, placement: cro.placement === 'start' ? 'start' : 'end' };
 }
 

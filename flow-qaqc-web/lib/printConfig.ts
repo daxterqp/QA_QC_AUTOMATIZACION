@@ -33,6 +33,8 @@ export interface CroquisConfig {
   base_opacity?: number;       // 0.3–1, atenúa la base
   point_size?: number;         // diámetro del ícono del ensayo (px)
   map_type?: string;           // (solo móvil; en web se ignora)
+  /** v100b — "Mapa completo": mapa a todo el ancho de su sección + leyenda debajo. */
+  full_width?: boolean;
 }
 export type ResolvedCroquis = Required<Omit<CroquisConfig, 'map_type'>> & { map_type?: string };
 
@@ -65,6 +67,7 @@ export function getCroquisConfig(c: CroquisConfig | undefined): ResolvedCroquis 
     base_opacity: typeof c?.base_opacity === 'number' ? Math.max(0.3, Math.min(1, c.base_opacity)) : 1,
     point_size: typeof c?.point_size === 'number' ? Math.max(8, Math.min(40, Math.round(c.point_size))) : 14,
     map_type: c?.map_type,
+    full_width: c?.full_width ?? false,
   };
 }
 

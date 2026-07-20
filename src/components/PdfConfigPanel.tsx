@@ -112,6 +112,7 @@ export default function PdfConfigPanel({
               </TouchableOpacity>
             ))}
           </View>
+          <View style={styles.pcRow}><Text style={styles.pcLabel}>Mapa completo (leyenda debajo)</Text><Switch value={c.croquis.full_width} onValueChange={v => onCroquis({ full_width: v })} /></View>
           <View style={styles.pcRow}><Text style={styles.pcLabel}>{t('dossier.overlayOrthophoto')}</Text><Switch value={c.croquis.show_orthophoto} onValueChange={v => onCroquis({ show_orthophoto: v })} /></View>
           <Text style={styles.pcLabel}>{t('dossier.dimBaseLayer', { pct: Math.round(c.croquis.base_opacity * 100) })}</Text>
           <View style={styles.pcSeg}>

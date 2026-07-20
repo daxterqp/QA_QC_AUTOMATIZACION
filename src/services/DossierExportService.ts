@@ -721,8 +721,18 @@ function croquisLegendHtml(legend: CroquisLegend | null): string {
     ${rows}
     ${legend.mapName ? `<div style="font-size:8.5px;color:#9ca3af;margin-top:5px;font-style:italic;">${escHtml(legend.mapName)}</div>` : ''}`;
 }
-/** Figura de croquis: mapa a la IZQUIERDA + leyenda a la DERECHA (como un gráfico). */
-function croquisFigureHtml(croquisB64: string | null, legend: CroquisLegend | null, imgWidth: number): string {
+/** Figura de croquis. Default: mapa IZQUIERDA + leyenda DERECHA (como un gráfico).
+ *  v100b `fullWidth`: mapa a TODO el ancho de su sección + leyenda DEBAJO. */
+function croquisFigureHtml(croquisB64: string | null, legend: CroquisLegend | null, imgWidth: number, fullWidth = false): string {
+  if (fullWidth) {
+    const img = croquisB64
+      ? `<img src="${croquisB64}" style="display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid #d8dee6;border-radius:5px;"/>`
+      : `<div style="width:100%;aspect-ratio:4/3;min-height:${Math.round(imgWidth * 0.75)}px;border:1px dashed #d8dee6;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:10px;">Croquis no disponible</div>`;
+    return `<div style="margin:8px 0 6px;page-break-inside:avoid;">
+      <div style="width:100%;">${img}</div>
+      <div style="margin-top:6px;">${croquisLegendHtml(legend)}</div>
+    </div>`;
+  }
   const img = croquisB64
     ? `<img src="${croquisB64}" style="display:block;width:${imgWidth}px;aspect-ratio:4/3;object-fit:cover;border:1px solid #d8dee6;border-radius:5px;"/>`
     : `<div style="width:${imgWidth}px;aspect-ratio:4/3;min-height:${Math.round(imgWidth * 0.75)}px;border:1px dashed #d8dee6;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:10px;">Croquis no disponible</div>`;
@@ -731,12 +741,14 @@ function croquisFigureHtml(croquisB64: string | null, legend: CroquisLegend | nu
     <div style="flex:0 1 auto;min-width:0;">${croquisLegendHtml(legend)}</div>
   </div>`;
 }
-function croquisNumericBlock(twoColumn: boolean, croquisB64: string | null, legend: CroquisLegend | null = null): NumericPdfBlock {
-  // 2 col: angosto (150) para dejar sitio a la leyenda. 1 col: aprovecha el ancho (380).
-  const w = twoColumn ? 150 : 380;
-  const h = Math.round(w * 0.75);    // 4:3
+function croquisNumericBlock(twoColumn: boolean, croquisB64: string | null, legend: CroquisLegend | null = null, fullWidth = false): NumericPdfBlock {
+  // Lado a lado — 2 col: angosto (150) para dejar sitio a la leyenda; 1 col: 380.
+  // Mapa completo — el mapa llena la columna; para el PESO estimamos el ancho de la
+  // sección (≈255 en 2 col, 380 en 1 col) + la leyenda debajo (~3 filas).
+  const w = fullWidth ? (twoColumn ? 255 : 380) : (twoColumn ? 150 : 380);
+  const h = Math.round(w * 0.75) + (fullWidth ? 44 : 0);    // 4:3 (+ leyenda debajo si full)
   return {
-    html: croquisFigureHtml(croquisB64, legend, w),
+    html: croquisFigureHtml(croquisB64, legend, w, fullWidth),
     weight: Math.max(6, Math.round((h + 22) / CROQUIS_ROW_PX)),
   };
 }
@@ -929,7 +941,7 @@ function buildProtocolPages(
       });
       // v43.6 — Croquis como un bloque/sección más (mismo peso que en protoPageCount).
       if (wantCroquisInline) {
-        const cb = croquisNumericBlock(cfg.two_column, croquisB64, croquisLegend);
+        const cb = croquisNumericBlock(cfg.two_column, croquisB64, croquisLegend, cfg.croquis.full_width);
         cfg.croquis.placement === 'start' ? blocks.unshift(cb) : blocks.push(cb);
       }
       // Presupuesto por columna = altura ÚTIL de una página. v43.6 — configurable por
@@ -982,7 +994,7 @@ function buildProtocolPages(
   // v43.6 — Croquis como sección en clásicos (start = pág 0 tras header; end = última pág
   // antes del pie). Mapa a la izquierda + leyenda a la derecha. Los clásicos casi siempre
   // caben en 1 página, así que no altera el conteo.
-  const croquisClassicHtml = wantCroquisInline ? croquisFigureHtml(croquisB64, croquisLegend, 380) : '';
+  const croquisClassicHtml = wantCroquisInline ? croquisFigureHtml(croquisB64, croquisLegend, 380, cfg.croquis.full_width) : '';
   const lastChunkIdx = chunks.length - 1;
 
   return chunks.map((chunk, pageIdx) => {

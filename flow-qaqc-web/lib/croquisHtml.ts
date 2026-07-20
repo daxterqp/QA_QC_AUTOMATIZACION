@@ -20,6 +20,8 @@ export interface CroquisFigureOpts {
   baseOpacity: number;                        // 0.3–1 (scrim blanco = 1 - baseOpacity)
   pointSize: number;                          // px del ícono del ensayo
   imgWidth: number;                           // ancho de la imagen (1col 380 / 2col 150)
+  /** v100b — "Mapa completo": SVG a todo el ancho de su sección + leyenda debajo. */
+  fullWidth?: boolean;
 }
 
 const GRAY = '#9ca3af';
@@ -44,7 +46,7 @@ function pointInPolygon(pt: { lat: number; lng: number }, poly: { lat: number; l
 
 /** Construye la figura del croquis (SVG + leyenda) lista para embeber en el HTML del PDF. */
 export function buildCroquisFigureHtml(opts: CroquisFigureOpts): string {
-  const { sectors, point, ortho, showOrtho, baseOpacity, pointSize, imgWidth } = opts;
+  const { sectors, point, ortho, showOrtho, baseOpacity, pointSize, imgWidth, fullWidth } = opts;
   const imgHeight = Math.round(imgWidth * 0.75);
 
   // ── bbox de sectores + ensayo, con padding y ajuste a 4:3 (corregido por cos lat) ──
@@ -124,7 +126,9 @@ export function buildCroquisFigureHtml(opts: CroquisFigureOpts): string {
   const r = Math.max(3, (pointSize / 2) * (CW / Math.max(1, imgWidth)));
   const dot = `<circle cx="${X(point.lng).toFixed(1)}" cy="${Y(point.lat).toFixed(1)}" r="${r.toFixed(1)}" fill="#c0392b" stroke="#fff" stroke-width="${Math.max(1.5, r / 3.5).toFixed(1)}"/>`;
 
-  const svg = `<svg viewBox="0 0 ${CW} ${CH}" width="${imgWidth}" height="${imgHeight}" preserveAspectRatio="xMidYMid meet" style="display:block;border:1px solid #d8dee6;border-radius:5px;background:#fff;">${bg}${scrim}${polys}${dot}</svg>`;
+  const svg = fullWidth
+    ? `<svg viewBox="0 0 ${CW} ${CH}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;border:1px solid #d8dee6;border-radius:5px;background:#fff;">${bg}${scrim}${polys}${dot}</svg>`
+    : `<svg viewBox="0 0 ${CW} ${CH}" width="${imgWidth}" height="${imgHeight}" preserveAspectRatio="xMidYMid meet" style="display:block;border:1px solid #d8dee6;border-radius:5px;background:#fff;">${bg}${scrim}${polys}${dot}</svg>`;
 
   // ── Leyenda (a la derecha, como un gráfico) ──
   const row = (swatch: string, label: string) => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">${swatch}<span style="font-size:9px;color:#333;line-height:1.15;">${escHtml(label)}</span></div>`;
@@ -139,6 +143,12 @@ export function buildCroquisFigureHtml(opts: CroquisFigureOpts): string {
     ${rows}
     ${mapName ? `<div style="font-size:8.5px;color:#9ca3af;margin-top:5px;font-style:italic;">${escHtml(mapName)}</div>` : ''}`;
 
+  if (fullWidth) {
+    return `<div style="margin:8px 0 6px;page-break-inside:avoid;">
+      <div style="width:100%;">${svg}</div>
+      <div style="margin-top:6px;">${legend}</div>
+    </div>`;
+  }
   return `<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin:8px 0 6px;page-break-inside:avoid;">
     <div style="flex:0 0 ${imgWidth}px;">${svg}</div>
     <div style="flex:0 1 auto;min-width:0;">${legend}</div>

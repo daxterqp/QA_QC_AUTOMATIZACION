@@ -56,9 +56,13 @@ export interface CroquisConfig {
   show_orthophoto?: boolean;       // default true (si el proyecto tiene ortofoto)
   base_opacity?: number;           // 0.3–1, atenúa la capa base. default 1
   point_size?: number;             // tamaño del ícono del ensayo (px). 8–40, default 14
+  /** v100b — "Mapa completo": el mapa ocupa TODO el ancho de su sección y la
+   *  leyenda baja debajo (en vez de mapa-izquierda / leyenda-derecha). Default
+   *  false (lado a lado, mejor donde hay poco espacio). */
+  full_width?: boolean;
 }
 export const DEFAULT_CROQUIS: Required<CroquisConfig> = {
-  show: false, placement: 'end', map_type: 'hybrid', show_orthophoto: true, base_opacity: 1, point_size: 14,
+  show: false, placement: 'end', map_type: 'hybrid', show_orthophoto: true, base_opacity: 1, point_size: 14, full_width: false,
 };
 /** Capas de mapa disponibles para el croquis (clave + etiqueta UI). */
 export const CROQUIS_MAP_TYPES: { value: CroquisMapType; label: string }[] = [
@@ -84,6 +88,7 @@ export function getCroquisConfig(c: CroquisConfig | undefined): Required<Croquis
     show_orthophoto: c?.show_orthophoto ?? true,
     base_opacity: typeof c?.base_opacity === 'number' ? Math.max(0.3, Math.min(1, c.base_opacity)) : 1,
     point_size: typeof c?.point_size === 'number' ? Math.max(8, Math.min(40, Math.round(c.point_size))) : 14,
+    full_width: c?.full_width ?? false,
   };
 }
 export type PrintHeaderSize = 'normal' | 'compact' | 'xcompact';
