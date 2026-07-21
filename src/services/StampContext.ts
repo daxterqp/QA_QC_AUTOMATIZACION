@@ -12,7 +12,7 @@
  * El logo se guarda en documentDirectory (PERSISTENTE), no en cacheDirectory (que el SO
  * puede vaciar), para que el estampado funcione aunque el usuario esté offline luego.
  */
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { database } from '@db/index';
 import { getProjectSettings, type StampSize } from '@services/ProjectSettings';
 import { downloadFromS3, s3FileExists } from '@services/S3Service';

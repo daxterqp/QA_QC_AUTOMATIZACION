@@ -17,7 +17,7 @@ import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import { database, plansCollection, protocolTemplatesCollection, locationsCollection, projectsCollection } from '@db/index';

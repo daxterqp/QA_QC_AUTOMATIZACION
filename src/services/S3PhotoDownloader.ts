@@ -11,7 +11,7 @@
  *   - El archivo en S3 NUNCA se elimina (mantiene secuencia de codificación).
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Q } from '@nozbe/watermelondb';
 import {
   database,

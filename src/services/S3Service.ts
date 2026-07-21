@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Sha256 } from '@aws-crypto/sha256-js';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { AWS_CONFIG } from '@config/aws';
 
 // Configuración explícita de sha256 requerida para React Native / Hermes

@@ -16,7 +16,7 @@
  *    dossier y para la PREGENERACIÓN al guardar coordenadas (GPSCaptureBar).
  *  - Al guardar un croquis nuevo se borran los archivos viejos de ese ensayo.
  */
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { CroquisSpec } from '../context/CroquisCaptureContext';
 import type { CroquisLegend, CroquisResult } from './CroquisService';
 

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Colors, Radius } from '../../theme/colors';
 import { projectsCollection } from '@db/index';
 import { parseFeatureFlagsJson, topoColumns, type TopoColumn } from '@utils/featureFlags';

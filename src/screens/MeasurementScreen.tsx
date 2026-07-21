@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { WebView } from 'react-native-webview';

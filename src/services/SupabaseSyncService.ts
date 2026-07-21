@@ -11,7 +11,7 @@
 
 import { Platform, ToastAndroid } from 'react-native';
 import { Q } from '@nozbe/watermelondb';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@config/supabase';
 import { downloadFromS3, listS3Keys, deleteFromS3 } from './S3Service';
 import { s3ProjectPrefix } from '@config/aws';
@@ -643,7 +643,15 @@ export async function pushProtocolStatus(protocol: any): Promise<void> {
  *  El path correcto del delete es enqueue de DELETE_PROJECT_SECTOR. */
 export async function pushProjectSector(sector: any): Promise<void> {
   if (sector?._raw?._status === 'deleted') return;
-  try { await pushTable('project_sectors', [toRow(sector._raw)]); } catch { /* sin red */ }
+  try {
+    const row = toRow(sector._raw);
+    // v102 — no enviar set_index/valid_from vacíos: en proyectos sin juegos de
+    // sectores son null y romperían el upsert si la nube aún no tiene la
+    // migración SQL v102 aplicada.
+    if (row.set_index == null) delete row.set_index;
+    if (row.valid_from == null) delete row.valid_from;
+    await pushTable('project_sectors', [row]);
+  } catch { /* sin red */ }
 }
 
 /** Borra un sector remoto. Asume que el caller ya hizo el delete local. */
@@ -1488,6 +1496,9 @@ async function pushProject(projectId: string): Promise<{ pushed: number; errors:
     if (typeof row.points_json === 'string') {
       try { row.points_json = JSON.parse(row.points_json); } catch { row.points_json = null; }
     }
+    // v102 — omitir set_index/valid_from nulos (compat con nube sin migración v102).
+    if (row.set_index == null) delete row.set_index;
+    if (row.valid_from == null) delete row.valid_from;
     return row;
   }));
   // v43 — Muestras ANTES que protocols: protocols.sample_id → samples(id).

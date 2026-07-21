@@ -17,7 +17,7 @@ import {
   equipmentCollection, activitiesCollection, projectSectorsCollection,
   sessionFormTemplatesCollection, equipmentActivitiesCollection,
 } from '@db/index';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 interface ChecklistItemFull {
   partidaItem: string | null;

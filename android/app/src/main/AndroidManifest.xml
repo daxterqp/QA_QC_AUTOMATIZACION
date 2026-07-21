@@ -6,26 +6,25 @@
        REACTIVAR: quitar este remove + re-agregar el permiso; ver checklist en
        src/services/BackgroundLocationTask.ts ("REACTIVAR BACKGROUND LOCATION"). -->
   <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+  <!-- FOREGROUND_SERVICE_LOCATION quitado junto con ACCESS_BACKGROUND_LOCATION (jun 2026):
+       lo usaba SOLO el servicio de rastreo en background. tools:node="remove" fuerza que
+       expo-location no lo re-inyecte. REACTIVAR junto al background. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-  <!-- FOREGROUND_SERVICE_LOCATION quitado junto con ACCESS_BACKGROUND_LOCATION (jun 2026):
-       lo usaba SOLO el servicio de rastreo en background. El modo "primer plano" de la
-       trazabilidad usa watchPositionAsync (sin servicio) y no lo requiere. tools:node="remove"
-       fuerza que expo-location no lo re-inyecte. REACTIVAR junto al background (ver
-       src/services/BackgroundLocationTask.ts). -->
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
   <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-  <uses-feature android:name="android.hardware.camera" android:required="false"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -33,12 +32,17 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
-    <!-- LocationTaskService de expo-location declara foregroundServiceType="location"
-         (servicio del rastreo en background, ya retirado). Se elimina del manifest
-         fusionado para que NO quede ningún FGS de tipo location (consistencia con Play).
-         No afecta la captura GPS en primer plano (watchPositionAsync no usa servicio).
-         REACTIVAR junto al background — ver src/services/BackgroundLocationTask.ts. -->
+  <queries>
+    <package android:name="com.google.android.googlequicksearchbox"/>
+    <intent>
+      <action android:name="android.speech.RecognitionService"/>
+    </intent>
+  </queries>
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
+    <!-- LocationTaskService de expo-location (servicio del rastreo en background, ya
+         retirado). Se elimina del manifest fusionado para que NO quede ningún FGS de
+         tipo location (consistencia con Play). REACTIVAR junto al background — ver
+         src/services/BackgroundLocationTask.ts. -->
     <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
     <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyBJbqP-2rHM5SOqdw2SLbjPviP858pBf9s"/>
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>

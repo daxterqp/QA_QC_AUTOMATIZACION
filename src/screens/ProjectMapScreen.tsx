@@ -34,7 +34,7 @@ import type Protocol from '@models/Protocol';
 import type ProtocolTemplate from '@models/ProtocolTemplate';
 import { pullProjectSectors, pullProjectSettings, diagnoseOrtho } from '@services/SupabaseSyncService';
 import { downloadFromS3 } from '@services/S3Service';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { effectiveDurationMs } from '@services/WorkSessionService';
 import { parseFeatureFlagsJson, isGeolocationEnabled } from '@utils/featureFlags';
 import { useI18n, tx } from '@i18n/index';

@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Colors, Radius } from '../theme/colors';
 import { database, projectSectorsCollection, protocolsCollection, projectsCollection } from '@db/index';
 import { Q } from '@nozbe/watermelondb';

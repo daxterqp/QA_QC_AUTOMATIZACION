@@ -13,7 +13,7 @@
  */
 
 import * as Print from 'expo-print';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'react-native';
 import { Q } from '@nozbe/watermelondb';

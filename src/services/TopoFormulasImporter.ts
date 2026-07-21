@@ -11,7 +11,7 @@
  *     TraceabilityExcelImporter (única ruta donde el móvil ESCRIBE lab_aux_tables).
  */
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import { Q } from '@nozbe/watermelondb';
 import { database, labAuxTablesCollection, projectsCollection } from '@db/index';

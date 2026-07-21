@@ -9,7 +9,7 @@ import { useTourStep } from '@hooks/useTourStep';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Radius, Shadow } from '../theme/colors';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { database, plansCollection, locationsCollection } from '@db/index';
 import { useAuth } from '@context/AuthContext';
 import { useNetwork } from '@context/NetworkContext';
