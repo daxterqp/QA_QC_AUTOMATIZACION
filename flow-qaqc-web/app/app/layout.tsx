@@ -223,7 +223,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="ml-56 flex-1 min-h-screen">
+      {/* v100n — `min-w-0` es OBLIGATORIO: sin él, este hijo flex toma
+          min-width:auto y se estira al ancho de su contenido más ancho (la tabla
+          del Dashboard), desbordando la página entera: la barra lateral quedaba
+          cortada y los botones del encabezado se salían de la pantalla. */}
+      <main className="ml-56 flex-1 min-w-0 min-h-screen">
         {children}
       </main>
 
