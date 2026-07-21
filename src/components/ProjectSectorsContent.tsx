@@ -17,6 +17,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors, Radius } from '../theme/colors';
 import { database, projectSectorsCollection, protocolsCollection, projectsCollection } from '@db/index';
+import { sectorsForDate } from '@utils/sectorSets';
 import { Q } from '@nozbe/watermelondb';
 import type ProjectSector from '@models/ProjectSector';
 import { parseSectorFile, type ParsedSector } from '@services/SectorImporter';
@@ -57,7 +58,9 @@ export default function ProjectSectorsContent({ projectId }: Props) {
     const sub = projectSectorsCollection
       .query(Q.where('project_id', projectId), Q.sortBy('name', Q.asc))
       .observe()
-      .subscribe(setSectors);
+      // v102 — la gestión muestra el juego de sectores VIGENTE hoy; los juegos
+      // anteriores quedan congelados para los ensayos de su periodo.
+      .subscribe((rows: any[]) => setSectors(sectorsForDate(rows, null) as any));
     return () => sub.unsubscribe();
   }, [projectId]);
 

@@ -45,6 +45,7 @@ import {
   projectsCollection,
 } from '@db/index';
 import { parseFeatureFlagsJson, type ProjectFeatureFlags } from '@utils/featureFlags';
+import { sectorsForDate } from '@utils/sectorSets';
 import { Q } from '@nozbe/watermelondb';
 import { Ionicons } from '@expo/vector-icons';
 import { DateRangePicker } from '@components/DateRangePicker';
@@ -270,7 +271,9 @@ export default function EnsayosScreen({ navigation, route }: Props) {
       })).sort((a, b) => (a.idProtocolo ?? a.name).localeCompare(b.idProtocolo ?? b.name));
       setTemplates(tl);
       setProtos(allProtos as Protocol[]);
-      const sortedSectors = [...sectors].sort((a: any, b: any) =>
+      // v102 — la creación por sector agrupa con el juego de sectores VIGENTE hoy
+      // (los ensayos viejos de juegos congelados siguen visibles vía su sector_id).
+      const sortedSectors = sectorsForDate([...sectors] as any[], null).sort((a: any, b: any) =>
         (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) || a.name.localeCompare(b.name));
       setSectorsLite(sortedSectors.map((s: any) => ({ id: s.id, name: s.name })));
 

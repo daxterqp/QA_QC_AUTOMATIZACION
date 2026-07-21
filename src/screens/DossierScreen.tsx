@@ -237,6 +237,7 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
         lng: (p as any).longitude ?? null,
         label: (p as any).protocolCode ?? p.protocolNumber ?? undefined,
         date: fmtDate((p as any).ensayoDate),
+        dateIso: (p as any).ensayoDate ?? null,   // v102 — juego de sectores por fecha
       }));
       const { specs, legends } = await buildProtocolCroquisSpecs(projectId, inputs, flags);
       if (specs.length === 0) return {};

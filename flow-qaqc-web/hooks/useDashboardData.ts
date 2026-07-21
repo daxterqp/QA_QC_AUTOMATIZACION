@@ -16,6 +16,7 @@ import {
   useHistoricalAnnotations,
 } from './useHistorical';
 import { useProjectSectors } from './useFileUpload';
+import { sectorsForDate } from '@lib/sectorSets';
 import { useProjects } from './useProjects';
 import { computeTotalExpected, protocolCoord } from '@lib/dashboardUtils';
 import { buildOrthophotoSources } from '@lib/orthophoto';
@@ -64,9 +65,12 @@ export function useDashboardData(projectId: string, filters: DashboardFiltersSta
     [locations],
   );
 
+  // v102 — el dashboard muestra el juego de sectores VIGENTE hoy (los juegos
+  // anteriores quedan congelados para los ensayos de su periodo).
+  const vigenteSectors = useMemo(() => sectorsForDate(sectors, null), [sectors]);
   const sectorOptions = useMemo(
-    () => sectors.map(s => ({ id: s.id, name: s.name })),
-    [sectors],
+    () => vigenteSectors.map(s => ({ id: s.id, name: s.name })),
+    [vigenteSectors],
   );
 
   const fromMs = filters.dateFrom ? new Date(filters.dateFrom + 'T00:00:00').getTime() : null;
@@ -148,7 +152,7 @@ export function useDashboardData(projectId: string, filters: DashboardFiltersSta
     projectStart,
     protocols,
     locations,
-    sectors,
+    sectors: vigenteSectors, // v102 — el mapa dibuja el juego vigente
     filteredProtocols,
     mapProtocols,
     filteredAnnotations,

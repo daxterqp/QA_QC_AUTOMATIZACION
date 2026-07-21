@@ -25,6 +25,12 @@ export const STRINGS_WEB_CSECTORS: Record<string, { es: string; en: string; pt: 
   'webCSectors.previewMore': { es: '…y {count} más', en: '…and {count} more', pt: '…e mais {count}' },
   'webCSectors.previewWarnMore': { es: '…y {count} más', en: '…and {count} more', pt: '…e mais {count}' },
   'webCSectors.confirmImport': { es: 'Confirmar importación', en: 'Confirm import', pt: 'Confirmar importação' },
+  // v102 — juegos de sectores con vigencia
+  'webCSectors.newSetToggle': { es: 'Cargar como NUEVO juego de sectores', en: 'Load as a NEW sector set', pt: 'Carregar como NOVO conjunto de setores' },
+  'webCSectors.newSetFrom': { es: 'Entra en vigencia desde:', en: 'Takes effect from:', pt: 'Entra em vigência desde:' },
+  'webCSectors.newSetHint': { es: 'El juego actual queda congelado: los ensayos con fecha anterior lo siguen usando (croquis incluido). Los ensayos desde esta fecha usarán el juego nuevo.', en: 'The current set is frozen: tests dated before keep using it (sketch included). Tests from this date on will use the new set.', pt: 'O conjunto atual fica congelado: os ensaios com data anterior continuam a usá-lo (croqui incluído). Os ensaios a partir desta data usarão o novo conjunto.' },
+  'webCSectors.confirmNewSet': { es: 'Cargar juego nuevo', en: 'Load new set', pt: 'Carregar novo conjunto' },
+  'webCSectors.setBadge': { es: 'Juego {n} · vigente desde {from}', en: 'Set {n} · effective from {from}', pt: 'Conjunto {n} · vigente desde {from}' },
   'webCSectors.importSummary': {
     es: '+{added} sector(es) nuevos, {modified} actualizado(s).',
     en: '+{added} new sector(s), {modified} updated.',

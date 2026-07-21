@@ -24,6 +24,10 @@ export default class ProjectSector extends Model {
   // corredor). null fuera de obra lineal.
   @field('station_start') stationStart!: number | null;
   @field('station_end') stationEnd!: number | null;
+  // v102 — Juego de sectores al que pertenece la fila (1 = inicial) + fecha de
+  // entrada en vigencia del juego (YYYY-MM-DD; null = desde siempre).
+  @field('set_index') setIndex!: number | null;
+  @field('valid_from') validFrom!: string | null;
 
   @readonly @date('created_at') createdAt!: Date;
   @readonly @date('updated_at') updatedAt!: Date;

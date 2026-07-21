@@ -25,7 +25,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  *      sin abusar de protocol_item_id.
  */
 export const schema = appSchema({
-  version: 46,
+  version: 47,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -446,6 +446,10 @@ export const schema = appSchema({
         // en el corredor). null fuera de obra lineal.
         { name: 'station_start', type: 'number', isOptional: true },
         { name: 'station_end', type: 'number', isOptional: true },
+        // v102 — Juegos de sectores: nº de juego (1 = inicial) + fecha de
+        // entrada en vigencia del juego (YYYY-MM-DD; null = desde siempre).
+        { name: 'set_index', type: 'number', isOptional: true },
+        { name: 'valid_from', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

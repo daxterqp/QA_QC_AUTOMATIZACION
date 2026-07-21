@@ -1032,5 +1032,20 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    // v102 — Juegos de sectores con periodo de vigencia: cada fila pertenece a
+    // un juego (set_index, 1 = inicial) y todas las filas de un juego comparten
+    // valid_from (fecha de entrada en vigencia; null = desde siempre).
+    {
+      toVersion: 47,
+      steps: [
+        addColumns({
+          table: 'project_sectors',
+          columns: [
+            { name: 'set_index', type: 'number', isOptional: true },
+            { name: 'valid_from', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

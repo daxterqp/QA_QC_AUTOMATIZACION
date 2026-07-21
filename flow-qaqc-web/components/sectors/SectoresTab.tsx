@@ -21,9 +21,10 @@ import {
 } from 'lucide-react';
 import { parseSectorFile, type SectorImportResult } from '@lib/sectorParser';
 import {
-  useProjectSectors, importSectorsToSupabase, updateSector, deleteSector,
+  useProjectSectors, importSectorsToSupabase, importNewSectorSet, updateSector, deleteSector,
   recalculateSectorAssignments, type SectorsImportSummary,
 } from '@hooks/useFileUpload';
+import { sectorsForDate, hasMultipleSets, todayIso } from '@lib/sectorSets';
 import { SectorCroquis } from './SectorCroquis';
 import { OrthophotoSection } from './OrthophotoSection';
 import type { MapSector, MapOrthophoto } from './SectorMap';
@@ -47,7 +48,13 @@ const PALETTE = ['#7E57C2', '#00897B', '#C2185B', '#8D6E63', '#5E35B1', '#0097A7
 export function SectoresTab({ projectId }: { projectId: string }) {
   const { t } = useI18n();
   const qc = useQueryClient();
-  const { data: sectors = [], refetch } = useProjectSectors(projectId);
+  const { data: allSectors = [], refetch } = useProjectSectors(projectId);
+  // v102 — la gestión muestra el juego de sectores VIGENTE hoy; los juegos
+  // anteriores quedan congelados para los ensayos de su periodo.
+  const sectors = useMemo(() => sectorsForDate(allSectors, null), [allSectors]);
+  const multiSet = useMemo(() => hasMultipleSets(allSectors), [allSectors]);
+  const vigenteSet = sectors[0]?.set_index ?? 1;
+  const vigenteFrom = sectors[0]?.valid_from ?? null;
   const { data: projects = [], refetch: refetchProjects } = useProjects();
   const project = projects.find(p => p.id === projectId);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,6 +63,9 @@ export function SectoresTab({ projectId }: { projectId: string }) {
   const [summary, setSummary] = useState<SectorsImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; name: string; color: string } | null>(null);
+  // v102 — cargar como JUEGO NUEVO (vigencia desde una fecha).
+  const [asNewSet, setAsNewSet] = useState(false);
+  const [newSetDate, setNewSetDate] = useState(todayIso());
   const [recalcMsg, setRecalcMsg] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -109,9 +119,14 @@ export function SectoresTab({ projectId }: { projectId: string }) {
     if (!parsed) return;
     setBusy(true); setError(null);
     try {
-      const s = await importSectorsToSupabase(projectId, parsed.sectors);
+      // v102 — juego nuevo: TODOS los sectores parseados entran como el juego
+      // siguiente con la vigencia elegida; el juego actual queda congelado.
+      const s = asNewSet
+        ? await importNewSectorSet(projectId, parsed.sectors, newSetDate)
+        : await importSectorsToSupabase(projectId, parsed.sectors);
       setSummary(s);
       setParsed(null);
+      setAsNewSet(false);
       refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -228,15 +243,32 @@ export function SectoresTab({ projectId }: { projectId: string }) {
               {parsed.warnings.length > 6 && <p>{t('webCSectors.previewWarnMore', { count: parsed.warnings.length - 6 })}</p>}
             </div>
           )}
+          {/* v102 — Cargar como JUEGO NUEVO de sectores con fecha de vigencia. */}
+          <div className="mt-2 p-2.5 rounded border border-border bg-surface/60 flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-textPrimary cursor-pointer">
+              <input type="checkbox" checked={asNewSet} onChange={e => setAsNewSet(e.target.checked)} className="w-4 h-4 accent-primary" />
+              {t('webCSectors.newSetToggle')}
+            </label>
+            {asNewSet && (
+              <div className="flex items-center gap-2 pl-6">
+                <span className="text-[11px] text-textSecondary">{t('webCSectors.newSetFrom')}</span>
+                <input type="date" value={newSetDate} onChange={e => setNewSetDate(e.target.value)}
+                  className="border border-border rounded px-2 py-1 text-xs" />
+              </div>
+            )}
+            {asNewSet && (
+              <p className="text-[11px] text-textSecondary pl-6">{t('webCSectors.newSetHint')}</p>
+            )}
+          </div>
           <div className="flex gap-2 mt-3">
             <button onClick={() => setParsed(null)} disabled={busy}
               className="px-3 py-1.5 text-xs font-bold rounded border border-border text-textSecondary hover:bg-surface">
               {t('common.cancel')}
             </button>
-            <button onClick={handleConfirm} disabled={busy}
+            <button onClick={handleConfirm} disabled={busy || (asNewSet && !/^\d{4}-\d{2}-\d{2}$/.test(newSetDate))}
               className="px-3 py-1.5 text-xs font-bold rounded bg-primary text-white hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
               {busy && <Loader2 size={12} className="animate-spin" />}
-              {t('webCSectors.confirmImport')}
+              {asNewSet ? t('webCSectors.confirmNewSet') : t('webCSectors.confirmImport')}
             </button>
           </div>
         </div>
@@ -258,6 +290,12 @@ export function SectoresTab({ projectId }: { projectId: string }) {
           <p className="text-xs font-bold text-textSecondary">
             {t('webCSectors.loadedHeader', { total: stats.total, withGeom: stats.withGeom })}
           </p>
+          {/* v102 — badge del juego vigente cuando hay más de un juego */}
+          {multiSet && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/30">
+              {t('webCSectors.setBadge', { n: vigenteSet, from: vigenteFrom ?? '—' })}
+            </span>
+          )}
         </div>
         {sectors.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-10 text-center">

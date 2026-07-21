@@ -15,6 +15,7 @@ import {
   type CroquisMapType,
 } from '@utils/featureFlags';
 import { pointInPolygon } from '@utils/CoordinateSystem';
+import { sectorsForDate } from '@utils/sectorSets';
 import type { CroquisSpec } from '../context/CroquisCaptureContext';
 
 const SECTOR_DEFAULT_COLOR = '#1a4f7a';
@@ -27,6 +28,9 @@ export interface CroquisProtocolInput {
   color?: string;
   label?: string;
   date?: string;               // fecha (dd/mm/aaaa) para el nombre del mapa
+  /** v102 — fecha ISO (YYYY-MM-DD) del ensayo: su croquis usa el juego de
+   *  sectores VIGENTE a esa fecha (null/ausente = juego vigente hoy). */
+  dateIso?: string | null;
 }
 
 /** Leyenda del croquis (se dibuja a la DERECHA del mapa en el PDF, como un gráfico). */
@@ -39,16 +43,19 @@ export interface CroquisLegend {
 
 export interface CroquisResult { img: string; legend: CroquisLegend }
 
-interface GeomSector { name: string; color: string; points: { lat: number; lng: number }[] }
+interface GeomSector { name: string; color: string; points: { lat: number; lng: number }[]; setIndex?: number | null; validFrom?: string | null }
 
-/** Sectores del proyecto CON geometría (id/name/color/puntos). */
+/** Sectores del proyecto CON geometría (id/name/color/puntos + juego v102). */
 async function loadGeomSectors(projectId: string): Promise<GeomSector[]> {
   const rows = await projectSectorsCollection
     .query(Q.where('project_id', projectId)).fetch() as ProjectSector[];
   const out: GeomSector[] = [];
   for (const s of (rows ?? [])) {
     const pts = s.points;
-    if (pts && pts.length >= 3) out.push({ name: s.name, color: s.displayColor || SECTOR_DEFAULT_COLOR, points: pts });
+    if (pts && pts.length >= 3) out.push({
+      name: s.name, color: s.displayColor || SECTOR_DEFAULT_COLOR, points: pts,
+      setIndex: (s as any).setIndex ?? null, validFrom: (s as any).validFrom ?? null,
+    });
   }
   return out;
 }
@@ -92,10 +99,12 @@ export async function buildProtocolCroquisSpecs(
   for (const p of wanted) {
     const cfg = getTemplatePrintConfig(flags, p.idProtocolo);
     const pt = { lat: p.lat as number, lng: p.lng as number };
+    // v102 — el croquis usa el juego de sectores vigente a la FECHA del ensayo.
+    const geomSet = sectorsForDate(geom, p.dateIso ?? null);
     // Sector(es) que CONTIENEN el ensayo → activos (a color); el resto, plomo.
-    const sectors = geom.map(s => ({ points: s.points, color: s.color, active: pointInPolygon(pt, s.points) }));
-    const activeSectors = geom.filter((_, i) => sectors[i].active).map(s => ({ name: s.name, color: s.color }));
-    const hasOtherSectors = geom.length > activeSectors.length;
+    const sectors = geomSet.map(s => ({ points: s.points, color: s.color, active: pointInPolygon(pt, s.points) }));
+    const activeSectors = geomSet.filter((_, i) => sectors[i].active).map(s => ({ name: s.name, color: s.color }));
+    const hasOtherSectors = geomSet.length > activeSectors.length;
     specs.push({
       id: p.id,
       sectors,
@@ -131,7 +140,9 @@ export async function buildSampleCroquisSpec(
   const pts = ensayos.filter(e => e.lat != null && e.lng != null);
   if (pts.length === 0) return null;
   const cfg = getTemplatePrintConfig(flags, null);   // config por defecto (muestra no es un "tipo")
-  const [geom, mapTileUrl] = await Promise.all([loadGeomSectors(projectId), loadMapTileUrl(projectId)]);
+  const [geomAll, mapTileUrl] = await Promise.all([loadGeomSectors(projectId), loadMapTileUrl(projectId)]);
+  // v102 — dossier de muestra: juego de sectores vigente HOY.
+  const geom = sectorsForDate(geomAll, null);
   // Activo = sector que contiene AL MENOS un ensayo de la muestra.
   const sectors = geom.map(s => ({ points: s.points, color: s.color, active: pts.some(pt => pointInPolygon(pt, s.points)) }));
   return {

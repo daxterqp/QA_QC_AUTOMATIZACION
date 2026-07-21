@@ -916,6 +916,7 @@ export async function importTraceabilityToSupabase(
 // ── v29 — Sectores GIS importer ─────────────────────────────────────────────
 
 import type { ParsedSector, LatLng } from '@lib/sectorParser';
+import { sectorsForDate, nextSetIndex } from '@lib/sectorSets';
 
 // Paleta de SECTORES (morados/teales/magentas/marrones) — distinta de los
 // colores de ESTADO de ensayo (gris/azul/ámbar/verde/rojo) para no confundirlos.
@@ -930,6 +931,9 @@ export interface SectorRow {
   source_system:  string | null;
   created_at:     number;
   updated_at:     number;
+  /** v102 — juego de sectores al que pertenece (1 = inicial) y su vigencia. */
+  set_index?:     number | null;
+  valid_from?:    string | null;
 }
 
 export interface SectorsImportSummary {
@@ -953,16 +957,22 @@ export function useProjectSectors(projectId: string) {
   });
 }
 
-/** Upsert idempotente por (project_id, name). Auto-asigna color de paleta para
- *  sectores nuevos. */
+/** Upsert idempotente por (project_id, name) — SOLO contra el juego de sectores
+ *  VIGENTE (v102): actualizar geometría no toca los juegos históricos. Los
+ *  sectores nuevos entran al juego vigente con su misma vigencia. Auto-asigna
+ *  color de paleta para sectores nuevos. */
 export async function importSectorsToSupabase(
   projectId: string,
   parsed: ParsedSector[],
 ): Promise<SectorsImportSummary> {
   const { data: existing } = await supabase
     .from('project_sectors').select('*').eq('project_id', projectId);
+  const all = (existing ?? []) as SectorRow[];
+  const vigente = sectorsForDate(all, null); // juego vigente HOY
+  const setIdx = vigente[0]?.set_index ?? 1;
+  const setFrom = vigente[0]?.valid_from ?? null;
   const byName = new Map<string, SectorRow>(
-    (existing ?? []).map((s: any) => [s.name.toLowerCase(), s]),
+    vigente.map((s: any) => [s.name.toLowerCase(), s]),
   );
   let added = 0, modified = 0;
   let colorIdx = byName.size;
@@ -973,13 +983,17 @@ export async function importSectorsToSupabase(
       const id = `sec_${now}_${Math.floor(Math.random() * 1e6).toString(36)}`;
       const color = SECTOR_PALETTE[colorIdx % SECTOR_PALETTE.length];
       colorIdx++;
-      const { error } = await supabase.from('project_sectors').insert({
+      const row: any = {
         id, project_id: projectId, name: p.name,
         points_json: p.points,
         display_color: color,
         source_system: p.sourceSystem,
         created_at: now, updated_at: now,
-      });
+      };
+      // v102 — solo se envían si el proyecto ya usa juegos (evita romper antes
+      // de aplicar la migración SQL v102 en la nube).
+      if (setIdx !== 1 || setFrom != null) { row.set_index = setIdx; row.valid_from = setFrom; }
+      const { error } = await supabase.from('project_sectors').insert(row);
       if (error) throw new Error(`Sector "${p.name}": ${error.message}`);
       added++;
     } else {
@@ -993,6 +1007,40 @@ export async function importSectorsToSupabase(
     }
   }
   return { added, modified };
+}
+
+/** v102 — Carga un JUEGO NUEVO de sectores completo: TODAS las filas parseadas
+ *  se insertan con set_index = (máximo actual + 1) y la vigencia elegida. Los
+ *  juegos anteriores quedan congelados: los ensayos con fecha anterior siguen
+ *  usando su juego. Requiere la migración SQL v102 aplicada en la nube. */
+export async function importNewSectorSet(
+  projectId: string,
+  parsed: ParsedSector[],
+  validFrom: string,           // YYYY-MM-DD — fecha en que entra en vigencia
+): Promise<SectorsImportSummary & { setIndex: number }> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(validFrom)) throw new Error('Fecha de vigencia inválida');
+  const { data: existing } = await supabase
+    .from('project_sectors').select('id, set_index, valid_from').eq('project_id', projectId);
+  const setIndex = nextSetIndex((existing ?? []) as SectorRow[]);
+  let added = 0;
+  let colorIdx = 0;
+  for (const p of parsed) {
+    const now = Date.now();
+    const id = `sec_${now}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const color = SECTOR_PALETTE[colorIdx % SECTOR_PALETTE.length];
+    colorIdx++;
+    const { error } = await supabase.from('project_sectors').insert({
+      id, project_id: projectId, name: p.name,
+      points_json: p.points,
+      display_color: color,
+      source_system: p.sourceSystem,
+      set_index: setIndex, valid_from: validFrom,
+      created_at: now, updated_at: now,
+    });
+    if (error) throw new Error(`Sector "${p.name}": ${error.message}`);
+    added++;
+  }
+  return { added, modified: 0, setIndex };
 }
 
 export async function updateSector(
@@ -1029,12 +1077,15 @@ export async function recalculateSectorAssignments(
   projectId: string,
 ): Promise<{ updated: number; total: number }> {
   const { data: sectorsData } = await supabase
-    .from('project_sectors').select('id, name, points_json, station_start, station_end')
+    .from('project_sectors').select('*')
     .eq('project_id', projectId);
-  const withGeom = (sectorsData ?? []).filter((s: any) =>
+  // v102 — con juegos de sectores, el recalculo se hace por FECHA de cada
+  // ensayo (más abajo); aquí solo se preparan todas las filas con geometría.
+  const allGeom = (sectorsData ?? []).filter((s: any) =>
     Array.isArray(s.points_json) && s.points_json.length >= 3
   );
-  if (withGeom.length === 0) return { updated: 0, total: 0 };
+  if (allGeom.length === 0) return { updated: 0, total: 0 };
+  const withGeom = allGeom; // compat: proyectos sin juegos = un solo juego
 
   // v100b — En obra lineal, además de reasignar el tramo hay que recomputar
   // progresiva/subtramo contra el tramo nuevo (espejo del móvil handleRecalculate).
@@ -1049,7 +1100,7 @@ export async function recalculateSectorAssignments(
   } catch { /* no lineal */ }
 
   const { data: protos } = await supabase
-    .from('protocols').select('id, latitude, longitude, sector_id, sector_assigned_manually, progresiva, subtramo_index')
+    .from('protocols').select('id, latitude, longitude, sector_id, sector_assigned_manually, progresiva, subtramo_index, ensayo_date')
     .eq('project_id', projectId)
     .or('sector_assigned_manually.is.null,sector_assigned_manually.eq.false');
   const list = (protos ?? []).filter((p: any) =>
@@ -1058,8 +1109,10 @@ export async function recalculateSectorAssignments(
 
   let updated = 0;
   for (const p of list as any[]) {
+    // v102 — solo compiten los sectores del juego vigente a la fecha del ensayo.
+    const setGeom = sectorsForDate(withGeom as any[], p.ensayo_date ?? null);
     let matchId: string | null = null;
-    for (const s of withGeom as any[]) {
+    for (const s of setGeom as any[]) {
       if (pointInPolygonWeb({ lat: p.latitude, lng: p.longitude }, s.points_json)) {
         matchId = s.id; break;
       }

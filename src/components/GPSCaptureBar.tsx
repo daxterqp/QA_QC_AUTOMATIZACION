@@ -34,6 +34,7 @@ import { enqueue as enqueueSync } from '@services/SyncQueueService';
 import { pullProjectSectors, pullProjectSettings } from '@services/SupabaseSyncService';
 import { formatCoords, findSectorByPoint, chainageForTramo, type LatLng, type TramoInfo } from '@utils/CoordinateSystem';
 import { parseFeatureFlagsJson, isLinearProject, linearSubtramoLength } from '@utils/featureFlags';
+import { sectorsForDate } from '@utils/sectorSets';
 import { useI18n } from '@i18n/index';
 import { Colors, Radius } from '../theme/colors';
 import type ProjectSector from '@db/models/ProjectSector';
@@ -122,7 +123,14 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
   }, [protocol]);
 
   const hasManualCoords = protocol.latitude != null && protocol.longitude != null;
-  const sectorsWithGeom = useMemo(() => sectors.filter(s => s.pointsJson != null), [sectors]);
+  // v102 — Juegos de sectores: el ensayo compite/elige SOLO dentro del juego
+  // vigente a su fecha. `currentSector` se busca en TODOS (un ensayo viejo puede
+  // apuntar a un sector de un juego congelado y debe seguir mostrándose).
+  const sectorsVigentes = useMemo(
+    () => sectorsForDate(sectors as any[], (protocol as any).ensayoDate ?? null) as ProjectSector[],
+    [sectors, protocol],
+  );
+  const sectorsWithGeom = useMemo(() => sectorsVigentes.filter(s => s.pointsJson != null), [sectorsVigentes]);
   const hasGeomSectors = sectorsWithGeom.length > 0;
   const currentSector = useMemo(
     () => sectors.find(s => s.id === protocol.sectorId),
@@ -151,6 +159,7 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
         lat: src.latitude, lng: src.longitude,
         label: src.protocolCode ?? src.protocolNumber ?? undefined,
         date: fmtDate(src.ensayoDate),
+        dateIso: src.ensayoDate ?? null,   // v102 — juego de sectores por fecha
       }];
       const { specs, legends } = await buildProtocolCroquisSpecs(protocol.projectId, inputs, flags);
       if (specs.length > 0) await getOrCaptureCroquis(specs, legends, captureMany);
@@ -168,9 +177,11 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
     // closure capturado en el último render). El auto-fetch de la 1ª captura
     // podía correr antes de que el pull remoto trajera sectores nuevos →
     // asignaba el sector equivocado o ninguno.
-    let liveSectors = sectors;
+    let liveSectors = sectorsVigentes;
     try {
-      liveSectors = await projectSectorsCollection.query(Q.where('project_id', protocol.projectId)).fetch() as any;
+      const all = await projectSectorsCollection.query(Q.where('project_id', protocol.projectId)).fetch() as any;
+      // v102 — solo compiten los sectores del juego vigente a la fecha del ensayo.
+      liveSectors = sectorsForDate(all, (protocol as any).ensayoDate ?? null);
     } catch { /* sin DB → usar el closure */ }
     const sectorAuto = findSectorByPoint(
       { lat: gps.lat, lng: gps.lng },
@@ -234,7 +245,7 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
     // v101 — croquis fresco al caché (fire-and-forget; overlay breve).
     pregenCroquis().catch(() => {});
     return sectorAuto;
-  }, [protocol, sectors, currentUser, pregenCroquis]);
+  }, [protocol, sectorsVigentes, currentUser, pregenCroquis]);
 
   /** Asigna manualmente un sector. C3 — `sectorAssignedManually=true` SIEMPRE,
    *  incluso cuando el técnico elige "— Sin sector —". Sin esto, el
@@ -390,7 +401,7 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
               <TouchableOpacity style={styles.sectorItem} onPress={() => { setSectorManual(null); setShowSectorPicker(false); }}>
                 <Text style={[styles.sectorItemText, { fontStyle: 'italic', color: Colors.textSecondary }]}>{t('gpsBar.sector.none')}</Text>
               </TouchableOpacity>
-              {sectors.map(s => (
+              {sectorsVigentes.map(s => (
                 <TouchableOpacity
                   key={s.id}
                   style={[
@@ -404,7 +415,7 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
                   {!s.pointsJson && <Text style={styles.sectorTag}>{t('gpsBar.sector.nameOnly')}</Text>}
                 </TouchableOpacity>
               ))}
-              {sectors.length === 0 && (
+              {sectorsVigentes.length === 0 && (
                 <Text style={styles.empty}>{t('gpsBar.sector.empty')}</Text>
               )}
             </ScrollView>

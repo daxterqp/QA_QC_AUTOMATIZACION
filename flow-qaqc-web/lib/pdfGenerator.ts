@@ -17,6 +17,7 @@ import { fetchDossierProtocolFull } from '@hooks/useDossier';
 import { parseNumericItem, parseNumericRow, extractHeaderRows, extractMatrices, splitRowComments, scopeKeyFor, colLetter, inRange, deriveAxisTitles, isNumericProtocol } from '@lib/numericProtocol';
 import { resolveScopeCells, type ScopeCell, type XrefValues, type AuxTables } from '@lib/formulaEval';
 import { renderChartSvg } from '@lib/chartRenderer';
+import { sectorsForDate } from '@lib/sectorSets';
 import { buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfBlock } from '@lib/numericPdfHtml';
 import {
   getTemplatePrintConfig, getPrintHeaderColor, chartWidthFor,
@@ -501,15 +502,18 @@ function linearHeaderCells(p: unknown): { tramo: string; subtramo: string; progr
   return { tramo, subtramo, progresiva };
 }
 
-/** v43.6 — Sectores del proyecto CON geometría (para el croquis). */
-async function loadGeomSectors(projectId: string): Promise<CroquisSectorIn[]> {
+/** v43.6 — Sectores del proyecto CON geometría (para el croquis).
+ *  v102 — incluye juego (set_index/valid_from): el croquis de cada ensayo usa el
+ *  juego VIGENTE a su fecha (los ensayos viejos conservan su geometría). */
+type CroquisSectorWithSet = CroquisSectorIn & { set_index?: number | null; valid_from?: string | null };
+async function loadGeomSectors(projectId: string): Promise<CroquisSectorWithSet[]> {
   try {
-    const { data } = await supabase.from('project_sectors').select('name, display_color, points_json').eq('project_id', projectId);
-    const out: CroquisSectorIn[] = [];
-    for (const s of (data ?? []) as { name: string; display_color: string | null; points_json: unknown }[]) {
+    const { data } = await supabase.from('project_sectors').select('*').eq('project_id', projectId);
+    const out: CroquisSectorWithSet[] = [];
+    for (const s of (data ?? []) as { name: string; display_color: string | null; points_json: unknown; set_index?: number | null; valid_from?: string | null }[]) {
       const pts = Array.isArray(s.points_json) ? (s.points_json as { lat: number; lng: number }[]) : null;
       if (pts && pts.length >= 3 && pts.every(p => typeof p?.lat === 'number' && typeof p?.lng === 'number')) {
-        out.push({ name: s.name, color: s.display_color || '#1a4f7a', points: pts });
+        out.push({ name: s.name, color: s.display_color || '#1a4f7a', points: pts, set_index: s.set_index, valid_from: s.valid_from });
       }
     }
     return out;
@@ -1220,10 +1224,11 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
 
   // v43.6 — Croquis: sectores con geometría + ortofoto (base64 + bounds) del proyecto.
   // Se cargan UNA vez; el croquis se dibuja vectorial (sin Google Maps) sobre la ortofoto.
-  const geomSectors: CroquisSectorIn[] = await loadGeomSectors(projectId);
+  const geomSectors = await loadGeomSectors(projectId);
   const croquisOrtho: CroquisOrtho | null = await loadCroquisOrtho(orthoRow);
+  // v102 — el croquis de cada ensayo usa el juego de sectores vigente a SU fecha.
   const croquisOf = (full: DossierProtocolFull, cfg: ResolvedPrintConfig) =>
-    croquisBlockFor(full, cfg, geomSectors, croquisOrtho);
+    croquisBlockFor(full, cfg, sectorsForDate(geomSectors, full.protocol.ensayo_date ?? null), croquisOrtho);
 
   onProgress?.('Cargando imágenes...');
 
@@ -1538,7 +1543,8 @@ export async function exportSingleProtocolPdf(
     loadGeomSectors(full.protocol.project_id),
     loadCroquisOrtho(orthoRow),
   ]);
-  const croquisS = croquisBlockFor(full, cfg, geomSectorsS, croquisOrthoS);
+  // v102 — juego de sectores vigente a la fecha del ensayo.
+  const croquisS = croquisBlockFor(full, cfg, sectorsForDate(geomSectorsS, full.protocol.ensayo_date ?? null), croquisOrthoS);
 
   const allEvidenceEntries = full.evidences.map(ev => {
       const key = ev.s3_key ?? ev.s3_url_placeholder ?? (ev as any).file_name;
