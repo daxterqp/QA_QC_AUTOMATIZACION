@@ -58,8 +58,10 @@ type ChartCfg = {
   xMin?: string | null; xMax?: string | null;
   xVertical?: boolean;
   limMin?: number | null; limMax?: number | null;
-  showEq?: boolean;    // v100f — ecuación de ajuste (default OFF)
-  showStats?: boolean; // v100f — media/σ/n (default ON; undefined = ON)
+  showEq?: boolean;      // v100f — ecuación de ajuste (default OFF)
+  showStats?: boolean;   // v100f — media/σ/n (default ON; undefined = ON)
+  showLegend?: boolean;  // v100g — leyenda de líneas (default OFF)
+  showVGrid?: boolean;   // v100g — cuadrícula vertical (default ON; undefined = ON)
 };
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
@@ -443,6 +445,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [axTrend, setAxTrend] = useState<Trend>('linear');
   // v100f — flags de ecuación (default OFF) y estadística (default ON).
   const [axShowEq, setAxShowEq] = useState(false); const [axShowStats, setAxShowStats] = useState(true);
+  // v100g — leyenda de líneas (default OFF) y cuadrícula vertical (default ON).
+  const [axShowLegend, setAxShowLegend] = useState(false); const [axShowVGrid, setAxShowVGrid] = useState(true);
   const openAxisCfg = useCallback((ch: ChartCfg) => {
     setAxisChart(ch);
     setAxYMin(ch.yMin != null ? String(ch.yMin) : '');
@@ -453,6 +457,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setAxLimMax(ch.limMax != null ? String(ch.limMax) : '');
     setAxTrend(ch.trend ?? 'linear');
     setAxShowEq(!!ch.showEq); setAxShowStats(ch.showStats !== false);
+    setAxShowLegend(!!ch.showLegend); setAxShowVGrid(ch.showVGrid !== false);
   }, []);
   const saveAxisCfg = useCallback(() => {
     if (!axisChart) return;
@@ -461,10 +466,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       ...c, yMin: numOrNull(axYMin), yMax: numOrNull(axYMax),
       xMin: axXMin || null, xMax: axXMax || null, xVertical: axVert,
       limMin: numOrNull(axLimMin), limMax: numOrNull(axLimMax), trend: axTrend,
-      showEq: axShowEq, showStats: axShowStats,
+      showEq: axShowEq, showStats: axShowStats, showLegend: axShowLegend, showVGrid: axShowVGrid,
     } : c));
     setAxisChart(null);
-  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats]);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid]);
 
   // v100f — ocultar temporalmente los gráficos para ver la tabla completa (móvil).
   const [chartsHidden, setChartsHidden] = useState(false);
@@ -617,7 +622,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                         {data.length > 0
                           ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
                               decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
-                              limMin={ch.limMin} limMax={ch.limMax} showEq={!!ch.showEq} showStats={ch.showStats !== false} />
+                              limMin={ch.limMin} limMax={ch.limMax} showEq={!!ch.showEq} showStats={ch.showStats !== false}
+                              showLegend={!!ch.showLegend} showVGrid={ch.showVGrid !== false} />
                           : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
                       </View>
                     </TouchableOpacity>
@@ -846,6 +852,14 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
             </View>
 
             <View style={[styles.modalHeadRow, { marginTop: 8 }]}>
+              <Text style={styles.dateRowText}>Mostrar leyenda de líneas</Text>
+              <Switch value={axShowLegend} onValueChange={setAxShowLegend} />
+            </View>
+            <View style={styles.modalHeadRow}>
+              <Text style={styles.dateRowText}>Cuadrícula vertical</Text>
+              <Switch value={axShowVGrid} onValueChange={setAxShowVGrid} />
+            </View>
+            <View style={styles.modalHeadRow}>
               <Text style={styles.dateRowText}>Mostrar ecuación de ajuste y R²</Text>
               <Switch value={axShowEq} onValueChange={setAxShowEq} disabled={axTrend === 'none'} />
             </View>
@@ -934,10 +948,20 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 // desbordan), tendencia punteada con ecuación de ajuste + R², y panel de
 // estadística (media / desviación / n) debajo. Rango Y centrado en los valores
 // típicos (atípicos recortados al borde); ticks con los decimales de la columna.
-function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats }: {
+// v100g — Paleta del gráfico. Grises unificados (ejes + cuadrícula horizontal
+// = mismo plomo; cuadrícula vertical más clara). Líneas de referencia con los
+// colores pedidos: máx rojo, mín azul, tendencia verde.
+const AXIS_GRAY = '#c3ccd8';       // ejes + cuadrícula horizontal (mismo plomo)
+const VGRID_GRAY = '#e4e9f0';      // cuadrícula vertical (más clara)
+const C_MAX = '#c90c0c';           // límite máximo
+const C_MIN = '#254ca5';           // límite mínimo
+const C_TREND = '#21de83';         // línea de tendencia
+const C_POINT = '#1a4f7a';         // puntos de ensayo
+function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid }: {
   data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
   limMin?: number | null; limMax?: number | null; showEq?: boolean; showStats?: boolean;
+  showLegend?: boolean; showVGrid?: boolean;
 }) {
   const { t } = useI18n();
   // Márgenes simétricos: padL alberga los ticks + el título vertical del eje Y.
@@ -988,11 +1012,15 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         {/* Título del eje Y (vertical) — ocupa la banda muerta de la izquierda */}
         <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle"
           transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
-        <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
-        <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
+        {/* v100g — Cuadrícula VERTICAL (más clara), detrás de todo */}
+        {showVGrid ? [1, 2, 3].map(i => { const xx = padL + ((W - padL - padR) * i) / 4; return (
+          <SvgLine key={`v${i}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
+        ); }) : null}
+        <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
+        <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         {Array.from({ length: 5 }, (_, i) => { const yv = lo + (dy * i) / 4; const yy = syRaw(yv); return (
           <React.Fragment key={i}>
-            <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="#eef2f7" strokeWidth={1} />
+            <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={AXIS_GRAY} strokeWidth={1} />
             <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
           </React.Fragment>); })}
         {xTicks.map((xv, i) => xVertical
@@ -1001,35 +1029,38 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         {/* Líneas de límite (punteadas): mín. azul, máx. rojo. Etiqueta al ARRANQUE (izq.) para no desbordar. */}
         {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi
           ? <React.Fragment>
-              <SvgLine x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke="#d93025" strokeWidth={1.6} strokeDasharray="6,4" />
-              <SvgText x={padL + 3} y={syRaw(limMax) - 3} fontSize={7.5} fontWeight="700" fill="#d93025" textAnchor="start">{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</SvgText>
+              <SvgLine x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke={C_MAX} strokeWidth={1.6} strokeDasharray="6,4" />
+              <SvgText x={padL + 3} y={syRaw(limMax) - 3} fontSize={7.5} fontWeight="700" fill={C_MAX} textAnchor="start">{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
         {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi
           ? <React.Fragment>
-              <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke="#2563eb" strokeWidth={1.6} strokeDasharray="6,4" />
-              <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontWeight="700" fill="#2563eb" textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
+              <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke={C_MIN} strokeWidth={1.6} strokeDasharray="6,4" />
+              <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontWeight="700" fill={C_MIN} textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
-        {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill="#1a4f7a" opacity={0.85} />)}
+        {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill={C_POINT} opacity={0.85} />)}
         {/* Tendencia: MISMO ancho y patrón que las líneas de límite */}
-        {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={1.6} strokeDasharray="6,4" /> : null}
+        {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke={C_TREND} strokeWidth={1.6} strokeDasharray="6,4" /> : null}
         <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
       </Svg>
 
-      {/* v100f — Leyenda de LÍNEAS solamente (máx/mín/tendencia), alineada a la
-          izquierda; el punto azul se omite (redundante). Debajo: ecuación y luego
-          estadística, cada una detrás de su flag. */}
+      {/* v100g — Leyenda de LÍNEAS (flag, OFF por defecto), solo texto de color
+          (sin guiones), a la izquierda. Debajo: ecuación y luego estadística,
+          cada una detrás de su propio flag. El recuadro solo aparece si hay algo. */}
+      {(showLegend || (showEq && trendVisible) || showStats) ? (
       <View style={styles.chartLegendBox}>
-        <View style={styles.chartLegendCol}>
-          {limMax != null && Number.isFinite(limMax) ? (
-            <View style={styles.legendItem}><View style={[styles.legendDash, { borderColor: '#d93025' }]} /><Text style={[styles.legendTxt, { color: '#d93025' }]}>{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</Text></View>
-          ) : null}
-          {limMin != null && Number.isFinite(limMin) ? (
-            <View style={styles.legendItem}><View style={[styles.legendDash, { borderColor: '#2563eb' }]} /><Text style={[styles.legendTxt, { color: '#2563eb' }]}>{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</Text></View>
-          ) : null}
-          {trendVisible ? (
-            <View style={styles.legendItem}><View style={[styles.legendDash, { borderColor: '#e37400' }]} /><Text style={[styles.legendTxt, { color: '#e37400' }]}>{t('summary.trendLegend', { kind: trendKind })}</Text></View>
-          ) : null}
-        </View>
+        {showLegend ? (
+          <View style={styles.chartLegendCol}>
+            {limMax != null && Number.isFinite(limMax) ? (
+              <Text style={[styles.legendTxt, { color: C_MAX }]}>{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</Text>
+            ) : null}
+            {limMin != null && Number.isFinite(limMin) ? (
+              <Text style={[styles.legendTxt, { color: C_MIN }]}>{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</Text>
+            ) : null}
+            {trendVisible ? (
+              <Text style={[styles.legendTxt, { color: C_TREND }]}>{t('summary.trendLegend', { kind: trendKind })}</Text>
+            ) : null}
+          </View>
+        ) : null}
         {showEq && trendVisible ? (
           <Text style={styles.chartEq} numberOfLines={2}>{eq}   ·   R² = {r2 != null ? r2.toFixed(3) : '—'}   <Text style={styles.chartEqNote}>{t('summary.daysNote')}</Text></Text>
         ) : null}
@@ -1041,6 +1072,7 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
           </View>
         ) : null}
       </View>
+      ) : null}
     </View>
   );
 }
@@ -1073,10 +1105,8 @@ const styles = StyleSheet.create({
   chartShot: { backgroundColor: Colors.white, borderRadius: Radius.md, paddingTop: 2, paddingBottom: 4 },
   chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
   chartLegendBox: { width: '100%', marginTop: 4, paddingTop: 6, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 5, alignItems: 'flex-start' },
-  chartLegendCol: { alignItems: 'flex-start', gap: 3 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  legendDash: { width: 20, height: 0, borderBottomWidth: 2, borderColor: '#e37400', borderStyle: 'dashed' },
-  legendTxt: { fontSize: 10.5, color: '#64748b', fontWeight: '600' },
+  chartLegendCol: { alignItems: 'flex-start', gap: 2 },
+  legendTxt: { fontSize: 10.5, color: '#64748b', fontWeight: '700' },
   chartEq: { fontSize: 10.5, color: '#334155', textAlign: 'left', fontWeight: '700' },
   chartEqNote: { fontSize: 9, color: '#94a3b8', fontWeight: '400' },
   chartStatsRow: { flexDirection: 'row', justifyContent: 'flex-start', gap: 18, marginTop: 1 },
