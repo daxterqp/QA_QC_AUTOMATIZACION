@@ -29,6 +29,9 @@ export interface SummaryColumn {
   from: string;
   /** Tipo de dato (para alinear/formatear y agregar). */
   kind?: 'number' | 'text' | 'date';
+  /** v43.3 — Decimales de la celda en la ficha (para mostrar la MISMA cantidad).
+   *  (Faltaba en la web: divergencia detectada y corregida en v100l.) */
+  decimals?: number;
   /** Decimales para mostrar (solo number). */
   dec?: number;
 }

@@ -29,6 +29,12 @@ import {
 } from '@utils/summaryTable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildAutoColumns, chartYOptions } from '@utils/summaryColumns';
+import {
+  type Trend, type Join, type ChartCfg,
+  AXIS_GRAY, VGRID_GRAY, C_MAX, C_MIN, C_TREND, C_POINT, DAY_MS, V_DIV,
+  niceYRange, niceTicks, ticksWithStep, polyfit, polyval, equationStr, rSquared,
+  smoothPath, describe, tickDecimals, fmtShortDate,
+} from '@utils/chartMath';
 import { formatComputed } from '@utils/numericProtocol';
 import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Path as SvgPath, Text as SvgText } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
@@ -49,47 +55,7 @@ interface Row {
   status: string | null; values: Record<string, unknown>;
 }
 
-type Trend = 'none' | 'linear' | 'quad' | 'cubic';
-type Join = 'none' | 'linear' | 'smooth'; // v100j — unión de puntos (tipo Excel)
-/** v100d — Config por gráfico (persistida): ejes manuales + fechas verticales.
- *  yMin/yMax null/undefined = automático; xMin/xMax = YYYY-MM-DD o null.
- *  v100e — limMin/limMax = líneas horizontales de límite (punteadas) o null.
- *  v100j — xKey = variable del eje X (null/undefined = Tiempo); join = unión de
- *  puntos; vxMin/vxMax = rango manual del eje X cuando es variable. */
-type ChartCfg = {
-  id: string; yKey: string; trend: Trend;
-  yMin?: number | null; yMax?: number | null;
-  xMin?: string | null; xMax?: string | null;
-  xVertical?: boolean;
-  limMin?: number | null; limMax?: number | null;
-  showEq?: boolean;      // v100f — ecuación de ajuste (default OFF)
-  showStats?: boolean;   // v100f — media/σ/n (default ON; undefined = ON)
-  showLegend?: boolean;  // v100g — leyenda de líneas (default OFF)
-  showVGrid?: boolean;   // v100g — cuadrícula vertical (default ON; undefined = ON)
-  xKey?: string | null;  // v100j — variable del eje X (null = Tiempo)
-  join?: Join;           // v100j — unión de puntos (default 'none')
-  vxMin?: number | null; vxMax?: number | null; // v100j — rango X manual (solo variable)
-};
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-
-/** v100d — Rango Y "bonito": centra los valores TÍPICOS (cuantiles 10-90, los
- *  atípicos no participan del centrado) + padding 25% a cada lado. Overrides
- *  manuales (cfg) mandan. Degenerado (todos iguales) → abre una ventana mínima. */
-function niceYRange(ys: number[], yMinCfg?: number | null, yMaxCfg?: number | null): { lo: number; hi: number } {
-  const sorted = ys.filter(Number.isFinite).sort((a, b) => a - b);
-  let lo = 0, hi = 1;
-  if (sorted.length > 0) {
-    const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
-    lo = q(0.1); hi = q(0.9);
-    if (hi - lo <= 0) { const base = Math.max(Math.abs(hi) * 0.01, 0.5); lo -= base; hi += base; }
-    const pad = (hi - lo) * 0.25;
-    lo -= pad; hi += pad;
-  }
-  if (yMinCfg != null && Number.isFinite(yMinCfg)) lo = yMinCfg;
-  if (yMaxCfg != null && Number.isFinite(yMaxCfg)) hi = yMaxCfg;
-  if (hi <= lo) hi = lo + 1;
-  return { lo, hi };
-}
 
 function num(v: unknown): number {
   if (typeof v === 'number') return v;
@@ -138,87 +104,6 @@ function measure(values: number[], op: MeasureOp): number | null {
 // v43.3 — Altura de fila FIJA para que el encabezado congelado y el cuerpo queden alineados.
 const ROW_H = 46;
 const MGR_H = 50; // alto de cada fila en la gestión de gráficos (para el drag)
-
-// Regresión polinómica (mínimos cuadrados) para la tendencia.
-function polyfit(xs: number[], ys: number[], degree: number): number[] | null {
-  const n = xs.length; if (n <= degree) return null;
-  const m = degree + 1;
-  const A: number[][] = Array.from({ length: m }, () => new Array(m).fill(0));
-  const b = new Array(m).fill(0);
-  for (let i = 0; i < n; i++) {
-    const pw = [1]; for (let p = 1; p < 2 * degree + 1; p++) pw.push(pw[p - 1] * xs[i]);
-    for (let r = 0; r < m; r++) { for (let c = 0; c < m; c++) A[r][c] += pw[r + c]; b[r] += pw[r] * ys[i]; }
-  }
-  for (let col = 0; col < m; col++) {
-    let piv = col; for (let r = col + 1; r < m; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
-    if (Math.abs(A[piv][col]) < 1e-12) return null;
-    [A[col], A[piv]] = [A[piv], A[col]]; [b[col], b[piv]] = [b[piv], b[col]];
-    for (let r = 0; r < m; r++) { if (r === col) continue; const f = A[r][col] / A[col][col]; for (let c = col; c < m; c++) A[r][c] -= f * A[col][c]; b[r] -= f * b[col]; }
-  }
-  return b.map((v, i) => v / A[i][i]);
-}
-const polyval = (coef: number[], x: number) => coef.reduce((acc, c, i) => acc + c * x ** i, 0);
-
-// v100e — Formato compacto de coeficientes (3-4 cifras significativas; notación
-// científica solo para magnitudes extremas) y armado de la ecuación de ajuste.
-function fmtCoef(v: number): string {
-  if (!Number.isFinite(v)) return '0';
-  const abs = Math.abs(v);
-  if (abs !== 0 && (abs < 1e-3 || abs >= 1e5)) return v.toExponential(2);
-  return String(Number(v.toPrecision(4)));
-}
-const SUP = ['', '', '²', '³'];
-/** coef en base i (coef[0] + coef[1]·sym + …); sym = 't' (días) o 'x' (variable). */
-function equationStr(coef: number[], degree: number, sym = 't'): string {
-  let s = '';
-  for (let i = degree; i >= 0; i--) {
-    const c = coef[i]; if (!Number.isFinite(c)) continue;
-    const body = i === 0 ? fmtCoef(Math.abs(c)) : `${fmtCoef(Math.abs(c))}·${sym}${SUP[i] || ''}`;
-    if (s === '') s = (c < 0 ? '−' : '') + body;
-    else s += (c < 0 ? ' − ' : ' + ') + body;
-  }
-  return `y = ${s}`;
-}
-/** v100j — Camino suavizado (spline Catmull-Rom → curvas Bézier) por los puntos
- *  YA ordenados por X, como la "línea suavizada" de Excel. */
-function smoothPath(pts: { x: number; y: number }[]): string {
-  if (pts.length < 2) return '';
-  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-  }
-  return d;
-}
-/** v100h — Paso "bonito" (1 · 2 · 2.5 · 5 · 10 ×10^k) para ~target divisiones. */
-function niceStep(range: number, target: number): number {
-  if (!(range > 0) || target <= 0) return 1;
-  const raw = range / target;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  const mult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
-  return mult * mag;
-}
-/** Marcas redondas DENTRO de [lo,hi] (el rango del eje no se altera). */
-function niceTicks(lo: number, hi: number, target: number): { ticks: number[]; step: number } {
-  const step = niceStep(hi - lo, target);
-  const ticks: number[] = [];
-  const start = Math.ceil(lo / step - 1e-9) * step;
-  for (let v = start, guard = 0; v <= hi + step * 1e-9 && guard < 64; v += step, guard++) {
-    ticks.push(Number(v.toFixed(10)));
-  }
-  return { ticks, step };
-}
-function rSquared(ys: number[], yhat: number[]): number | null {
-  const n = ys.length; if (n < 2) return null;
-  const mean = ys.reduce((a, b) => a + b, 0) / n;
-  const ssTot = ys.reduce((a, b) => a + (b - mean) ** 2, 0);
-  if (ssTot <= 0) return 1;
-  const ssRes = ys.reduce((a, b, i) => a + (b - yhat[i]) ** 2, 0);
-  return 1 - ssRes / ssTot;
-}
 
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
@@ -501,6 +386,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   // v100j — unión de puntos + rango X numérico (cuando el eje X es una variable).
   const [axJoin, setAxJoin] = useState<Join>('none');
   const [axVxMin, setAxVxMin] = useState(''); const [axVxMax, setAxVxMax] = useState('');
+  // v100k — separación manual de divisiones (vacío = automática).
+  const [axYStep, setAxYStep] = useState(''); const [axXStep, setAxXStep] = useState('');
   const openAxisCfg = useCallback((ch: ChartCfg) => {
     setAxisChart(ch);
     setAxYMin(ch.yMin != null ? String(ch.yMin) : '');
@@ -515,6 +402,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setAxJoin(ch.join ?? 'none');
     setAxVxMin(ch.vxMin != null ? String(ch.vxMin) : '');
     setAxVxMax(ch.vxMax != null ? String(ch.vxMax) : '');
+    setAxYStep(ch.yStep != null ? String(ch.yStep) : '');
+    setAxXStep(ch.xStep != null ? String(ch.xStep) : '');
   }, []);
   const saveAxisCfg = useCallback(() => {
     if (!axisChart) return;
@@ -525,9 +414,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       limMin: numOrNull(axLimMin), limMax: numOrNull(axLimMax), trend: axTrend,
       showEq: axShowEq, showStats: axShowStats, showLegend: axShowLegend, showVGrid: axShowVGrid,
       join: axJoin, vxMin: numOrNull(axVxMin), vxMax: numOrNull(axVxMax),
+      yStep: numOrNull(axYStep), xStep: numOrNull(axXStep),
     } : c));
     setAxisChart(null);
-  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid, axJoin, axVxMin, axVxMax]);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid, axJoin, axVxMin, axVxMax, axYStep, axXStep]);
 
   // v100f — ocultar temporalmente los gráficos para ver la tabla completa (móvil).
   const [chartsHidden, setChartsHidden] = useState(false);
@@ -670,9 +560,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                   /* v100d/e — mantener presionado (o la ruedita) abre la config; los íconos
                      van FUERA del área capturable para que no salgan en la imagen compartida. */
                   <View key={ch.id} style={styles.chartCard}>
+                    {/* v100k — íconos APILADOS: configuración arriba, compartir debajo */}
                     <View style={styles.chartIcons}>
-                      <TouchableOpacity onPress={() => shareChart(ch.id)} hitSlop={8} style={styles.chartIconBtn}><Ionicons name="share-social-outline" size={16} color={Colors.textMuted} /></TouchableOpacity>
                       <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8} style={styles.chartIconBtn}><Ionicons name="settings-outline" size={16} color={Colors.textMuted} /></TouchableOpacity>
+                      <TouchableOpacity onPress={() => shareChart(ch.id)} hitSlop={8} style={styles.chartIconBtn}><Ionicons name="share-social-outline" size={16} color={Colors.textMuted} /></TouchableOpacity>
                     </View>
                     <TouchableOpacity activeOpacity={1} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
                       <View ref={(r) => { chartShotRefs.current[ch.id] = r; }} collapsable={false} style={styles.chartShot}>
@@ -685,7 +576,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                               limMin={ch.limMin} limMax={ch.limMax} showEq={!!ch.showEq} showStats={ch.showStats !== false}
                               showLegend={!!ch.showLegend} showVGrid={ch.showVGrid !== false}
                               xLabel={ch.xKey ? yLabelOf(ch.xKey) : undefined} xDecimals={ch.xKey ? decimalsOf(ch.xKey) : undefined}
-                              join={ch.join ?? 'none'} vxMin={ch.vxMin} vxMax={ch.vxMax} />
+                              join={ch.join ?? 'none'} vxMin={ch.vxMin} vxMax={ch.vxMax}
+                              yStep={ch.yStep} xStep={ch.xStep} />
                           : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
                       </View>
                     </TouchableOpacity>
@@ -915,6 +807,19 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
               </View>
             </View>
 
+            {/* v100k — separación entre divisiones (cuadrícula) */}
+            <Text style={styles.filterLabel}>Separación de divisiones (vacío = automática)</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <View style={styles.dateField}>
+                <Text style={styles.dateFieldLabel}>Horizontales (Y)</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axYStep} onChangeText={setAxYStep} placeholder="auto" />
+              </View>
+              <View style={styles.dateField}>
+                <Text style={styles.dateFieldLabel}>{axisChart?.xKey ? 'Verticales (X)' : 'Verticales (días)'}</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axXStep} onChangeText={setAxXStep} placeholder="auto" />
+              </View>
+            </View>
+
             <Text style={styles.filterLabel}>Líneas de límite (horizontales punteadas)</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
               <View style={styles.dateField}>
@@ -1061,15 +966,8 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 // desbordan), tendencia punteada con ecuación de ajuste + R², y panel de
 // estadística (media / desviación / n) debajo. Rango Y centrado en los valores
 // típicos (atípicos recortados al borde); ticks con los decimales de la columna.
-// v100g — Paleta del gráfico. Grises unificados (ejes + cuadrícula horizontal
-// = mismo plomo; cuadrícula vertical más clara). Líneas de referencia con los
-// colores pedidos: máx rojo, mín azul, tendencia verde.
-const AXIS_GRAY = '#c3ccd8';       // ejes + cuadrícula horizontal (mismo plomo)
-const VGRID_GRAY = '#e4e9f0';      // cuadrícula vertical (más clara)
-const C_MAX = '#c90c0c';           // límite máximo
-const C_MIN = '#254ca5';           // límite mínimo
-const C_TREND = '#21de83';         // línea de tendencia
-const C_POINT = '#1a4f7a';         // puntos de ensayo
+// v100l — La paleta y toda la matemática viven en @utils/chartMath (espejo con
+// flow-qaqc-web/lib/chartMath.ts) para que móvil y PC no puedan divergir.
 // v100i — Tipografía de los gráficos. Century Gothic es propietaria (Monotype) y
 // no se puede redistribuir; Poppins es la geométrica libre más cercana (mismas
 // formas circulares y 'a' de un piso). Si algún día se licencia la real, basta
@@ -1087,13 +985,15 @@ function LegendDash({ color }: { color: string }) {
     </Svg>
   );
 }
-function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid, xLabel, xDecimals, join, vxMin, vxMax }: {
+function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid, xLabel, xDecimals, join, vxMin, vxMax, yStep, xStep }: {
   data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
   limMin?: number | null; limMax?: number | null; showEq?: boolean; showStats?: boolean;
   showLegend?: boolean; showVGrid?: boolean;
   // v100j — eje X variable (xLabel presente = variable; ausente = tiempo) + unión de puntos.
   xLabel?: string; xDecimals?: number; join?: Join; vxMin?: number | null; vxMax?: number | null;
+  // v100k — separación manual de divisiones (X en días cuando el eje X es tiempo).
+  yStep?: number | null; xStep?: number | null;
 }) {
   const { t } = useI18n();
   const isVar = xLabel != null; // eje X = variable (no tiempo)
@@ -1125,20 +1025,26 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
   const sy = (y: number) => Math.max(padT, Math.min(H - padB, syRaw(y)));
   // v100h — Densidad de cuadrícula calculada del rango: marcas REDONDAS dentro de
   // [lo,hi] con ~7 divisiones en Y y ~5-6 en X (el rango del eje no cambia).
-  const { ticks: yTicks, step } = niceTicks(lo, hi, 7);
-  const V_DIV = 6; // divisiones verticales (modo tiempo)
+  // v100k — si el usuario fijó una separación, manda esa (con caída a automática).
+  const autoY = niceTicks(lo, hi, 7);
+  const forcedY = ticksWithStep(lo, hi, yStep);
+  const yTicks = forcedY ?? autoY.ticks;
+  const step = forcedY ? (yStep as number) : autoY.step;
   // Decimales de los ticks: los de la columna; si el paso entre marcas es más fino
   // (rango chico), sube la precisión lo justo para que no salgan repetidos.
-  const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
-  const tickDec = Math.max(decimals ?? 0, needed);
-  // v100j — Ticks del eje X en modo variable (marcas redondas + decimales de SU columna).
-  const { ticks: xVarTicks, step: xStep } = niceTicks(xlo, xhi, 5);
-  const xNeeded = xStep > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(xStep)))) : 0;
-  const xTickDec = Math.max(xDecimals ?? 0, xNeeded);
+  const tickDec = tickDecimals(step, decimals);
+  // v100j/k — Ticks del eje X en modo variable (marcas redondas o separación fija).
+  const autoX = niceTicks(xlo, xhi, 5);
+  const forcedX = isVar ? ticksWithStep(xlo, xhi, xStep) : null;
+  const xVarTicks = forcedX ?? autoX.ticks;
+  const xStepEff = forcedX ? (xStep as number) : autoX.step;
+  const xTickDec = tickDecimals(xStepEff, xDecimals);
   // v100e/j — tendencia opcional y punteada. Con X=tiempo la regresión va en DÍAS
   // (t = días desde el 1er ensayo); con X=variable, en las unidades de la variable.
   const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : trend === 'cubic' ? 3 : 0;
-  const DAY = 86400000;
+  const DAY = DAY_MS;
+  // v100k — En modo TIEMPO la separación vertical se pide en DÍAS.
+  const timeGridXs = !isVar ? ticksWithStep(xlo, xhi, xStep != null && xStep > 0 ? xStep * DAY : null) : null;
   const tx2 = isVar ? xs : xs.map(x => (x - minX) / DAY);
   const coef = trend === 'none' ? null : polyfit(tx2, ys, degree);
   const toT = (xv: number) => isVar ? xv : (xv - minX) / DAY;
@@ -1153,11 +1059,9 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
   const joinLinearPts = joinMode === 'linear' && pxy.length > 1 ? pxy.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') : '';
   const joinSmoothD = joinMode === 'smooth' && pxy.length > 1 ? smoothPath(pxy) : '';
   // Estadística descriptiva.
-  const n = ys.length;
-  const mean = n ? ys.reduce((a, b) => a + b, 0) / n : 0;
-  const std = n > 1 ? Math.sqrt(ys.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+  const { n, mean, std } = describe(ys);
   const statDec = Math.max(decimals ?? 0, 2);
-  const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
+  const fmtD = fmtShortDate;
   // Ticks del eje X: variable → marcas redondas; tiempo vertical → todas las
   // fechas (dedup); tiempo horizontal → 3 marcas.
   const xTicks = isVar ? xVarTicks : (xVertical
@@ -1173,15 +1077,16 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
           transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
         {/* v100g/h/j — Cuadrícula VERTICAL (más clara), detrás de todo. Variable →
             alineada a las marcas redondas del eje X; tiempo → divisiones uniformes. */}
-        {showVGrid ? (isVar
-          ? xVarTicks.map((xv, k) => <SvgLine key={`v${k}`} x1={sxRaw(xv)} y1={padT} x2={sxRaw(xv)} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />)
+        {showVGrid ? ((isVar ? xVarTicks : timeGridXs)
+          ? (isVar ? xVarTicks : timeGridXs!).map((xv, k) => <SvgLine key={`v${k}`} x1={sxRaw(xv)} y1={padT} x2={sxRaw(xv)} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />)
           : Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
             <SvgLine key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
           ); })) : null}
-        {/* Marco: eje Y (izq.), eje X (abajo) y v100i — cierre por la DERECHA */}
+        {/* v100i/k — Marco COMPLETO: siempre cerrado por los 4 lados */}
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         <SvgLine x1={W - padR} y1={padT} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
+        <SvgLine x1={padL} y1={padT} x2={W - padR} y2={padT} stroke={AXIS_GRAY} strokeWidth={1} />
         {yTicks.map((yv, i) => { const yy = syRaw(yv); return (
           <React.Fragment key={i}>
             <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={AXIS_GRAY} strokeWidth={1} />
@@ -1243,8 +1148,9 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
                 <View style={{ alignItems: showLegend ? 'flex-end' : 'flex-start' }}>
                   {/* v100j — R² arriba junto a la ecuación; la descripción de la
                       variable debajo, en plomo claro e itálica (solo modo tiempo) */}
-                  <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>
-                    {eq}  ·  R² = {r2 != null ? r2.toFixed(1) : '—'}
+                  {/* v100k — 'R² = 0.0' con espacios DUROS: si no entra, baja completo */}
+                  <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={3}>
+                    {`${eq}  ·  R² = ${r2 != null ? r2.toFixed(1) : '—'}`}
                   </Text>
                   {!isVar ? (
                     <Text style={[styles.chartEqNote, { textAlign: showLegend ? 'right' : 'left' }]}>{t('summary.daysNote')}</Text>
@@ -1282,10 +1188,10 @@ const styles = StyleSheet.create({
   carouselEmpty: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 10, padding: 14, borderRadius: Radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
   carouselEmptyText: { fontSize: 12.5, color: Colors.primary, fontWeight: '700' },
   chartCard: { position: 'relative', backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, width: 344 },
-  chartIcons: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', gap: 2, zIndex: 5 },
+  chartIcons: { position: 'absolute', top: 8, right: 8, flexDirection: 'column', alignItems: 'center', gap: 2, zIndex: 5 },
   chartIconBtn: { padding: 4 },
   chartShot: { backgroundColor: Colors.white, borderRadius: Radius.md, paddingTop: 2, paddingBottom: 4 },
-  chartTitle: { fontSize: 12.5, fontFamily: FONT_BOLD, color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
+  chartTitle: { fontSize: 12.5, fontFamily: FONT_BOLD, color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 30, marginBottom: 8 },
   chartFooter: { width: '100%', flexDirection: 'row', marginTop: 4, paddingTop: 6, paddingHorizontal: 2, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 8 },
   footerLeft: { flex: 1, alignItems: 'flex-start', gap: 3 },
   footerDivider: { width: 1, alignSelf: 'stretch', backgroundColor: '#e4e9f0' },

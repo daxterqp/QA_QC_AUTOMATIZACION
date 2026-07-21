@@ -10,7 +10,7 @@
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Table2, Download, ChevronRight, X as XIcon, Loader2, Plus, LineChart, Settings, Filter, Trash2, GripVertical, HelpCircle, ArrowLeft } from 'lucide-react';
+import { Table2, Download, ChevronRight, X as XIcon, Loader2, Plus, LineChart, Settings, Filter, Trash2, GripVertical, HelpCircle, ArrowLeft, Share2 } from 'lucide-react';
 import PageHeader from '@components/PageHeader';
 import { useProjects } from '@hooks/useProjects';
 import { useSummaryTemplates, useSummaryRows, useTemplateItems, type SummaryRowData } from '@hooks/useSummaryRows';
@@ -18,6 +18,14 @@ import { FIXED_SUMMARY_COLUMNS, dynamicColumnsFromRows, summaryStatus, type Summ
 import { buildAutoColumns, chartYOptions } from '@lib/summaryColumns';
 import { useI18n } from '@lib/i18n';
 import { usePageRefresh } from '@hooks/usePageRefresh';
+// v100l — Espejo EXACTO de src/utils/chartMath.ts: toda la matemática y la paleta
+// de los gráficos es compartida con el móvil para que no puedan divergir.
+import {
+  type Trend, type Join, type ChartCfg,
+  AXIS_GRAY, VGRID_GRAY, C_MAX, C_MIN, C_TREND, C_POINT, DAY_MS, V_DIV,
+  niceYRange, niceTicks, ticksWithStep, polyfit, polyval, equationStr, rSquared,
+  smoothPath, describe, tickDecimals, fmtShortDate,
+} from '@lib/chartMath';
 
 const STATUS_FILTERS = [
   { key: 'APPROVED', labelKey: 'webDash.approved', color: '#1e8e3e' },
@@ -72,46 +80,11 @@ function groupSpans(cols: SummaryColumn[]): { title: string | null; span: number
   return out;
 }
 
-// ── Regresión polinómica (mínimos cuadrados) para la línea de tendencia ──────
-function polyfit(xs: number[], ys: number[], degree: number): number[] | null {
-  const n = xs.length;
-  if (n <= degree) return null;
-  const m = degree + 1;
-  // Matriz normal A (m×m) y vector b (m).
-  const A: number[][] = Array.from({ length: m }, () => new Array(m).fill(0));
-  const b = new Array(m).fill(0);
-  for (let i = 0; i < n; i++) {
-    const powers = [1];
-    for (let p = 1; p < 2 * degree + 1; p++) powers.push(powers[p - 1] * xs[i]);
-    for (let r = 0; r < m; r++) {
-      for (let c = 0; c < m; c++) A[r][c] += powers[r + c];
-      b[r] += powers[r] * ys[i];
-    }
-  }
-  // Eliminación gaussiana.
-  for (let col = 0; col < m; col++) {
-    let piv = col;
-    for (let r = col + 1; r < m; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
-    if (Math.abs(A[piv][col]) < 1e-12) return null;
-    [A[col], A[piv]] = [A[piv], A[col]]; [b[col], b[piv]] = [b[piv], b[col]];
-    for (let r = 0; r < m; r++) {
-      if (r === col) continue;
-      const f = A[r][col] / A[col][col];
-      for (let c = col; c < m; c++) A[r][c] -= f * A[col][c];
-      b[r] -= f * b[col];
-    }
-  }
-  return b.map((v, i) => v / A[i][i]);
-}
-const polyval = (coef: number[], x: number) => coef.reduce((acc, c, i) => acc + c * x ** i, 0);
-
 export default function SummaryTablesPage() {
   const { t } = useI18n();
   return <Suspense fallback={<div className="p-8 text-sm text-muted">{t('common.loading')}</div>}><SummaryTablesInner /></Suspense>;
 }
 
-type Trend = 'linear' | 'quad' | 'cubic';
-type ChartCfg = { id: string; yKey: string; trend: Trend };
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 function SummaryTablesInner() {
@@ -167,6 +140,61 @@ function SummaryTablesInner() {
   // Form "agregar gráfico" (dentro del modal ⚙)
   const [addY, setAddY] = useState('');
   const [addTrend, setAddTrend] = useState<Trend>('linear');
+  // v100l — eje X seleccionable ('' = Tiempo) + unión de puntos (espejo del móvil)
+  const [addX, setAddX] = useState('');
+  const [addJoin, setAddJoin] = useState<Join>('none');
+  // v100l — config por gráfico (equivalente al modal "Ejes del gráfico" del móvil)
+  const [axisChart, setAxisChart] = useState<ChartCfg | null>(null);
+  const [ax, setAx] = useState({
+    yMin: '', yMax: '', xMin: '', xMax: '', vxMin: '', vxMax: '', yStep: '', xStep: '',
+    limMin: '', limMax: '', trend: 'linear' as Trend, join: 'none' as Join,
+    vert: false, showEq: false, showStats: true, showLegend: false, showVGrid: true,
+  });
+  const openAxisCfg = (ch: ChartCfg) => {
+    setAxisChart(ch);
+    const s = (v: number | null | undefined) => v != null ? String(v) : '';
+    setAx({
+      yMin: s(ch.yMin), yMax: s(ch.yMax), xMin: ch.xMin ?? '', xMax: ch.xMax ?? '',
+      vxMin: s(ch.vxMin), vxMax: s(ch.vxMax), yStep: s(ch.yStep), xStep: s(ch.xStep),
+      limMin: s(ch.limMin), limMax: s(ch.limMax), trend: ch.trend ?? 'linear', join: ch.join ?? 'none',
+      vert: !!ch.xVertical, showEq: !!ch.showEq, showStats: ch.showStats !== false,
+      showLegend: !!ch.showLegend, showVGrid: ch.showVGrid !== false,
+    });
+  };
+  const saveAxisCfg = () => {
+    if (!axisChart) return;
+    const nOrNull = (v: string) => { const x = Number(String(v).trim().replace(',', '.')); return v.trim() !== '' && Number.isFinite(x) ? x : null; };
+    setCharts(prev => prev.map(c => c.id === axisChart.id ? {
+      ...c, yMin: nOrNull(ax.yMin), yMax: nOrNull(ax.yMax), xMin: ax.xMin || null, xMax: ax.xMax || null,
+      vxMin: nOrNull(ax.vxMin), vxMax: nOrNull(ax.vxMax), yStep: nOrNull(ax.yStep), xStep: nOrNull(ax.xStep),
+      limMin: nOrNull(ax.limMin), limMax: nOrNull(ax.limMax), trend: ax.trend, join: ax.join,
+      xVertical: ax.vert, showEq: ax.showEq, showStats: ax.showStats, showLegend: ax.showLegend, showVGrid: ax.showVGrid,
+    } : c));
+    setAxisChart(null);
+  };
+  // v100l — Compartir/descargar el gráfico como PNG (equivalente al captureRef del móvil).
+  const shareChart = async (chartId: string, title: string) => {
+    const svg = document.getElementById(`chart-svg-${chartId}`) as SVGSVGElement | null;
+    if (!svg) return;
+    const xml = new XMLSerializer().serializeToString(svg);
+    const img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+    await new Promise(res => { img.onload = res; img.onerror = res; });
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * scale; canvas.height = img.height * scale;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${title.replace(/[^\w\s-]/g, '').trim() || 'grafico'}.png`; a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
   // Drag-reorder (HTML5)
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
@@ -214,11 +242,21 @@ function SummaryTablesInner() {
     URL.revokeObjectURL(url);
   }
 
-  // Puntos de un gráfico (X = fecha → tiempo; Y = columna elegida).
-  const buildPts = (yKey: string) => filtered
-    .map(r => ({ x: r.ensayo_date ? new Date(r.ensayo_date + 'T12:00:00').getTime() : NaN, y: num(r.values_json?.[yKey]), code: r.protocol_code ?? '' }))
-    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-    .sort((a, b) => a.x - b.x);
+  // Puntos de un gráfico. v100l — el eje X puede ser el TIEMPO (default) o
+  // cualquier variable numérica (ch.xKey); siempre ordenados por X para que la
+  // unión de puntos tenga sentido (espejo del móvil).
+  const buildPts = (ch: ChartCfg) => {
+    const xk = ch.xKey || null;
+    return filtered
+      .filter(r => xk ? true : (!ch.xMin || (r.ensayo_date ?? '') >= ch.xMin) && (!ch.xMax || (r.ensayo_date ?? '') <= ch.xMax))
+      .map(r => ({
+        x: xk ? num(r.values_json?.[xk]) : (r.ensayo_date ? new Date(r.ensayo_date + 'T12:00:00').getTime() : NaN),
+        y: num(r.values_json?.[ch.yKey]), code: r.protocol_code ?? '',
+      }))
+      .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+      .sort((a, b) => a.x - b.x);
+  };
+  const decimalsOf = (key: string) => dataCols.find(c => c.key === key)?.decimals;
 
   // Reordenar gráficos al soltar (drag HTML5).
   const dropChart = (to: number) => {
@@ -289,11 +327,27 @@ function SummaryTablesInner() {
             ) : (
               <div className="flex gap-4 overflow-x-auto pb-2 snap-x">
                 {charts.map(ch => {
-                  const pts = buildPts(ch.yKey);
+                  const pts = buildPts(ch);
+                  const title = ch.xKey
+                    ? `${yLabelOf(ch.yKey)} vs ${yLabelOf(ch.xKey)}`
+                    : t('webDash.scatterVsTime', { param: yLabelOf(ch.yKey) });
                   return (
-                    <div key={ch.id} className="bg-white rounded-xl border border-border p-4 shrink-0 w-[760px] max-w-[90vw] snap-start">
-                      <h3 className="text-sm font-bold text-navy mb-2">{t('webDash.scatterVsTime', { param: yLabelOf(ch.yKey) })}</h3>
-                      <ScatterChart data={pts} yLabel={yLabelOf(ch.yKey)} trend={ch.trend} />
+                    <div key={ch.id} className="relative bg-white rounded-xl border border-border p-4 shrink-0 w-[760px] max-w-[90vw] snap-start">
+                      {/* v100l — íconos APILADOS: configuración arriba, compartir debajo */}
+                      <div className="absolute top-3 right-3 flex flex-col items-center gap-1 z-10">
+                        <button onClick={() => openAxisCfg(ch)} title={t('webDash.chartAxesTitle')} className="p-1 text-muted hover:text-primary transition"><Settings size={15} /></button>
+                        <button onClick={() => shareChart(ch.id, title)} title={t('webDash.shareChart')} className="p-1 text-muted hover:text-primary transition"><Share2 size={15} /></button>
+                      </div>
+                      <h3 className="text-sm font-bold text-navy mb-2 text-center underline underline-offset-4 px-10 chart-font">{title}</h3>
+                      <div id={`chart-svg-wrap-${ch.id}`}>
+                        <ScatterChart data={pts} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
+                          decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
+                          limMin={ch.limMin} limMax={ch.limMax} showEq={!!ch.showEq} showStats={ch.showStats !== false}
+                          showLegend={!!ch.showLegend} showVGrid={ch.showVGrid !== false}
+                          xLabel={ch.xKey ? yLabelOf(ch.xKey) : undefined} xDecimals={ch.xKey ? decimalsOf(ch.xKey) : undefined}
+                          join={ch.join ?? 'none'} vxMin={ch.vxMin} vxMax={ch.vxMax}
+                          yStep={ch.yStep} xStep={ch.xStep} svgId={`chart-svg-${ch.id}`} />
+                      </div>
                     </div>
                   );
                 })}
@@ -419,7 +473,7 @@ function SummaryTablesInner() {
                       <div key={ch.id} draggable onDragStart={() => setDragIdx(i)} onDragOver={e => e.preventDefault()} onDrop={() => dropChart(i)}
                         className={`flex items-center gap-2 px-2 py-2 rounded-lg border bg-surface/60 ${dragIdx === i ? 'border-primary opacity-60' : 'border-border'}`}>
                         <GripVertical size={16} className="text-gray-400 cursor-grab shrink-0" />
-                        <span className="flex-1 min-w-0 text-sm text-textPrimary truncate">{yLabelOf(ch.yKey)} <span className="text-[10px] text-gray-400">· {ch.trend === 'linear' ? t('webDash.trendLinear') : ch.trend === 'quad' ? t('webDash.trendQuad') : t('webDash.trendCubic')}</span></span>
+                        <span className="flex-1 min-w-0 text-sm text-textPrimary truncate">{yLabelOf(ch.yKey)}{ch.xKey ? ` vs ${yLabelOf(ch.xKey)}` : ''} <span className="text-[10px] text-gray-400">· {ch.trend === 'none' ? t('webDash.trendNone') : ch.trend === 'linear' ? t('webDash.trendLinear') : ch.trend === 'quad' ? t('webDash.trendQuad') : t('webDash.trendCubic')}</span></span>
                         <button onClick={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} title={t('webDash.deleteChartTitle')} className="text-gray-400 hover:text-danger shrink-0"><Trash2 size={15} /></button>
                       </div>
                     ))}
@@ -431,8 +485,12 @@ function SummaryTablesInner() {
             {/* AGREGAR (igual que el de gráficos) */}
             <div className="border-t border-divider pt-3 flex flex-col gap-2.5">
               <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.addChart')}</p>
+              {/* v100l — el eje X ya no es fijo: Tiempo (default) o cualquier variable */}
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisX')}</span>
-                <input disabled value={t('webDash.axisXValue')} className="border border-border rounded px-2 py-1.5 text-sm bg-surface text-gray-500" /></label>
+                <select value={addX} onChange={e => setAddX(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="">{t('webDash.axisXValue')}</option>
+                  {yOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.axisYParam')}</span>
                 <select value={addY} onChange={e => setAddY(e.target.value)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
                   <option value="" disabled>{t('webDash.chooseColumn')}</option>
@@ -440,11 +498,108 @@ function SummaryTablesInner() {
                 </select></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.trendLine')}</span>
                 <select value={addTrend} onChange={e => setAddTrend(e.target.value as Trend)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="none">{t('webDash.trendNone')}</option>
                   <option value="linear">{t('webDash.trendLinear')}</option><option value="quad">{t('webDash.trendQuad')}</option><option value="cubic">{t('webDash.trendCubic')}</option>
                 </select></label>
-              <button onClick={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend }]); setAddY(''); setAddTrend('linear'); } }}
+              {/* v100l — unión de puntos tipo Excel */}
+              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.joinLine')}</span>
+                <select value={addJoin} onChange={e => setAddJoin(e.target.value as Join)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="none">{t('webDash.joinNone')}</option><option value="linear">{t('webDash.joinLinear')}</option><option value="smooth">{t('webDash.joinSmooth')}</option>
+                </select></label>
+              <button onClick={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
                 disabled={!addY || yOptions.length === 0}
                 className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40"><Plus size={14} /> {t('webDash.addChart')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* v100l — Modal: EJES del gráfico (espejo del móvil). Se persiste por gráfico. */}
+      {axisChart && (
+        <div className="fixed inset-0 z-50 bg-navy/50 flex items-center justify-center p-4" onClick={() => setAxisChart(null)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-navy">{t('webDash.chartAxesTitle')}</h3>
+              <button onClick={() => setAxisChart(null)} className="text-gray-400 hover:text-danger"><XIcon size={18} /></button>
+            </div>
+            <p className="text-xs text-muted -mt-2">{yLabelOf(axisChart.yKey)}{axisChart.xKey ? ` vs ${yLabelOf(axisChart.xKey)}` : ''}</p>
+
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.axisYRange')}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.min')}</span>
+                <input inputMode="decimal" value={ax.yMin} onChange={e => setAx(a => ({ ...a, yMin: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.max')}</span>
+                <input inputMode="decimal" value={ax.yMax} onChange={e => setAx(a => ({ ...a, yMax: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+            </div>
+
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.gridSpacing')}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.gridH')}</span>
+                <input inputMode="decimal" value={ax.yStep} onChange={e => setAx(a => ({ ...a, yStep: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{axisChart.xKey ? t('webDash.gridV') : t('webDash.gridVDays')}</span>
+                <input inputMode="decimal" value={ax.xStep} onChange={e => setAx(a => ({ ...a, xStep: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+            </div>
+
+            <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.limitLines')}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase" style={{ color: C_MIN }}>{t('webDash.limitMin')}</span>
+                <input inputMode="decimal" value={ax.limMin} onChange={e => setAx(a => ({ ...a, limMin: e.target.value }))} placeholder={t('webDash.none')} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+              <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase" style={{ color: C_MAX }}>{t('webDash.limitMax')}</span>
+                <input inputMode="decimal" value={ax.limMax} onChange={e => setAx(a => ({ ...a, limMax: e.target.value }))} placeholder={t('webDash.none')} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+            </div>
+
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.trendLine')}</span>
+              <select value={ax.trend} onChange={e => setAx(a => ({ ...a, trend: e.target.value as Trend }))} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                <option value="none">{t('webDash.trendNone')}</option>
+                <option value="linear">{t('webDash.trendLinear')}</option><option value="quad">{t('webDash.trendQuad')}</option><option value="cubic">{t('webDash.trendCubic')}</option>
+              </select></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-gray-600">{t('webDash.joinLine')}</span>
+              <select value={ax.join} onChange={e => setAx(a => ({ ...a, join: e.target.value as Join }))} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
+                <option value="none">{t('webDash.joinNone')}</option><option value="linear">{t('webDash.joinLinear')}</option><option value="smooth">{t('webDash.joinSmooth')}</option>
+              </select></label>
+
+            <label className="flex items-center justify-between gap-2 text-sm text-textPrimary">
+              <span>{t('webDash.showLegend')}</span>
+              <input type="checkbox" checked={ax.showLegend} onChange={e => setAx(a => ({ ...a, showLegend: e.target.checked }))} className="w-4 h-4 accent-primary" /></label>
+            <label className="flex items-center justify-between gap-2 text-sm text-textPrimary">
+              <span>{t('webDash.showVGrid')}</span>
+              <input type="checkbox" checked={ax.showVGrid} onChange={e => setAx(a => ({ ...a, showVGrid: e.target.checked }))} className="w-4 h-4 accent-primary" /></label>
+            <label className="flex items-center justify-between gap-2 text-sm text-textPrimary">
+              <span>{t('webDash.showEq')}</span>
+              <input type="checkbox" disabled={ax.trend === 'none'} checked={ax.showEq} onChange={e => setAx(a => ({ ...a, showEq: e.target.checked }))} className="w-4 h-4 accent-primary disabled:opacity-40" /></label>
+            <label className="flex items-center justify-between gap-2 text-sm text-textPrimary">
+              <span>{t('webDash.showStats')}</span>
+              <input type="checkbox" checked={ax.showStats} onChange={e => setAx(a => ({ ...a, showStats: e.target.checked }))} className="w-4 h-4 accent-primary" /></label>
+
+            {!axisChart.xKey ? (
+              <>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.axisXDates')}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.dateFrom')}</span>
+                    <input type="date" value={ax.xMin} onChange={e => setAx(a => ({ ...a, xMin: e.target.value }))} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+                  <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.dateTo')}</span>
+                    <input type="date" value={ax.xMax} onChange={e => setAx(a => ({ ...a, xMax: e.target.value }))} className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t('webDash.axisXRange')}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.min')}</span>
+                    <input inputMode="decimal" value={ax.vxMin} onChange={e => setAx(a => ({ ...a, vxMin: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+                  <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase text-gray-400">{t('webDash.max')}</span>
+                    <input inputMode="decimal" value={ax.vxMax} onChange={e => setAx(a => ({ ...a, vxMax: e.target.value }))} placeholder="auto" className="border border-border rounded px-2 py-1.5 text-sm" /></label>
+                </div>
+              </>
+            )}
+
+            <label className="flex items-center justify-between gap-2 text-sm text-textPrimary">
+              <span>{axisChart.xKey ? t('webDash.xLabelsVertical') : t('webDash.xDatesVertical')}</span>
+              <input type="checkbox" checked={ax.vert} onChange={e => setAx(a => ({ ...a, vert: e.target.checked }))} className="w-4 h-4 accent-primary" /></label>
+
+            <div className="flex items-center justify-between border-t border-divider pt-3">
+              <button onClick={() => setAxisChart(null)} className="text-xs font-bold text-gray-500 hover:text-danger">{t('common.cancel')}</button>
+              <button onClick={saveAxisCfg} className="px-4 py-2 text-xs font-bold rounded-lg bg-primary text-white hover:bg-primary/90">{t('common.save')}</button>
             </div>
           </div>
         </div>
@@ -453,51 +608,160 @@ function SummaryTablesInner() {
   );
 }
 
-// ── Gráfico de dispersión SVG con línea de tendencia ─────────────────────────
-function ScatterChart({ data, yLabel, trend }: { data: { x: number; y: number; code: string }[]; yLabel: string; trend: 'linear' | 'quad' | 'cubic' }) {
+// ── Gráfico de dispersión SVG ────────────────────────────────────────────────
+// v100l — ESPEJO VISUAL del móvil (ScatterChartRN en SummaryTablesScreen.tsx):
+// marco cerrado por los 4 lados, cuadrícula con densidad calculada (o separación
+// fija), título del eje Y rotado, límites máx/mín punteados con etiqueta al
+// arranque, tendencia punteada + ecuación/R², unión de puntos (lineal/suavizada),
+// eje X por tiempo o por variable, y pie en dos columnas (leyenda | stats+ecuación).
+// La matemática y la paleta vienen de @lib/chartMath (espejo con el móvil).
+function ScatterChart({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid, xLabel, xDecimals, join, vxMin, vxMax, yStep, xStep, svgId }: {
+  data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
+  decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
+  limMin?: number | null; limMax?: number | null; showEq?: boolean; showStats?: boolean;
+  showLegend?: boolean; showVGrid?: boolean;
+  xLabel?: string; xDecimals?: number; join?: Join; vxMin?: number | null; vxMax?: number | null;
+  yStep?: number | null; xStep?: number | null; svgId?: string;
+}) {
   const { t } = useI18n();
-  const W = 720, H = 320, padL = 56, padR = 16, padT = 12, padB = 48;
   if (data.length === 0) return <p className="text-sm text-muted">{t('webDash.noDataToPlot')}</p>;
+  const isVar = xLabel != null;
+  const W = 720, H = 340, padL = 68, padR = 22, padT = 16, padB = xVertical ? 78 : 52;
   const xs = data.map(d => d.x), ys = data.map(d => d.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) || minX + 1;
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const dx = maxX - minX || 1, dy = (maxY - minY) || 1;
-  const sx = (x: number) => padL + ((x - minX) / dx) * (W - padL - padR);
-  const sy = (y: number) => H - padB - ((y - minY) / dy) * (H - padT - padB);
-  const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : 3;
-  // Normalizamos X a [0,1] para estabilidad numérica del ajuste.
-  const nx = xs.map(x => (x - minX) / dx);
-  const coef = polyfit(nx, ys, degree);
+  // Rango X: tiempo = extensión de los datos; variable = datos + 6% de aire,
+  // con overrides manuales (vxMin/vxMax) que mandan.
+  let xlo = minX, xhi = maxX;
+  if (isVar) {
+    const padX = (maxX - minX || Math.max(Math.abs(maxX) * 0.01, 0.5)) * 0.06;
+    xlo = minX - padX; xhi = maxX + padX;
+    if (vxMin != null && Number.isFinite(vxMin)) xlo = vxMin;
+    if (vxMax != null && Number.isFinite(vxMax)) xhi = vxMax;
+    if (xhi <= xlo) xhi = xlo + 1;
+  }
+  const dx = xhi - xlo || 1;
+  // Rango Y: los límites configurados deben quedar VISIBLES.
+  let { lo, hi } = niceYRange(ys, yMin, yMax);
+  if (yMin == null && limMin != null && Number.isFinite(limMin)) lo = Math.min(lo, limMin);
+  if (yMax == null && limMax != null && Number.isFinite(limMax)) hi = Math.max(hi, limMax);
+  if (hi <= lo) hi = lo + 1;
+  const dy = hi - lo;
+  const sxRaw = (x: number) => padL + ((x - xlo) / dx) * (W - padL - padR);
+  const syRaw = (y: number) => H - padB - ((y - lo) / dy) * (H - padT - padB);
+  const sx = (x: number) => Math.max(padL, Math.min(W - padR, sxRaw(x)));
+  const sy = (y: number) => Math.max(padT, Math.min(H - padB, syRaw(y)));
+  // Cuadrícula: densidad calculada, o separación fija si el usuario la fijó.
+  const autoY = niceTicks(lo, hi, 7);
+  const forcedY = ticksWithStep(lo, hi, yStep);
+  const yTicks = forcedY ?? autoY.ticks;
+  const step = forcedY ? (yStep as number) : autoY.step;
+  const tickDec = tickDecimals(step, decimals);
+  const autoX = niceTicks(xlo, xhi, 5);
+  const forcedX = isVar ? ticksWithStep(xlo, xhi, xStep) : null;
+  const xVarTicks = forcedX ?? autoX.ticks;
+  const xStepEff = forcedX ? (xStep as number) : autoX.step;
+  const xTickDec = tickDecimals(xStepEff, xDecimals);
+  // Tendencia: base DÍAS con X=tiempo, unidades de la variable con X=variable.
+  const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : trend === 'cubic' ? 3 : 0;
+  const timeGridXs = !isVar ? ticksWithStep(xlo, xhi, xStep != null && xStep > 0 ? xStep * DAY_MS : null) : null;
+  const tx2 = isVar ? xs : xs.map(x => (x - minX) / DAY_MS);
+  const coef = trend === 'none' ? null : polyfit(tx2, ys, degree);
+  const toT = (xv: number) => isVar ? xv : (xv - minX) / DAY_MS;
   const trendPts: string[] = [];
-  if (coef) for (let i = 0; i <= 60; i++) { const t = i / 60; const xv = minX + t * dx; const yv = polyval(coef, t); trendPts.push(`${sx(xv).toFixed(1)},${sy(yv).toFixed(1)}`); }
-  const fmtDate = (t: number) => new Date(t).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
-  const yticks = 5;
+  if (coef) for (let i = 0; i <= 60; i++) { const tt = i / 60; const xv = xlo + tt * dx; trendPts.push(`${sx(xv).toFixed(1)},${sy(polyval(coef, toT(xv))).toFixed(1)}`); }
+  const trendVisible = !!coef && trend !== 'none';
+  const r2 = coef ? rSquared(ys, tx2.map(v => polyval(coef, v))) : null;
+  const eq = coef ? equationStr(coef, degree, isVar ? 'x' : 't') : '';
+  // Unión de puntos (tipo Excel).
+  const joinMode: Join = join ?? 'none';
+  const pxy = data.map(d => ({ x: sx(d.x), y: sy(d.y) }));
+  const joinLinearPts = joinMode === 'linear' && pxy.length > 1 ? pxy.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') : '';
+  const joinSmoothD = joinMode === 'smooth' && pxy.length > 1 ? smoothPath(pxy) : '';
+  const { n, mean, std } = describe(ys);
+  const statDec = Math.max(decimals ?? 0, 2);
+  const xTicks = isVar ? xVarTicks : (xVertical
+    ? Array.from(new Set(xs)).sort((a, b) => a - b)
+    : [minX, (minX + maxX) / 2, maxX]);
+  const fmtX = (xv: number) => isVar ? xv.toFixed(xTickDec) : fmtShortDate(xv);
+  const trendKind = trend === 'linear' ? t('webDash.trendKindLinear') : trend === 'quad' ? t('webDash.trendKindQuad') : trend === 'cubic' ? t('webDash.trendKindCubic') : '';
+  const hasFooter = showLegend || (showEq && trendVisible) || showStats;
   return (
     <div className="overflow-x-auto">
-      <svg width={W} height={H} className="bg-white">
-        {/* ejes */}
-        <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#cbd5e1" />
-        <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#cbd5e1" />
-        {/* grid + labels Y */}
-        {Array.from({ length: yticks + 1 }, (_, i) => { const yv = minY + (dy * i) / yticks; const yy = sy(yv); return (
-          <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="#eef2f7" />
-            <text x={padL - 6} y={yy + 3} textAnchor="end" fontSize="9" fill="#64748b">{Math.abs(yv) >= 100 ? yv.toFixed(0) : yv.toFixed(2)}</text></g>); })}
-        {/* labels X (primeras/últimas) */}
-        {[minX, (minX + maxX) / 2, maxX].map((xv, i) => (
-          <text key={i} x={sx(xv)} y={H - padB + 16} textAnchor="middle" fontSize="9" fill="#64748b">{fmtDate(xv)}</text>))}
-        {/* puntos */}
-        {data.map((d, i) => <circle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3.5} fill="#1a4f7a" opacity={0.8}><title>{d.code}: {d.y}</title></circle>)}
-        {/* tendencia */}
-        {coef && <polyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={2} />}
-        {/* títulos de ejes */}
-        <text x={(W) / 2} y={H - 6} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1a1a2e">{t('webDash.axisTimeDate')}</text>
-        <text x={14} y={H / 2} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1a1a2e" transform={`rotate(-90 14 ${H / 2})`}>{yLabel}</text>
+      <svg id={svgId} width={W} height={H} className="bg-white chart-font">
+        {/* Título del eje Y (vertical) */}
+        <text x={16} y={(padT + H - padB) / 2} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1a1a2e"
+          transform={`rotate(-90 16 ${(padT + H - padB) / 2})`}>{yLabel}</text>
+        {/* Cuadrícula VERTICAL (más clara), detrás de todo */}
+        {showVGrid && ((isVar ? xVarTicks : timeGridXs)
+          ? (isVar ? xVarTicks : timeGridXs!).map((xv, k) => <line key={`v${k}`} x1={sxRaw(xv)} y1={padT} x2={sxRaw(xv)} y2={H - padB} stroke={VGRID_GRAY} />)
+          : Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
+            <line key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} />); }))}
+        {/* Marco COMPLETO: siempre cerrado por los 4 lados */}
+        <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} />
+        <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} />
+        <line x1={W - padR} y1={padT} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} />
+        <line x1={padL} y1={padT} x2={W - padR} y2={padT} stroke={AXIS_GRAY} />
+        {/* Cuadrícula horizontal + marcas Y */}
+        {yTicks.map((yv, i) => { const yy = syRaw(yv); return (
+          <g key={i}><line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={AXIS_GRAY} />
+            <text x={padL - 6} y={yy + 3.5} textAnchor="end" fontSize="10" fill="#64748b">{yv.toFixed(tickDec)}</text></g>); })}
+        {/* Marcas X */}
+        {xTicks.map((xv, i) => xVertical
+          ? <text key={i} x={sxRaw(xv)} y={H - padB + 8} textAnchor="end" fontSize="9.5" fill="#64748b" transform={`rotate(-90 ${sxRaw(xv)} ${H - padB + 8})`} dy={3.5}>{fmtX(xv)}</text>
+          : <text key={i} x={sxRaw(xv)} y={H - padB + 18} textAnchor="middle" fontSize="10" fill="#64748b">{fmtX(xv)}</text>)}
+        {/* Líneas de límite (punteadas), etiqueta al ARRANQUE para no desbordar */}
+        {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi && (
+          <g><line x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke={C_MAX} strokeWidth={1.6} strokeDasharray="6,4" />
+            <text x={padL + 4} y={syRaw(limMax) - 4} fontSize="9.5" fontWeight="700" fill={C_MAX}>{t('webDash.limMaxShort')} {limMax.toFixed(tickDec)}</text></g>)}
+        {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi && (
+          <g><line x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke={C_MIN} strokeWidth={1.6} strokeDasharray="6,4" />
+            <text x={padL + 4} y={syRaw(limMin) - 4} fontSize="9.5" fontWeight="700" fill={C_MIN}>{t('webDash.limMinShort')} {limMin.toFixed(tickDec)}</text></g>)}
+        {/* Unión de puntos (debajo de los puntos) */}
+        {joinLinearPts && <polyline points={joinLinearPts} fill="none" stroke={C_POINT} strokeWidth={1.8} />}
+        {joinSmoothD && <path d={joinSmoothD} fill="none" stroke={C_POINT} strokeWidth={1.8} />}
+        {data.map((d, i) => <circle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3.5} fill={C_POINT} opacity={0.85}><title>{d.code}: {d.y}</title></circle>)}
+        {/* Tendencia: MISMO ancho y patrón que las líneas de límite */}
+        {trendVisible && <polyline points={trendPts.join(' ')} fill="none" stroke={C_TREND} strokeWidth={1.6} strokeDasharray="6,4" />}
+        <text x={(padL + W - padR) / 2} y={H - 6} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1a1a2e">{isVar ? xLabel : t('webDash.axisTimeDate')}</text>
       </svg>
-      {/* leyenda */}
-      <div className="flex items-center gap-4 justify-center mt-1 text-[11px] text-gray-600">
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#1a4f7a] inline-block" /> {t('webDash.legendTests')}</span>
-        <span className="flex items-center gap-1"><span className="w-4 h-0.5 bg-[#e37400] inline-block" /> {trend === 'linear' ? t('webDash.legendTrendLinear') : trend === 'quad' ? t('webDash.legendTrendQuad') : t('webDash.legendTrendCubic')}</span>
-      </div>
+
+      {/* Pie en DOS columnas: izquierda la leyenda, derecha stats + ecuación */}
+      {hasFooter && (
+        <div className="flex gap-3 mt-1 pt-1.5 border-t border-[#eef2f7] chart-font" style={{ width: W }}>
+          {showLegend && (
+            <div className="flex-1 flex flex-col items-start gap-0.5">
+              {limMax != null && Number.isFinite(limMax) && (
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: C_MAX }}><LegendDash color={C_MAX} /> {t('webDash.limMaxShort')} {limMax.toFixed(tickDec)}</span>)}
+              {limMin != null && Number.isFinite(limMin) && (
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: C_MIN }}><LegendDash color={C_MIN} /> {t('webDash.limMinShort')} {limMin.toFixed(tickDec)}</span>)}
+              {trendVisible && (
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: C_TREND }}><LegendDash color={C_TREND} /> {t('webDash.trendLegend', { kind: trendKind })}</span>)}
+            </div>
+          )}
+          {showLegend && (showStats || (showEq && trendVisible)) && <div className="w-px self-stretch bg-[#e4e9f0]" />}
+          {(showStats || (showEq && trendVisible)) && (
+            <div className={`flex-[1.2] flex flex-col gap-0.5 ${showLegend ? 'items-end text-right' : 'items-start text-left'}`}>
+              {showStats && (
+                <div className="flex flex-wrap gap-3 text-[11.5px] text-[#334155]">
+                  <span>n = {n}</span><span>x&#772; = {mean.toFixed(statDec)}</span><span>&#963; = {std.toFixed(statDec)}</span>
+                </div>
+              )}
+              {showEq && trendVisible && (
+                <>
+                  {/* 'R² = 0.0' con espacios DUROS: si no entra, baja completo */}
+                  <span className="text-[11px] text-[#334155]">{`${eq}  ·  R² = ${r2 != null ? r2.toFixed(1) : '—'}`}</span>
+                  {!isVar && <span className="text-[10px] italic text-[#a8b3c2]">{t('webDash.daysNote')}</span>}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Muestra de línea punteada para la leyenda: EXACTAMENTE 3 tramos (espejo del móvil). */
+function LegendDash({ color }: { color: string }) {
+  return <svg width={21} height={4}><line x1={0} y1={2} x2={21} y2={2} stroke={color} strokeWidth={1.8} strokeDasharray="5,3" /></svg>;
 }

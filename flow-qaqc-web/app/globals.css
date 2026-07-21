@@ -156,3 +156,9 @@ button:not(:disabled):active { transform: scale(0.98); }
   /* Excepción: el spinner de "cargando" ES información de estado. */
   .animate-spin { animation: spin 1.5s linear infinite !important; }
 }
+
+/* v100l — Tipografía geométrica de los gráficos del Dashboard (espejo del móvil,
+   que usa Poppins como sustituta libre de Century Gothic). */
+.chart-font, .chart-font text, .chart-font span, .chart-font div {
+  font-family: var(--font-chart), 'Poppins', system-ui, sans-serif;
+}
