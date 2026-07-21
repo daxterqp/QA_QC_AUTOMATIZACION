@@ -30,9 +30,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildAutoColumns, chartYOptions } from '@utils/summaryColumns';
 import { formatComputed } from '@utils/numericProtocol';
-import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Text as SvgText } from 'react-native-svg';
+import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Path as SvgPath, Text as SvgText } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
-import { useFonts, Poppins_400Regular, Poppins_500Medium, Poppins_700Bold } from '@expo-google-fonts/poppins';
+import { useFonts, Poppins_400Regular, Poppins_400Regular_Italic, Poppins_500Medium, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useI18n, tx } from '@i18n/index';
@@ -50,9 +50,12 @@ interface Row {
 }
 
 type Trend = 'none' | 'linear' | 'quad' | 'cubic';
+type Join = 'none' | 'linear' | 'smooth'; // v100j — unión de puntos (tipo Excel)
 /** v100d — Config por gráfico (persistida): ejes manuales + fechas verticales.
  *  yMin/yMax null/undefined = automático; xMin/xMax = YYYY-MM-DD o null.
- *  v100e — limMin/limMax = líneas horizontales de límite (punteadas) o null. */
+ *  v100e — limMin/limMax = líneas horizontales de límite (punteadas) o null.
+ *  v100j — xKey = variable del eje X (null/undefined = Tiempo); join = unión de
+ *  puntos; vxMin/vxMax = rango manual del eje X cuando es variable. */
 type ChartCfg = {
   id: string; yKey: string; trend: Trend;
   yMin?: number | null; yMax?: number | null;
@@ -63,6 +66,9 @@ type ChartCfg = {
   showStats?: boolean;   // v100f — media/σ/n (default ON; undefined = ON)
   showLegend?: boolean;  // v100g — leyenda de líneas (default OFF)
   showVGrid?: boolean;   // v100g — cuadrícula vertical (default ON; undefined = ON)
+  xKey?: string | null;  // v100j — variable del eje X (null = Tiempo)
+  join?: Join;           // v100j — unión de puntos (default 'none')
+  vxMin?: number | null; vxMax?: number | null; // v100j — rango X manual (solo variable)
 };
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
@@ -162,16 +168,29 @@ function fmtCoef(v: number): string {
   return String(Number(v.toPrecision(4)));
 }
 const SUP = ['', '', '²', '³'];
-/** coef en base i (coef[0] + coef[1]·t + …); t = días desde el primer ensayo. */
-function equationStr(coef: number[], degree: number): string {
+/** coef en base i (coef[0] + coef[1]·sym + …); sym = 't' (días) o 'x' (variable). */
+function equationStr(coef: number[], degree: number, sym = 't'): string {
   let s = '';
   for (let i = degree; i >= 0; i--) {
     const c = coef[i]; if (!Number.isFinite(c)) continue;
-    const body = i === 0 ? fmtCoef(Math.abs(c)) : `${fmtCoef(Math.abs(c))}·t${SUP[i] || ''}`;
+    const body = i === 0 ? fmtCoef(Math.abs(c)) : `${fmtCoef(Math.abs(c))}·${sym}${SUP[i] || ''}`;
     if (s === '') s = (c < 0 ? '−' : '') + body;
     else s += (c < 0 ? ' − ' : ' + ') + body;
   }
   return `y = ${s}`;
+}
+/** v100j — Camino suavizado (spline Catmull-Rom → curvas Bézier) por los puntos
+ *  YA ordenados por X, como la "línea suavizada" de Excel. */
+function smoothPath(pts: { x: number; y: number }[]): string {
+  if (pts.length < 2) return '';
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
 }
 /** v100h — Paso "bonito" (1 · 2 · 2.5 · 5 · 10 ×10^k) para ~target divisiones. */
 function niceStep(range: number, target: number): number {
@@ -204,7 +223,7 @@ function rSquared(ys: number[], yhat: number[]): number | null {
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
   // v100i — tipografía geométrica de los gráficos (sustituta libre de Century Gothic).
-  useFonts({ Poppins_400Regular, Poppins_500Medium, Poppins_700Bold });
+  useFonts({ Poppins_400Regular, Poppins_400Regular_Italic, Poppins_500Medium, Poppins_700Bold });
   const insets = useSafeAreaInsets();
   const { projectId, projectName } = route.params;
 
@@ -249,6 +268,8 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [charts, setCharts] = useState<ChartCfg[]>([]);
   const [addY, setAddY] = useState('');
   const [addTrend, setAddTrend] = useState<Trend>('linear');
+  const [addX, setAddX] = useState(''); // v100j — '' = Tiempo (default); si no, key de variable
+  const [addJoin, setAddJoin] = useState<Join>('none');
 
   // Estructura de la ficha (para encabezados limpios/ordenados).
   useEffect(() => {
@@ -435,13 +456,21 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const yOptions = useMemo(() => chartYOptions(dataCols), [dataCols]);
   const yLabelOf = (yKey: string) => yOptions.find(o => o.key === yKey)?.label ?? t('summary.value');
 
-  // Puntos de un gráfico (X = fecha → tiempo; Y = columna). v100d — respeta el
-  // rango de fechas configurado por gráfico (xMin/xMax).
-  const buildPts = useCallback((ch: ChartCfg) => filtered
-    .filter(r => (!ch.xMin || (r.ensayoDate ?? '') >= ch.xMin) && (!ch.xMax || (r.ensayoDate ?? '') <= ch.xMax))
-    .map(r => ({ x: r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN, y: num(r.values[ch.yKey]), code: r.protocolCode ?? '' }))
-    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-    .sort((a, b) => a.x - b.x), [filtered]);
+  // Puntos de un gráfico. v100j — el eje X puede ser el TIEMPO (default) o
+  // cualquier variable numérica (ch.xKey); siempre ordenados por X para que la
+  // unión de puntos tenga sentido. El rango de fechas (xMin/xMax) solo aplica
+  // cuando X es tiempo.
+  const buildPts = useCallback((ch: ChartCfg) => {
+    const xk = ch.xKey || null;
+    return filtered
+      .filter(r => xk ? true : (!ch.xMin || (r.ensayoDate ?? '') >= ch.xMin) && (!ch.xMax || (r.ensayoDate ?? '') <= ch.xMax))
+      .map(r => ({
+        x: xk ? num(r.values[xk]) : (r.ensayoDate ? new Date(r.ensayoDate + 'T12:00:00').getTime() : NaN),
+        y: num(r.values[ch.yKey]), code: r.protocolCode ?? '',
+      }))
+      .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+      .sort((a, b) => a.x - b.x);
+  }, [filtered]);
   // v100d — decimales de la columna del eje Y (los ticks usan los MISMOS decimales).
   const decimalsOf = useCallback((yKey: string) => dataCols.find(c => c.key === yKey)?.decimals, [dataCols]);
 
@@ -469,6 +498,9 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [axShowEq, setAxShowEq] = useState(false); const [axShowStats, setAxShowStats] = useState(true);
   // v100g — leyenda de líneas (default OFF) y cuadrícula vertical (default ON).
   const [axShowLegend, setAxShowLegend] = useState(false); const [axShowVGrid, setAxShowVGrid] = useState(true);
+  // v100j — unión de puntos + rango X numérico (cuando el eje X es una variable).
+  const [axJoin, setAxJoin] = useState<Join>('none');
+  const [axVxMin, setAxVxMin] = useState(''); const [axVxMax, setAxVxMax] = useState('');
   const openAxisCfg = useCallback((ch: ChartCfg) => {
     setAxisChart(ch);
     setAxYMin(ch.yMin != null ? String(ch.yMin) : '');
@@ -480,6 +512,9 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setAxTrend(ch.trend ?? 'linear');
     setAxShowEq(!!ch.showEq); setAxShowStats(ch.showStats !== false);
     setAxShowLegend(!!ch.showLegend); setAxShowVGrid(ch.showVGrid !== false);
+    setAxJoin(ch.join ?? 'none');
+    setAxVxMin(ch.vxMin != null ? String(ch.vxMin) : '');
+    setAxVxMax(ch.vxMax != null ? String(ch.vxMax) : '');
   }, []);
   const saveAxisCfg = useCallback(() => {
     if (!axisChart) return;
@@ -489,9 +524,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       xMin: axXMin || null, xMax: axXMax || null, xVertical: axVert,
       limMin: numOrNull(axLimMin), limMax: numOrNull(axLimMax), trend: axTrend,
       showEq: axShowEq, showStats: axShowStats, showLegend: axShowLegend, showVGrid: axShowVGrid,
+      join: axJoin, vxMin: numOrNull(axVxMin), vxMax: numOrNull(axVxMax),
     } : c));
     setAxisChart(null);
-  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid]);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid, axJoin, axVxMin, axVxMax]);
 
   // v100f — ocultar temporalmente los gráficos para ver la tabla completa (móvil).
   const [chartsHidden, setChartsHidden] = useState(false);
@@ -640,12 +676,16 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                     </View>
                     <TouchableOpacity activeOpacity={1} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
                       <View ref={(r) => { chartShotRefs.current[ch.id] = r; }} collapsable={false} style={styles.chartShot}>
-                        <Text style={styles.chartTitle} numberOfLines={2}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
+                        <Text style={styles.chartTitle} numberOfLines={2}>
+                          {yLabelOf(ch.yKey)}{ch.xKey ? ` vs ${yLabelOf(ch.xKey)}` : t('summary.vsTime')}
+                        </Text>
                         {data.length > 0
                           ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
                               decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
                               limMin={ch.limMin} limMax={ch.limMax} showEq={!!ch.showEq} showStats={ch.showStats !== false}
-                              showLegend={!!ch.showLegend} showVGrid={ch.showVGrid !== false} />
+                              showLegend={!!ch.showLegend} showVGrid={ch.showVGrid !== false}
+                              xLabel={ch.xKey ? yLabelOf(ch.xKey) : undefined} xDecimals={ch.xKey ? decimalsOf(ch.xKey) : undefined}
+                              join={ch.join ?? 'none'} vxMin={ch.vxMin} vxMax={ch.vxMax} />
                           : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
                       </View>
                     </TouchableOpacity>
@@ -778,11 +818,13 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       <Modal visible={showCharts} transparent animationType="fade" onRequestClose={() => setShowCharts(false)}>
         <GestureHandlerRootView style={styles.modalBg}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowCharts(false)} />
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { maxHeight: '88%' }]}>
             <View style={styles.modalHeadRow}>
               <Text style={styles.modalTitle}>{t('summary.chartsConfig')}</Text>
               <TouchableOpacity onPress={() => setShowCharts(false)} hitSlop={8}><Ionicons name="close" size={20} color={Colors.textMuted} /></TouchableOpacity>
             </View>
+            {/* v100j — contenido scrolleable; el botón Agregar queda SIEMPRE visible abajo */}
+            <ScrollView style={{ flexShrink: 1 }} nestedScrollEnabled>
 
             {/* GESTIÓN: reordenar (mantén y arrastra) + eliminar */}
             <Text style={styles.filterLabel}>{t('summary.manageCharts')}</Text>
@@ -792,7 +834,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                 <View style={{ height: charts.length * MGR_H, marginTop: 4 }}>
                   {charts.map((ch, i) => (
                     <ManagerRow key={ch.id} index={i} count={charts.length}
-                      label={yLabelOf(ch.yKey)}
+                      label={`${yLabelOf(ch.yKey)}${ch.xKey ? ` vs ${yLabelOf(ch.xKey)}` : ''}`}
                       sub={ch.trend === 'none' ? t('summary.trendNone') : ch.trend === 'linear' ? t('summary.trendLinear') : ch.trend === 'quad' ? t('summary.trendQuad') : t('summary.trendCubic')}
                       onReorder={reorderCharts}
                       onDelete={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} />
@@ -804,10 +846,19 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
             {/* AGREGAR */}
             <View style={styles.addDivider} />
             <Text style={styles.filterLabel}>{t('summary.addChart')}</Text>
+            {/* v100j — el eje X ya no es fijo: Tiempo (default) o cualquier variable */}
             <Text style={styles.chartFieldLabel}>{t('summary.axisX')}</Text>
-            <View style={styles.chartFixedField}><Text style={styles.chartFixedText}>{t('summary.axisXFixed')}</Text></View>
+            <ScrollView style={{ maxHeight: 96 }} nestedScrollEnabled>
+              <TouchableOpacity style={[styles.dateRow, !addX && { backgroundColor: Colors.primary + '12' }]} onPress={() => setAddX('')}>
+                <Text style={[styles.dateRowText, !addX && { color: Colors.primary, fontWeight: '800' }]}>{t('summary.axisXFixed')}</Text></TouchableOpacity>
+              {yOptions.map(o => {
+                const on = addX === o.key;
+                return <TouchableOpacity key={o.key} style={[styles.dateRow, on && { backgroundColor: Colors.primary + '12' }]} onPress={() => setAddX(o.key)}>
+                  <Text style={[styles.dateRowText, on && { color: Colors.primary, fontWeight: '800' }]}>{o.label}</Text></TouchableOpacity>;
+              })}
+            </ScrollView>
             <Text style={styles.chartFieldLabel}>{t('summary.axisYParam')}</Text>
-            <ScrollView style={{ maxHeight: 150 }}>
+            <ScrollView style={{ maxHeight: 120 }} nestedScrollEnabled>
               {yOptions.map(o => {
                 const on = addY === o.key;
                 return <TouchableOpacity key={o.key} style={[styles.dateRow, on && { backgroundColor: Colors.primary + '12' }]} onPress={() => setAddY(o.key)}>
@@ -821,8 +872,17 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                   <Text style={[styles.choiceText, addTrend === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
               ))}
             </View>
+            {/* v100j — unión de puntos tipo Excel */}
+            <Text style={styles.chartFieldLabel}>{t('summary.joinLine')}</Text>
+            <View style={styles.chipRow}>
+              {([['none', t('summary.joinNone')], ['linear', t('summary.joinLinear')], ['smooth', t('summary.joinSmooth')]] as [Join, string][]).map(([k, l]) => (
+                <TouchableOpacity key={k} onPress={() => setAddJoin(k)} style={[styles.choice, addJoin === k && styles.choiceOn]}>
+                  <Text style={[styles.choiceText, addJoin === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
+              ))}
+            </View>
+            </ScrollView>
             <TouchableOpacity disabled={!addY || yOptions.length === 0}
-              onPress={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend }]); setAddY(''); setAddTrend('linear'); } }}
+              onPress={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
               style={[styles.addBtn, (!addY || yOptions.length === 0) && { opacity: 0.4 }]}>
               <Ionicons name="add" size={16} color={Colors.white} /><Text style={styles.genBtnText}>{t('summary.addChart')}</Text>
             </TouchableOpacity>
@@ -834,12 +894,14 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       <Modal visible={!!axisChart} transparent animationType="fade" onRequestClose={() => setAxisChart(null)}>
         <View style={styles.modalBg}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setAxisChart(null)} />
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { maxHeight: '88%' }]}>
             <View style={styles.modalHeadRow}>
               <Text style={styles.modalTitle}>Ejes del gráfico</Text>
               <TouchableOpacity onPress={() => setAxisChart(null)} hitSlop={8}><Ionicons name="close" size={20} color={Colors.textMuted} /></TouchableOpacity>
             </View>
-            <Text style={styles.smallMuted}>{axisChart ? yLabelOf(axisChart.yKey) : ''}</Text>
+            <Text style={styles.smallMuted}>{axisChart ? `${yLabelOf(axisChart.yKey)}${axisChart.xKey ? ` vs ${yLabelOf(axisChart.xKey)}` : ''}` : ''}</Text>
+            {/* v100j — contenido scrolleable; Cancelar/Guardar SIEMPRE visibles abajo */}
+            <ScrollView style={{ flexShrink: 1 }} nestedScrollEnabled>
 
             <Text style={styles.filterLabel}>Eje Y — rango (vacío = automático)</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
@@ -873,6 +935,15 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
               ))}
             </View>
 
+            {/* v100j — unión de puntos tipo Excel (editable también aquí) */}
+            <Text style={styles.filterLabel}>{t('summary.joinLine')}</Text>
+            <View style={styles.chipRow}>
+              {([['none', t('summary.joinNone')], ['linear', t('summary.joinLinear')], ['smooth', t('summary.joinSmooth')]] as [Join, string][]).map(([k, l]) => (
+                <TouchableOpacity key={k} onPress={() => setAxJoin(k)} style={[styles.choice, axJoin === k && styles.choiceOn]}>
+                  <Text style={[styles.choiceText, axJoin === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
+              ))}
+            </View>
+
             <View style={[styles.modalHeadRow, { marginTop: 8 }]}>
               <Text style={styles.dateRowText}>Mostrar leyenda de líneas</Text>
               <Switch value={axShowLegend} onValueChange={setAxShowLegend} />
@@ -890,29 +961,49 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
               <Switch value={axShowStats} onValueChange={setAxShowStats} />
             </View>
 
-            <Text style={styles.filterLabel}>Eje X — rango de fechas (vacío = automático)</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'from' ? null : 'from')}>
-                <Text style={styles.dateFieldLabel}>Inicial</Text>
-                <Text style={styles.dateFieldValue}>{axXMin || '—'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'to' ? null : 'to')}>
-                <Text style={styles.dateFieldLabel}>Final</Text>
-                <Text style={styles.dateFieldValue}>{axXMax || '—'}</Text>
-              </TouchableOpacity>
-            </View>
-            {axDatePick && (
-              <CalendarPicker
-                value={(axDatePick === 'from' ? axXMin : axXMax) || undefined}
-                onSelect={d => { if (axDatePick === 'from') setAxXMin(d); else setAxXMax(d); setAxDatePick(null); }}
-                onClear={() => { if (axDatePick === 'from') setAxXMin(''); else setAxXMax(''); setAxDatePick(null); }}
-              />
+            {!axisChart?.xKey ? (
+              <>
+                <Text style={styles.filterLabel}>Eje X — rango de fechas (vacío = automático)</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'from' ? null : 'from')}>
+                    <Text style={styles.dateFieldLabel}>Inicial</Text>
+                    <Text style={styles.dateFieldValue}>{axXMin || '—'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.dateField} onPress={() => setAxDatePick(axDatePick === 'to' ? null : 'to')}>
+                    <Text style={styles.dateFieldLabel}>Final</Text>
+                    <Text style={styles.dateFieldValue}>{axXMax || '—'}</Text>
+                  </TouchableOpacity>
+                </View>
+                {axDatePick && (
+                  <CalendarPicker
+                    value={(axDatePick === 'from' ? axXMin : axXMax) || undefined}
+                    onSelect={d => { if (axDatePick === 'from') setAxXMin(d); else setAxXMax(d); setAxDatePick(null); }}
+                    onClear={() => { if (axDatePick === 'from') setAxXMin(''); else setAxXMax(''); setAxDatePick(null); }}
+                  />
+                )}
+              </>
+            ) : (
+              /* v100j — eje X variable → rango numérico manual */
+              <>
+                <Text style={styles.filterLabel}>Eje X — rango (vacío = automático)</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                  <View style={styles.dateField}>
+                    <Text style={styles.dateFieldLabel}>Mínimo</Text>
+                    <TextInput style={styles.axisInput} keyboardType="numeric" value={axVxMin} onChangeText={setAxVxMin} placeholder="auto" />
+                  </View>
+                  <View style={styles.dateField}>
+                    <Text style={styles.dateFieldLabel}>Máximo</Text>
+                    <TextInput style={styles.axisInput} keyboardType="numeric" value={axVxMax} onChangeText={setAxVxMax} placeholder="auto" />
+                  </View>
+                </View>
+              </>
             )}
 
             <View style={[styles.modalHeadRow, { marginTop: 10 }]}>
-              <Text style={styles.dateRowText}>Fechas del eje X en vertical</Text>
+              <Text style={styles.dateRowText}>{axisChart?.xKey ? 'Etiquetas del eje X en vertical' : 'Fechas del eje X en vertical'}</Text>
               <Switch value={axVert} onValueChange={setAxVert} />
             </View>
+            </ScrollView>
 
             <View style={styles.modalFootRow}>
               <TouchableOpacity onPress={() => setAxisChart(null)}><Text style={styles.clearText}>Cancelar</Text></TouchableOpacity>
@@ -984,6 +1075,7 @@ const C_POINT = '#1a4f7a';         // puntos de ensayo
 // formas circulares y 'a' de un piso). Si algún día se licencia la real, basta
 // con cambiar estas tres constantes.
 const FONT_REG = 'Poppins_400Regular';
+const FONT_ITALIC = 'Poppins_400Regular_Italic';
 const FONT_MED = 'Poppins_500Medium';
 const FONT_BOLD = 'Poppins_700Bold';
 /** v100h — Muestra de línea punteada para la leyenda: EXACTAMENTE 3 tramos
@@ -995,57 +1087,83 @@ function LegendDash({ color }: { color: string }) {
     </Svg>
   );
 }
-function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid }: {
+function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid, xLabel, xDecimals, join, vxMin, vxMax }: {
   data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
   limMin?: number | null; limMax?: number | null; showEq?: boolean; showStats?: boolean;
   showLegend?: boolean; showVGrid?: boolean;
+  // v100j — eje X variable (xLabel presente = variable; ausente = tiempo) + unión de puntos.
+  xLabel?: string; xDecimals?: number; join?: Join; vxMin?: number | null; vxMax?: number | null;
 }) {
   const { t } = useI18n();
+  const isVar = xLabel != null; // eje X = variable (no tiempo)
   // Márgenes simétricos: padL alberga los ticks + el título vertical del eje Y.
   const W = 320, H = 232, padL = 50, padR = 16, padT = 12, padB = xVertical ? 64 : 40;
   const xs = data.map(d => d.x), ys = data.map(d => d.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) || minX + 1;
-  const dx = maxX - minX || 1;
+  // v100j — Rango X: tiempo = extensión de los datos; variable = datos + 6% de
+  // aire a cada lado, con overrides manuales (vxMin/vxMax) que mandan.
+  let xlo = minX, xhi = maxX;
+  if (isVar) {
+    const padX = (maxX - minX || Math.max(Math.abs(maxX) * 0.01, 0.5)) * 0.06;
+    xlo = minX - padX; xhi = maxX + padX;
+    if (vxMin != null && Number.isFinite(vxMin)) xlo = vxMin;
+    if (vxMax != null && Number.isFinite(vxMax)) xhi = vxMax;
+    if (xhi <= xlo) xhi = xlo + 1;
+  }
+  const dx = xhi - xlo || 1;
   // Rango Y: los límites configurados deben quedar VISIBLES dentro del área de ploteo.
   let { lo, hi } = niceYRange(ys, yMin, yMax);
   if (yMin == null && limMin != null && Number.isFinite(limMin)) lo = Math.min(lo, limMin);
   if (yMax == null && limMax != null && Number.isFinite(limMax)) hi = Math.max(hi, limMax);
   if (hi <= lo) hi = lo + 1;
   const dy = hi - lo;
-  const sx = (x: number) => padL + ((x - minX) / dx) * (W - padL - padR);
+  const sxRaw = (x: number) => padL + ((x - xlo) / dx) * (W - padL - padR);
   const syRaw = (y: number) => H - padB - ((y - lo) / dy) * (H - padT - padB);
   // Atípicos fuera del rango → recortados al borde del área de ploteo.
+  const sx = (x: number) => Math.max(padL, Math.min(W - padR, sxRaw(x)));
   const sy = (y: number) => Math.max(padT, Math.min(H - padB, syRaw(y)));
   // v100h — Densidad de cuadrícula calculada del rango: marcas REDONDAS dentro de
-  // [lo,hi] con ~7 divisiones en Y y ~6 en X (el rango del eje no cambia).
+  // [lo,hi] con ~7 divisiones en Y y ~5-6 en X (el rango del eje no cambia).
   const { ticks: yTicks, step } = niceTicks(lo, hi, 7);
-  const V_DIV = 6; // divisiones verticales
+  const V_DIV = 6; // divisiones verticales (modo tiempo)
   // Decimales de los ticks: los de la columna; si el paso entre marcas es más fino
   // (rango chico), sube la precisión lo justo para que no salgan repetidos.
   const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
   const tickDec = Math.max(decimals ?? 0, needed);
-  // v100e — tendencia opcional ('none' = sin línea) y punteada. La regresión se
-  // ajusta en base DÍAS (t = días desde el 1er ensayo) → ecuación con sentido.
+  // v100j — Ticks del eje X en modo variable (marcas redondas + decimales de SU columna).
+  const { ticks: xVarTicks, step: xStep } = niceTicks(xlo, xhi, 5);
+  const xNeeded = xStep > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(xStep)))) : 0;
+  const xTickDec = Math.max(xDecimals ?? 0, xNeeded);
+  // v100e/j — tendencia opcional y punteada. Con X=tiempo la regresión va en DÍAS
+  // (t = días desde el 1er ensayo); con X=variable, en las unidades de la variable.
   const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : trend === 'cubic' ? 3 : 0;
   const DAY = 86400000;
-  const td = xs.map(x => (x - minX) / DAY);
-  const coef = trend === 'none' ? null : polyfit(td, ys, degree);
+  const tx2 = isVar ? xs : xs.map(x => (x - minX) / DAY);
+  const coef = trend === 'none' ? null : polyfit(tx2, ys, degree);
+  const toT = (xv: number) => isVar ? xv : (xv - minX) / DAY;
   const trendPts: string[] = [];
-  if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; const xv = minX + tt * dx; trendPts.push(`${sx(xv).toFixed(1)},${sy(polyval(coef, (xv - minX) / DAY)).toFixed(1)}`); }
+  if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; const xv = xlo + tt * dx; trendPts.push(`${sx(xv).toFixed(1)},${sy(polyval(coef, toT(xv))).toFixed(1)}`); }
   const trendVisible = !!coef && trend !== 'none';
-  const r2 = coef ? rSquared(ys, td.map(v => polyval(coef, v))) : null;
-  const eq = coef ? equationStr(coef, degree) : '';
+  const r2 = coef ? rSquared(ys, tx2.map(v => polyval(coef, v))) : null;
+  const eq = coef ? equationStr(coef, degree, isVar ? 'x' : 't') : '';
+  // v100j — Unión de puntos (tipo Excel): ninguna / lineal / suavizada.
+  const joinMode: Join = join ?? 'none';
+  const pxy = data.map(d => ({ x: sx(d.x), y: sy(d.y) }));
+  const joinLinearPts = joinMode === 'linear' && pxy.length > 1 ? pxy.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') : '';
+  const joinSmoothD = joinMode === 'smooth' && pxy.length > 1 ? smoothPath(pxy) : '';
   // Estadística descriptiva.
   const n = ys.length;
   const mean = n ? ys.reduce((a, b) => a + b, 0) / n : 0;
   const std = n > 1 ? Math.sqrt(ys.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
   const statDec = Math.max(decimals ?? 0, 2);
   const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
-  // v100e — X vertical: todas las fechas presentes (deduplicadas y ordenadas). Horizontal: 3 marcas.
-  const xTicks = xVertical
+  // Ticks del eje X: variable → marcas redondas; tiempo vertical → todas las
+  // fechas (dedup); tiempo horizontal → 3 marcas.
+  const xTicks = isVar ? xVarTicks : (xVertical
     ? Array.from(new Set(xs)).sort((a, b) => a - b)
-    : [minX, (minX + maxX) / 2, maxX];
+    : [minX, (minX + maxX) / 2, maxX]);
+  const fmtX = (xv: number) => isVar ? xv.toFixed(xTickDec) : fmtD(xv);
   const trendKind = trend === 'linear' ? t('summary.trendKindLinear') : trend === 'quad' ? t('summary.trendKindQuad') : trend === 'cubic' ? t('summary.trendKindCubic') : '';
   return (
     <View style={{ alignItems: 'center' }}>
@@ -1053,10 +1171,13 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         {/* Título del eje Y (vertical) — ocupa la banda muerta de la izquierda */}
         <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontFamily={FONT_BOLD} fill="#1a1a2e" textAnchor="middle"
           transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
-        {/* v100g/h — Cuadrícula VERTICAL (más clara y más densa), detrás de todo */}
-        {showVGrid ? Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
-          <SvgLine key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
-        ); }) : null}
+        {/* v100g/h/j — Cuadrícula VERTICAL (más clara), detrás de todo. Variable →
+            alineada a las marcas redondas del eje X; tiempo → divisiones uniformes. */}
+        {showVGrid ? (isVar
+          ? xVarTicks.map((xv, k) => <SvgLine key={`v${k}`} x1={sxRaw(xv)} y1={padT} x2={sxRaw(xv)} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />)
+          : Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
+            <SvgLine key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
+          ); })) : null}
         {/* Marco: eje Y (izq.), eje X (abajo) y v100i — cierre por la DERECHA */}
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
@@ -1067,8 +1188,8 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
             <SvgText x={padL - 4} y={yy + 3} fontSize={8} fontFamily={FONT_REG} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
           </React.Fragment>); })}
         {xTicks.map((xv, i) => xVertical
-          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={7.5} fontFamily={FONT_REG} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
-          : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fontFamily={FONT_REG} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
+          ? <SvgText key={i} x={sxRaw(xv)} y={H - padB + 6} fontSize={7.5} fontFamily={FONT_REG} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sxRaw(xv)}, ${H - padB + 6})`} dy={3}>{fmtX(xv)}</SvgText>
+          : <SvgText key={i} x={sxRaw(xv)} y={H - padB + 14} fontSize={8} fontFamily={FONT_REG} fill="#64748b" textAnchor="middle">{fmtX(xv)}</SvgText>)}
         {/* Líneas de límite (punteadas): mín. azul, máx. rojo. Etiqueta al ARRANQUE (izq.) para no desbordar. */}
         {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi
           ? <React.Fragment>
@@ -1080,10 +1201,13 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
               <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke={C_MIN} strokeWidth={1.6} strokeDasharray="6,4" />
               <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontFamily={FONT_BOLD} fill={C_MIN} textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
+        {/* v100j — Unión de puntos (debajo de los puntos): lineal o suavizada, sólida */}
+        {joinLinearPts ? <SvgPolyline points={joinLinearPts} fill="none" stroke={C_POINT} strokeWidth={1.6} /> : null}
+        {joinSmoothD ? <SvgPath d={joinSmoothD} fill="none" stroke={C_POINT} strokeWidth={1.6} /> : null}
         {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill={C_POINT} opacity={0.85} />)}
         {/* Tendencia: MISMO ancho y patrón que las líneas de límite */}
         {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke={C_TREND} strokeWidth={1.6} strokeDasharray="6,4" /> : null}
-        <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontFamily={FONT_BOLD} fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
+        <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontFamily={FONT_BOLD} fill="#1a1a2e" textAnchor="middle">{isVar ? xLabel : t('summary.timeAxisLabel')}</SvgText>
       </Svg>
 
       {/* v100h — Pie en DOS columnas: izquierda la leyenda (muestra de línea
@@ -1117,10 +1241,14 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
               ) : null}
               {showEq && trendVisible ? (
                 <View style={{ alignItems: showLegend ? 'flex-end' : 'flex-start' }}>
-                  <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>{eq}</Text>
+                  {/* v100j — R² arriba junto a la ecuación; la descripción de la
+                      variable debajo, en plomo claro e itálica (solo modo tiempo) */}
                   <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>
-                    R² = {r2 != null ? r2.toFixed(3) : '—'}  {t('summary.daysNote')}
+                    {eq}  ·  R² = {r2 != null ? r2.toFixed(3) : '—'}
                   </Text>
+                  {!isVar ? (
+                    <Text style={[styles.chartEqNote, { textAlign: showLegend ? 'right' : 'left' }]}>{t('summary.daysNote')}</Text>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -1166,6 +1294,8 @@ const styles = StyleSheet.create({
   legendTxt: { fontSize: 10, color: '#64748b', fontFamily: FONT_MED },
   // v100i — cálculos y ecuación SIN negrita, mismo cuerpo de letra.
   chartEq: { fontSize: 10, color: '#334155', fontFamily: FONT_REG },
+  // v100j — descripción de la variable t: plomo más claro e itálica.
+  chartEqNote: { fontSize: 9, color: '#a8b3c2', fontFamily: FONT_ITALIC },
   chartStatsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   chartStat: { fontSize: 10, color: '#334155', fontFamily: FONT_REG },
   chartsHiddenBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 8, paddingVertical: 8, borderRadius: Radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
@@ -1208,8 +1338,6 @@ const styles = StyleSheet.create({
 
   addDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
   chartFieldLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 8, marginBottom: 3 },
-  chartFixedField: { backgroundColor: Colors.surface, borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 10, paddingVertical: 8 },
-  chartFixedText: { fontSize: 13, color: Colors.textMuted },
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 10, marginTop: 12 },
   genBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: 16, paddingVertical: 8 },
   genBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
