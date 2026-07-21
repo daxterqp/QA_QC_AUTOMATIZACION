@@ -1244,7 +1244,7 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
                   {/* v100j — R² arriba junto a la ecuación; la descripción de la
                       variable debajo, en plomo claro e itálica (solo modo tiempo) */}
                   <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>
-                    {eq}  ·  R² = {r2 != null ? r2.toFixed(3) : '—'}
+                    {eq}  ·  R² = {r2 != null ? r2.toFixed(1) : '—'}
                   </Text>
                   {!isVar ? (
                     <Text style={[styles.chartEqNote, { textAlign: showLegend ? 'right' : 'left' }]}>{t('summary.daysNote')}</Text>
