@@ -31,6 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildAutoColumns, chartYOptions } from '@utils/summaryColumns';
 import { formatComputed } from '@utils/numericProtocol';
 import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Text as SvgText } from 'react-native-svg';
+import { captureRef } from 'react-native-view-shot';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useI18n, tx } from '@i18n/index';
@@ -146,6 +147,35 @@ function polyfit(xs: number[], ys: number[], degree: number): number[] | null {
   return b.map((v, i) => v / A[i][i]);
 }
 const polyval = (coef: number[], x: number) => coef.reduce((acc, c, i) => acc + c * x ** i, 0);
+
+// v100e — Formato compacto de coeficientes (3-4 cifras significativas; notación
+// científica solo para magnitudes extremas) y armado de la ecuación de ajuste.
+function fmtCoef(v: number): string {
+  if (!Number.isFinite(v)) return '0';
+  const abs = Math.abs(v);
+  if (abs !== 0 && (abs < 1e-3 || abs >= 1e5)) return v.toExponential(2);
+  return String(Number(v.toPrecision(4)));
+}
+const SUP = ['', '', '²', '³'];
+/** coef en base i (coef[0] + coef[1]·t + …); t = días desde el primer ensayo. */
+function equationStr(coef: number[], degree: number): string {
+  let s = '';
+  for (let i = degree; i >= 0; i--) {
+    const c = coef[i]; if (!Number.isFinite(c)) continue;
+    const body = i === 0 ? fmtCoef(Math.abs(c)) : `${fmtCoef(Math.abs(c))}·t${SUP[i] || ''}`;
+    if (s === '') s = (c < 0 ? '−' : '') + body;
+    else s += (c < 0 ? ' − ' : ' + ') + body;
+  }
+  return `y = ${s}`;
+}
+function rSquared(ys: number[], yhat: number[]): number | null {
+  const n = ys.length; if (n < 2) return null;
+  const mean = ys.reduce((a, b) => a + b, 0) / n;
+  const ssTot = ys.reduce((a, b) => a + (b - mean) ** 2, 0);
+  if (ssTot <= 0) return 1;
+  const ssRes = ys.reduce((a, b, i) => a + (b - yhat[i]) ** 2, 0);
+  return 1 - ssRes / ssTot;
+}
 
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
@@ -389,6 +419,17 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   // v100d — decimales de la columna del eje Y (los ticks usan los MISMOS decimales).
   const decimalsOf = useCallback((yKey: string) => dataCols.find(c => c.key === yKey)?.decimals, [dataCols]);
 
+  // v100e — captura + compartir imagen de cada gráfico.
+  const chartShotRefs = useRef<Record<string, any>>({});
+  const shareChart = useCallback(async (id: string) => {
+    try {
+      const node = chartShotRefs.current[id];
+      if (!node) return;
+      const uri = await captureRef(node, { format: 'png', quality: 1, result: 'tmpfile' });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: t('summary.shareChart') });
+    } catch { Alert.alert(t('summary.shareChart'), t('common.error')); }
+  }, [t]);
+
   // v100d — Config de ejes por gráfico (mantener presionado el gráfico / ruedita).
   const [axisChart, setAxisChart] = useState<ChartCfg | null>(null);
   const [axYMin, setAxYMin] = useState(''); const [axYMax, setAxYMax] = useState('');
@@ -544,18 +585,24 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
               {charts.map(ch => {
                 const data = buildPts(ch);
                 return (
-                  /* v100d — mantener presionado (o la ruedita) abre la config de ejes del gráfico */
-                  <TouchableOpacity key={ch.id} style={styles.chartCard} activeOpacity={0.9} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
-                    <View style={styles.chartTitleRow}>
-                      <Text style={styles.chartTitle} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
-                      <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8} style={styles.chartGear}><Ionicons name="settings-outline" size={15} color={Colors.textMuted} /></TouchableOpacity>
+                  /* v100d/e — mantener presionado (o la ruedita) abre la config; los íconos
+                     van FUERA del área capturable para que no salgan en la imagen compartida. */
+                  <View key={ch.id} style={styles.chartCard}>
+                    <View style={styles.chartIcons}>
+                      <TouchableOpacity onPress={() => shareChart(ch.id)} hitSlop={8} style={styles.chartIconBtn}><Ionicons name="share-social-outline" size={16} color={Colors.textMuted} /></TouchableOpacity>
+                      <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8} style={styles.chartIconBtn}><Ionicons name="settings-outline" size={16} color={Colors.textMuted} /></TouchableOpacity>
                     </View>
-                    {data.length > 0
-                      ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
-                          decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
-                          limMin={ch.limMin} limMax={ch.limMax} />
-                      : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
-                  </TouchableOpacity>
+                    <TouchableOpacity activeOpacity={1} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
+                      <View ref={(r) => { chartShotRefs.current[ch.id] = r; }} collapsable={false} style={styles.chartShot}>
+                        <Text style={styles.chartTitle} numberOfLines={2}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
+                        {data.length > 0
+                          ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
+                              decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
+                              limMin={ch.limMin} limMax={ch.limMax} />
+                          : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
+                      </View>
+                    </TouchableOpacity>
+                  </View>
                 );
               })}
             </ScrollView>
@@ -854,18 +901,19 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 }
 
 // ── Gráfico de dispersión (react-native-svg) con tendencia ───────────────────
-// v100d — Eje Y: rango centrado en los valores TÍPICOS (atípicos fuera del
-// centrado, se dibujan recortados al borde), ticks con los MISMOS decimales de
-// la columna (subiendo precisión solo si el paso lo exige). Overrides yMin/yMax
-// y fechas verticales vienen de la config por gráfico.
+// v100e — Presentación profesional: título de eje Y rotado (usa el espacio muerto
+// de la izquierda), líneas de límite punteadas con etiqueta al ARRANQUE (no
+// desbordan), tendencia punteada con ecuación de ajuste + R², y panel de
+// estadística (media / desviación / n) debajo. Rango Y centrado en los valores
+// típicos (atípicos recortados al borde); ticks con los decimales de la columna.
 function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax }: {
   data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
   limMin?: number | null; limMax?: number | null;
 }) {
   const { t } = useI18n();
-  // v100e — el eje X vertical muestra TODAS las fechas → más alto abajo para que quepan apiladas.
-  const W = 320, H = 230, padL = 46, padR = 12, padT = 12, padB = xVertical ? 62 : 40;
+  // Márgenes simétricos: padL alberga los ticks + el título vertical del eje Y.
+  const W = 320, H = 232, padL = 50, padR = 16, padT = 12, padB = xVertical ? 64 : 40;
   const xs = data.map(d => d.x), ys = data.map(d => d.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) || minX + 1;
   const dx = maxX - minX || 1;
@@ -884,21 +932,34 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
   const step = dy / 4;
   const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
   const tickDec = Math.max(decimals ?? 0, needed);
-  // v100e — tendencia opcional ('none' = sin línea) y punteada.
+  // v100e — tendencia opcional ('none' = sin línea) y punteada. La regresión se
+  // ajusta en base DÍAS (t = días desde el 1er ensayo) → ecuación con sentido.
   const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : trend === 'cubic' ? 3 : 0;
-  const nx = xs.map(x => (x - minX) / dx);
-  const coef = trend === 'none' ? null : polyfit(nx, ys, degree);
+  const DAY = 86400000;
+  const td = xs.map(x => (x - minX) / DAY);
+  const coef = trend === 'none' ? null : polyfit(td, ys, degree);
   const trendPts: string[] = [];
-  if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; trendPts.push(`${sx(minX + tt * dx).toFixed(1)},${sy(polyval(coef, tt)).toFixed(1)}`); }
+  if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; const xv = minX + tt * dx; trendPts.push(`${sx(xv).toFixed(1)},${sy(polyval(coef, (xv - minX) / DAY)).toFixed(1)}`); }
+  const trendVisible = !!coef && trend !== 'none';
+  const r2 = coef ? rSquared(ys, td.map(v => polyval(coef, v))) : null;
+  const eq = coef ? equationStr(coef, degree) : '';
+  // Estadística descriptiva.
+  const n = ys.length;
+  const mean = n ? ys.reduce((a, b) => a + b, 0) / n : 0;
+  const std = n > 1 ? Math.sqrt(ys.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+  const statDec = Math.max(decimals ?? 0, 2);
   const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
   // v100e — X vertical: todas las fechas presentes (deduplicadas y ordenadas). Horizontal: 3 marcas.
   const xTicks = xVertical
     ? Array.from(new Set(xs)).sort((a, b) => a - b)
     : [minX, (minX + maxX) / 2, maxX];
-  const trendVisible = coef && trend !== 'none';
+  const trendKind = trend === 'linear' ? t('summary.trendKindLinear') : trend === 'quad' ? t('summary.trendKindQuad') : trend === 'cubic' ? t('summary.trendKindCubic') : '';
   return (
     <View style={{ alignItems: 'center' }}>
       <Svg width={W} height={H}>
+        {/* Título del eje Y (vertical) — ocupa la banda muerta de la izquierda */}
+        <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle"
+          transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
         {Array.from({ length: 5 }, (_, i) => { const yv = lo + (dy * i) / 4; const yy = syRaw(yv); return (
@@ -909,24 +970,36 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         {xTicks.map((xv, i) => xVertical
           ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={7.5} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
           : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
-        {/* Líneas de límite (punteadas): mín. azul, máx. rojo */}
-        {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi
-          ? <React.Fragment>
-              <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke="#2563eb" strokeWidth={1.3} strokeDasharray="5,4" />
-              <SvgText x={W - padR - 2} y={syRaw(limMin) - 3} fontSize={7.5} fill="#2563eb" textAnchor="end">mín {limMin.toFixed(tickDec)}</SvgText>
-            </React.Fragment> : null}
+        {/* Líneas de límite (punteadas): mín. azul, máx. rojo. Etiqueta al ARRANQUE (izq.) para no desbordar. */}
         {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi
           ? <React.Fragment>
               <SvgLine x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke="#d93025" strokeWidth={1.3} strokeDasharray="5,4" />
-              <SvgText x={W - padR - 2} y={syRaw(limMax) - 3} fontSize={7.5} fill="#d93025" textAnchor="end">máx {limMax.toFixed(tickDec)}</SvgText>
+              <SvgText x={padL + 3} y={syRaw(limMax) - 3} fontSize={7.5} fontWeight="700" fill="#d93025" textAnchor="start">{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
-        {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill="#1a4f7a" opacity={0.8} />)}
+        {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi
+          ? <React.Fragment>
+              <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke="#2563eb" strokeWidth={1.3} strokeDasharray="5,4" />
+              <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontWeight="700" fill="#2563eb" textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
+            </React.Fragment> : null}
+        {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill="#1a4f7a" opacity={0.85} />)}
         {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={2} strokeDasharray="6,4" /> : null}
-        <SvgText x={W / 2} y={H - 4} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
+        <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
       </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 12, marginTop: 2 }}>
-        <Text style={{ fontSize: 10, color: '#64748b' }}>{t('summary.testsLegend', { label: yLabel })}</Text>
-        {trendVisible ? <Text style={{ fontSize: 10, color: '#e37400' }}>{t('summary.trendLegend', { kind: trend === 'linear' ? t('summary.trendKindLinear') : trend === 'quad' ? t('summary.trendKindQuad') : t('summary.trendKindCubic') })}</Text> : null}
+
+      {/* Leyenda + estadística, organizada debajo del gráfico */}
+      <View style={styles.chartLegendBox}>
+        <View style={styles.chartLegendRow}>
+          <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#1a4f7a' }]} /><Text style={styles.legendTxt}>{t('summary.testsLegend', { label: yLabel })}</Text></View>
+          {trendVisible ? <View style={styles.legendItem}><View style={styles.legendDash} /><Text style={[styles.legendTxt, { color: '#e37400' }]}>{t('summary.trendLegend', { kind: trendKind })}</Text></View> : null}
+        </View>
+        {trendVisible ? (
+          <Text style={styles.chartEq} numberOfLines={2}>{eq}   ·   R² = {r2 != null ? r2.toFixed(3) : '—'}   <Text style={styles.chartEqNote}>{t('summary.daysNote')}</Text></Text>
+        ) : null}
+        <View style={styles.chartStatsRow}>
+          <Text style={styles.chartStat}>x̄ = <Text style={styles.chartStatVal}>{mean.toFixed(statDec)}</Text></Text>
+          <Text style={styles.chartStat}>σ = <Text style={styles.chartStatVal}>{std.toFixed(statDec)}</Text></Text>
+          <Text style={styles.chartStat}>n = <Text style={styles.chartStatVal}>{n}</Text></Text>
+        </View>
       </View>
     </View>
   );
@@ -954,10 +1027,22 @@ const styles = StyleSheet.create({
   carousel: { flexGrow: 0, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   carouselEmpty: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 10, padding: 14, borderRadius: Radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
   carouselEmptyText: { fontSize: 12.5, color: Colors.primary, fontWeight: '700' },
-  chartCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, width: 344 },
-  chartTitleRow: { position: 'relative', justifyContent: 'center', minHeight: 22, marginBottom: 6 },
-  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', paddingHorizontal: 24 },
-  chartGear: { position: 'absolute', right: 0, top: 0, padding: 2 },
+  chartCard: { position: 'relative', backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, width: 344 },
+  chartIcons: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', gap: 2, zIndex: 5 },
+  chartIconBtn: { padding: 4 },
+  chartShot: { backgroundColor: Colors.white, borderRadius: Radius.md, paddingTop: 2, paddingBottom: 4 },
+  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
+  chartLegendBox: { width: '100%', marginTop: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 3 },
+  chartLegendRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 14 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  legendDot: { width: 9, height: 9, borderRadius: 5 },
+  legendDash: { width: 14, height: 0, borderBottomWidth: 2, borderColor: '#e37400', borderStyle: 'dashed' },
+  legendTxt: { fontSize: 10, color: '#64748b' },
+  chartEq: { fontSize: 10.5, color: '#334155', textAlign: 'center', fontWeight: '600' },
+  chartEqNote: { fontSize: 9, color: '#94a3b8', fontWeight: '400' },
+  chartStatsRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 1 },
+  chartStat: { fontSize: 11, color: '#64748b' },
+  chartStatVal: { fontSize: 11, color: Colors.navy, fontWeight: '800' },
   chartEmpty: { height: 200, alignItems: 'center', justifyContent: 'center' },
 
   filterLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 8 },
