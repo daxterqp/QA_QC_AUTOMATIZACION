@@ -128,9 +128,9 @@ const summary: Record<string, { es: string; en: string; pt: string }> = {
   // Gráfico de dispersión (ScatterChartRN)
   'summary.testsLegend': { es: '● Ensayos ({label})', en: '● Tests ({label})', pt: '● Ensaios ({label})' },
   'summary.trendLegend': {
-    es: '— Tendencia {kind}',
-    en: '— {kind} trend',
-    pt: '— Tendência {kind}',
+    es: 'Tendencia {kind}',
+    en: '{kind} trend',
+    pt: 'Tendência {kind}',
   },
   'summary.trendKindLinear': { es: 'lineal', en: 'linear', pt: 'linear' },
   'summary.trendKindQuad': { es: 'cuadrática', en: 'quadratic', pt: 'quadrática' },

@@ -172,6 +172,25 @@ function equationStr(coef: number[], degree: number): string {
   }
   return `y = ${s}`;
 }
+/** v100h — Paso "bonito" (1 · 2 · 2.5 · 5 · 10 ×10^k) para ~target divisiones. */
+function niceStep(range: number, target: number): number {
+  if (!(range > 0) || target <= 0) return 1;
+  const raw = range / target;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const mult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+  return mult * mag;
+}
+/** Marcas redondas DENTRO de [lo,hi] (el rango del eje no se altera). */
+function niceTicks(lo: number, hi: number, target: number): { ticks: number[]; step: number } {
+  const step = niceStep(hi - lo, target);
+  const ticks: number[] = [];
+  const start = Math.ceil(lo / step - 1e-9) * step;
+  for (let v = start, guard = 0; v <= hi + step * 1e-9 && guard < 64; v += step, guard++) {
+    ticks.push(Number(v.toFixed(10)));
+  }
+  return { ticks, step };
+}
 function rSquared(ys: number[], yhat: number[]): number | null {
   const n = ys.length; if (n < 2) return null;
   const mean = ys.reduce((a, b) => a + b, 0) / n;
@@ -957,6 +976,15 @@ const C_MAX = '#c90c0c';           // límite máximo
 const C_MIN = '#254ca5';           // límite mínimo
 const C_TREND = '#21de83';         // línea de tendencia
 const C_POINT = '#1a4f7a';         // puntos de ensayo
+/** v100h — Muestra de línea punteada para la leyenda: EXACTAMENTE 3 tramos
+ *  (5 + 3 + 5 + 3 + 5 = 21 px), mismo grosor que las líneas del gráfico. */
+function LegendDash({ color }: { color: string }) {
+  return (
+    <Svg width={21} height={4}>
+      <SvgLine x1={0} y1={2} x2={21} y2={2} stroke={color} strokeWidth={1.8} strokeDasharray="5,3" />
+    </Svg>
+  );
+}
 function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax, showEq, showStats, showLegend, showVGrid }: {
   data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
@@ -979,9 +1007,12 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
   const syRaw = (y: number) => H - padB - ((y - lo) / dy) * (H - padT - padB);
   // Atípicos fuera del rango → recortados al borde del área de ploteo.
   const sy = (y: number) => Math.max(padT, Math.min(H - padB, syRaw(y)));
-  // Decimales de los ticks: los de la columna; si el paso entre ticks es más fino
+  // v100h — Densidad de cuadrícula calculada del rango: marcas REDONDAS dentro de
+  // [lo,hi] con ~7 divisiones en Y y ~6 en X (el rango del eje no cambia).
+  const { ticks: yTicks, step } = niceTicks(lo, hi, 7);
+  const V_DIV = 6; // divisiones verticales
+  // Decimales de los ticks: los de la columna; si el paso entre marcas es más fino
   // (rango chico), sube la precisión lo justo para que no salgan repetidos.
-  const step = dy / 4;
   const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
   const tickDec = Math.max(decimals ?? 0, needed);
   // v100e — tendencia opcional ('none' = sin línea) y punteada. La regresión se
@@ -1012,13 +1043,13 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         {/* Título del eje Y (vertical) — ocupa la banda muerta de la izquierda */}
         <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle"
           transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
-        {/* v100g — Cuadrícula VERTICAL (más clara), detrás de todo */}
-        {showVGrid ? [1, 2, 3].map(i => { const xx = padL + ((W - padL - padR) * i) / 4; return (
-          <SvgLine key={`v${i}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
+        {/* v100g/h — Cuadrícula VERTICAL (más clara y más densa), detrás de todo */}
+        {showVGrid ? Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
+          <SvgLine key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
         ); }) : null}
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
-        {Array.from({ length: 5 }, (_, i) => { const yv = lo + (dy * i) / 4; const yy = syRaw(yv); return (
+        {yTicks.map((yv, i) => { const yy = syRaw(yv); return (
           <React.Fragment key={i}>
             <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={AXIS_GRAY} strokeWidth={1} />
             <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
@@ -1043,35 +1074,41 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
         <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
       </Svg>
 
-      {/* v100g — Leyenda de LÍNEAS (flag, OFF por defecto), solo texto de color
-          (sin guiones), a la izquierda. Debajo: ecuación y luego estadística,
-          cada una detrás de su propio flag. El recuadro solo aparece si hay algo. */}
+      {/* v100h — Pie en DOS columnas: izquierda la leyenda (muestra de línea
+          punteada de 3 tramos + rótulo), derecha primero la estadística y luego
+          la ecuación. Cada bloque detrás de su propio flag. */}
       {(showLegend || (showEq && trendVisible) || showStats) ? (
-      <View style={styles.chartLegendBox}>
-        {showLegend ? (
-          <View style={styles.chartLegendCol}>
-            {limMax != null && Number.isFinite(limMax) ? (
-              <Text style={[styles.legendTxt, { color: C_MAX }]}>{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</Text>
-            ) : null}
-            {limMin != null && Number.isFinite(limMin) ? (
-              <Text style={[styles.legendTxt, { color: C_MIN }]}>{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</Text>
-            ) : null}
-            {trendVisible ? (
-              <Text style={[styles.legendTxt, { color: C_TREND }]}>{t('summary.trendLegend', { kind: trendKind })}</Text>
-            ) : null}
-          </View>
-        ) : null}
-        {showEq && trendVisible ? (
-          <Text style={styles.chartEq} numberOfLines={2}>{eq}   ·   R² = {r2 != null ? r2.toFixed(3) : '—'}   <Text style={styles.chartEqNote}>{t('summary.daysNote')}</Text></Text>
-        ) : null}
-        {showStats ? (
-          <View style={styles.chartStatsRow}>
-            <Text style={styles.chartStat}>x̄ = <Text style={styles.chartStatVal}>{mean.toFixed(statDec)}</Text></Text>
-            <Text style={styles.chartStat}>σ = <Text style={styles.chartStatVal}>{std.toFixed(statDec)}</Text></Text>
-            <Text style={styles.chartStat}>n = <Text style={styles.chartStatVal}>{n}</Text></Text>
-          </View>
-        ) : null}
-      </View>
+        <View style={styles.chartFooter}>
+          {showLegend ? (
+            <View style={styles.footerLeft}>
+              {limMax != null && Number.isFinite(limMax) ? (
+                <View style={styles.legendItem}><LegendDash color={C_MAX} /><Text style={[styles.legendTxt, { color: C_MAX }]}>{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</Text></View>
+              ) : null}
+              {limMin != null && Number.isFinite(limMin) ? (
+                <View style={styles.legendItem}><LegendDash color={C_MIN} /><Text style={[styles.legendTxt, { color: C_MIN }]}>{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</Text></View>
+              ) : null}
+              {trendVisible ? (
+                <View style={styles.legendItem}><LegendDash color={C_TREND} /><Text style={[styles.legendTxt, { color: C_TREND }]}>{t('summary.trendLegend', { kind: trendKind })}</Text></View>
+              ) : null}
+            </View>
+          ) : null}
+          {(showStats || (showEq && trendVisible)) ? (
+            <View style={[styles.footerRight, { alignItems: showLegend ? 'flex-end' : 'flex-start' }]}>
+              {showStats ? (
+                <View style={styles.chartStatsRow}>
+                  <Text style={styles.chartStat}>x̄ = <Text style={styles.chartStatVal}>{mean.toFixed(statDec)}</Text></Text>
+                  <Text style={styles.chartStat}>σ = <Text style={styles.chartStatVal}>{std.toFixed(statDec)}</Text></Text>
+                  <Text style={styles.chartStat}>n = <Text style={styles.chartStatVal}>{n}</Text></Text>
+                </View>
+              ) : null}
+              {showEq && trendVisible ? (
+                <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={3}>
+                  {eq}  ·  R² = {r2 != null ? r2.toFixed(3) : '—'} <Text style={styles.chartEqNote}>{t('summary.daysNote')}</Text>
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -1104,14 +1141,16 @@ const styles = StyleSheet.create({
   chartIconBtn: { padding: 4 },
   chartShot: { backgroundColor: Colors.white, borderRadius: Radius.md, paddingTop: 2, paddingBottom: 4 },
   chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
-  chartLegendBox: { width: '100%', marginTop: 4, paddingTop: 6, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 5, alignItems: 'flex-start' },
-  chartLegendCol: { alignItems: 'flex-start', gap: 2 },
-  legendTxt: { fontSize: 10.5, color: '#64748b', fontWeight: '700' },
-  chartEq: { fontSize: 10.5, color: '#334155', textAlign: 'left', fontWeight: '700' },
-  chartEqNote: { fontSize: 9, color: '#94a3b8', fontWeight: '400' },
-  chartStatsRow: { flexDirection: 'row', justifyContent: 'flex-start', gap: 18, marginTop: 1 },
-  chartStat: { fontSize: 11.5, color: '#64748b' },
-  chartStatVal: { fontSize: 11.5, color: Colors.navy, fontWeight: '800' },
+  chartFooter: { width: '100%', flexDirection: 'row', marginTop: 4, paddingTop: 6, paddingHorizontal: 2, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 8 },
+  footerLeft: { flex: 1, alignItems: 'flex-start', gap: 3 },
+  footerRight: { flex: 1.2, gap: 3 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendTxt: { fontSize: 10, color: '#64748b', fontWeight: '700' },
+  chartEq: { fontSize: 9.5, color: '#334155', fontWeight: '700' },
+  chartEqNote: { fontSize: 8.5, color: '#94a3b8', fontWeight: '400' },
+  chartStatsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  chartStat: { fontSize: 11, color: '#64748b' },
+  chartStatVal: { fontSize: 11, color: Colors.navy, fontWeight: '800' },
   chartsHiddenBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 8, paddingVertical: 8, borderRadius: Radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
   chartEmpty: { height: 200, alignItems: 'center', justifyContent: 'center' },
 
