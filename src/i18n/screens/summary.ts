@@ -103,6 +103,7 @@ const summary: Record<string, { es: string; en: string; pt: string }> = {
   'summary.trendLine': { es: 'Línea de tendencia', en: 'Trend line', pt: 'Linha de tendência' },
   'summary.trendNone': { es: 'Ninguna', en: 'None', pt: 'Nenhuma' },
   'summary.shareChart': { es: 'Compartir gráfico', en: 'Share chart', pt: 'Compartilhar gráfico' },
+  'summary.chartsShow': { es: 'Mostrar gráficos', en: 'Show charts', pt: 'Mostrar gráficos' },
   'summary.daysNote': { es: '(t: días desde el 1.er ensayo)', en: '(t: days since 1st test)', pt: '(t: dias desde o 1.º ensaio)' },
   'summary.limMaxShort': { es: 'máx', en: 'max', pt: 'máx' },
   'summary.limMinShort': { es: 'mín', en: 'min', pt: 'mín' },
