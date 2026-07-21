@@ -76,8 +76,10 @@ export default function CroquisCapture({ sectors, points, mapType, mapTileUrl, s
     if (doneRef.current) return;
     doneRef.current = true;
     try {
-      // Captura a resolución NATIVA del dispositivo (pixelRatio) → PNG nítido.
-      const uri = await captureRef(shotRef, { format: 'png', quality: 1, result: 'data-uri' });
+      // v101 — JPEG (q0.82) en vez de PNG: un mapa comprime ~8-10× mejor y el
+      // HTML del dossier con ~100 croquis pasa de ~180 MB (OOM en printToFileAsync)
+      // a ~15-20 MB. Nítido igual: se captura a resolución nativa (pixelRatio).
+      const uri = await captureRef(shotRef, { format: 'jpg', quality: 0.82, result: 'data-uri' });
       onResult(uri);
     } catch {
       onResult(null);

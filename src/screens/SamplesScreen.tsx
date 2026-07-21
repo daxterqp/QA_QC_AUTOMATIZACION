@@ -39,6 +39,7 @@ import { pushSample, pullSamples, mergeAndSaveFeatureFlags } from '@services/Sup
 import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { exportSampleDossierPdf } from '@services/DossierExportService';
 import { buildSampleCroquisSpec } from '@services/CroquisService';
+import { getOrCaptureCroquis } from '@services/CroquisCacheService';
 import { useCroquisCapture } from '@context/CroquisCaptureContext';
 import { GpsCaptureModal } from '@components/GpsCaptureModal';
 import { DateRangePicker } from '@components/DateRangePicker';
@@ -275,7 +276,10 @@ export default function SamplesScreen({ route, navigation }: Props) {
         const spec = await buildSampleCroquisSpec(projectId, sid, ensayos, flags);
         if (spec) specs.push(spec);
       }
-      const croquisBySample = specs.length > 0 ? await captureMany(specs) : {};
+      // v101 — caché de croquis: la muestra solo se recaptura si cambió algo.
+      const cachedResults = specs.length > 0 ? await getOrCaptureCroquis(specs, {}, captureMany) : {};
+      const croquisBySample: Record<string, string> = {};
+      for (const k of Object.keys(cachedResults)) croquisBySample[k] = cachedResults[k].img;
       const uri = await exportSampleDossierPdf(ids, projectId, projectName, currentUser.id, croquisBySample);
       exitSelectMode();
       navigation.navigate('DossierPreview' as any, { pdfUri: uri, projectName });

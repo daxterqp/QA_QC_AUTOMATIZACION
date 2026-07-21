@@ -21,7 +21,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Q } from '@nozbe/watermelondb';
-import { database, projectSectorsCollection, projectsCollection } from '@db/index';
+import { database, projectSectorsCollection, projectsCollection, protocolTemplatesCollection, protocolsCollection } from '@db/index';
+import { useCroquisCapture } from '@context/CroquisCaptureContext';
+import { buildProtocolCroquisSpecs } from '@services/CroquisService';
+import { getOrCaptureCroquis } from '@services/CroquisCacheService';
 import { type GpsResult } from '@hooks/useGpsCapture';
 import { GpsCaptureModal } from './GpsCaptureModal';
 import { ManualCoordModal } from './ManualCoordModal';
@@ -128,6 +131,32 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
 
   // ── Persistencia ──────────────────────────────────────────────────────────
 
+  // v101 — PREGENERA el croquis del ensayo apenas cambian sus coordenadas o su
+  // sector (overlay breve). Queda cacheado en disco: al exportar el dossier ya
+  // no hay que capturar el mapa de nuevo (solo si algo cambió). Nunca bloquea
+  // ni falla el guardado — es mejor esfuerzo.
+  const { captureMany } = useCroquisCapture();
+  const pregenCroquis = useCallback(async () => {
+    try {
+      const proj: any = await projectsCollection.find(protocol.projectId);
+      const flags = parseFeatureFlagsJson(proj?.featureFlags);
+      const fresh: any = await protocolsCollection.find(protocol.id).catch(() => null);
+      const src: any = fresh ?? protocol;
+      if (src.latitude == null || src.longitude == null) return;
+      const tpl: any = src.templateId ? await protocolTemplatesCollection.find(src.templateId).catch(() => null) : null;
+      const fmtDate = (d: any) => (typeof d === 'string' && d.length >= 10) ? d.slice(0, 10).split('-').reverse().join('/') : undefined;
+      const inputs = [{
+        id: protocol.id,
+        idProtocolo: tpl?.idProtocolo ?? null,
+        lat: src.latitude, lng: src.longitude,
+        label: src.protocolCode ?? src.protocolNumber ?? undefined,
+        date: fmtDate(src.ensayoDate),
+      }];
+      const { specs, legends } = await buildProtocolCroquisSpecs(protocol.projectId, inputs, flags);
+      if (specs.length > 0) await getOrCaptureCroquis(specs, legends, captureMany);
+    } catch { /* el croquis nunca bloquea el guardado */ }
+  }, [protocol, captureMany]);
+
   /** Guarda coords nuevas. Si `keepBackup`, mueve las actuales a backup_*.
    *  `meta` (v35): método de captura + nº de muestras + precisión del promediado. */
   const saveCoords = useCallback(async (
@@ -202,8 +231,10 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
     });
     // Sync diferido (también funciona offline)
     enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: protocol.id, projectId: protocol.projectId }).catch(() => {});
+    // v101 — croquis fresco al caché (fire-and-forget; overlay breve).
+    pregenCroquis().catch(() => {});
     return sectorAuto;
-  }, [protocol, sectors, currentUser]);
+  }, [protocol, sectors, currentUser, pregenCroquis]);
 
   /** Asigna manualmente un sector. C3 — `sectorAssignedManually=true` SIEMPRE,
    *  incluso cuando el técnico elige "— Sin sector —". Sin esto, el
@@ -236,7 +267,9 @@ export function GPSCaptureBar({ protocol, readOnly, sectorLocked, title, embedde
       });
     });
     enqueueSync({ opType: 'PUSH_PROTOCOL_STATUS', entityId: protocol.id, projectId: protocol.projectId }).catch(() => {});
-  }, [protocol]);
+    // v101 — el sector activo cambia el croquis → refrescar el caché.
+    pregenCroquis().catch(() => {});
+  }, [protocol, pregenCroquis]);
 
   // ── Handlers UI ───────────────────────────────────────────────────────────
 

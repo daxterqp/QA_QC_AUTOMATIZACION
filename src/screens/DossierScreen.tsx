@@ -36,6 +36,7 @@ import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
 import { parseFeatureFlagsJson, getTemplatePrintConfig, PRINT_HEADER_COLORS, DEFAULT_HEADER_COLOR, PRINT_HEADER_FIELDS, CROQUIS_MAP_TYPES, CROQUIS_PLACEMENTS, type TemplatePrintConfig, type PrintFontLevel, type PrintGraphSize, type PrintHeaderSize } from '@utils/featureFlags';
 import { upsertSummaryRow } from '@services/SummaryRowService';
 import { buildProtocolCroquisSpecs, type CroquisResult } from '@services/CroquisService';
+import { getOrCaptureCroquis } from '@services/CroquisCacheService';
 import { useCroquisCapture } from '@context/CroquisCaptureContext';
 import { useI18n } from '@i18n/index';
 
@@ -239,10 +240,9 @@ export default function DossierScreen({ projectId, projectName, onBack, onOpenPr
       }));
       const { specs, legends } = await buildProtocolCroquisSpecs(projectId, inputs, flags);
       if (specs.length === 0) return {};
-      const imgs = await captureMany(specs);
-      const out: Record<string, CroquisResult> = {};
-      for (const id of Object.keys(imgs)) out[id] = { img: imgs[id], legend: legends[id] };
-      return out;
+      // v101 — caché: solo se CAPTURAN los croquis cuyo spec cambió (coords/
+      // sectores/config); el resto sale del disco al instante.
+      return await getOrCaptureCroquis(specs, legends, captureMany);
     } catch {
       return {};   // croquis es opcional; nunca bloquea el PDF
     }
