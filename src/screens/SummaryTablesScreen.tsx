@@ -32,6 +32,7 @@ import { buildAutoColumns, chartYOptions } from '@utils/summaryColumns';
 import { formatComputed } from '@utils/numericProtocol';
 import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Text as SvgText } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
+import { useFonts, Poppins_400Regular, Poppins_500Medium, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useI18n, tx } from '@i18n/index';
@@ -202,6 +203,8 @@ function rSquared(ys: number[], yhat: number[]): number | null {
 
 export default function SummaryTablesScreen({ route, navigation }: Props) {
   const { t } = useI18n();
+  // v100i — tipografía geométrica de los gráficos (sustituta libre de Century Gothic).
+  useFonts({ Poppins_400Regular, Poppins_500Medium, Poppins_700Bold });
   const insets = useSafeAreaInsets();
   const { projectId, projectName } = route.params;
 
@@ -976,6 +979,13 @@ const C_MAX = '#c90c0c';           // límite máximo
 const C_MIN = '#254ca5';           // límite mínimo
 const C_TREND = '#21de83';         // línea de tendencia
 const C_POINT = '#1a4f7a';         // puntos de ensayo
+// v100i — Tipografía de los gráficos. Century Gothic es propietaria (Monotype) y
+// no se puede redistribuir; Poppins es la geométrica libre más cercana (mismas
+// formas circulares y 'a' de un piso). Si algún día se licencia la real, basta
+// con cambiar estas tres constantes.
+const FONT_REG = 'Poppins_400Regular';
+const FONT_MED = 'Poppins_500Medium';
+const FONT_BOLD = 'Poppins_700Bold';
 /** v100h — Muestra de línea punteada para la leyenda: EXACTAMENTE 3 tramos
  *  (5 + 3 + 5 + 3 + 5 = 21 px), mismo grosor que las líneas del gráfico. */
 function LegendDash({ color }: { color: string }) {
@@ -1041,37 +1051,39 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
     <View style={{ alignItems: 'center' }}>
       <Svg width={W} height={H}>
         {/* Título del eje Y (vertical) — ocupa la banda muerta de la izquierda */}
-        <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle"
+        <SvgText x={12} y={(padT + H - padB) / 2} fontSize={9} fontFamily={FONT_BOLD} fill="#1a1a2e" textAnchor="middle"
           transform={`rotate(-90, 12, ${(padT + H - padB) / 2})`}>{yLabel}</SvgText>
         {/* v100g/h — Cuadrícula VERTICAL (más clara y más densa), detrás de todo */}
         {showVGrid ? Array.from({ length: V_DIV - 1 }, (_, k) => { const xx = padL + ((W - padL - padR) * (k + 1)) / V_DIV; return (
           <SvgLine key={`v${k}`} x1={xx} y1={padT} x2={xx} y2={H - padB} stroke={VGRID_GRAY} strokeWidth={1} />
         ); }) : null}
+        {/* Marco: eje Y (izq.), eje X (abajo) y v100i — cierre por la DERECHA */}
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
+        <SvgLine x1={W - padR} y1={padT} x2={W - padR} y2={H - padB} stroke={AXIS_GRAY} strokeWidth={1} />
         {yTicks.map((yv, i) => { const yy = syRaw(yv); return (
           <React.Fragment key={i}>
             <SvgLine x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={AXIS_GRAY} strokeWidth={1} />
-            <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
+            <SvgText x={padL - 4} y={yy + 3} fontSize={8} fontFamily={FONT_REG} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
           </React.Fragment>); })}
         {xTicks.map((xv, i) => xVertical
-          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={7.5} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
-          : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
+          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={7.5} fontFamily={FONT_REG} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
+          : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fontFamily={FONT_REG} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
         {/* Líneas de límite (punteadas): mín. azul, máx. rojo. Etiqueta al ARRANQUE (izq.) para no desbordar. */}
         {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi
           ? <React.Fragment>
               <SvgLine x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke={C_MAX} strokeWidth={1.6} strokeDasharray="6,4" />
-              <SvgText x={padL + 3} y={syRaw(limMax) - 3} fontSize={7.5} fontWeight="700" fill={C_MAX} textAnchor="start">{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</SvgText>
+              <SvgText x={padL + 3} y={syRaw(limMax) - 3} fontSize={7.5} fontFamily={FONT_BOLD} fill={C_MAX} textAnchor="start">{t('summary.limMaxShort')} {limMax.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
         {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi
           ? <React.Fragment>
               <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke={C_MIN} strokeWidth={1.6} strokeDasharray="6,4" />
-              <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontWeight="700" fill={C_MIN} textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
+              <SvgText x={padL + 3} y={syRaw(limMin) - 3} fontSize={7.5} fontFamily={FONT_BOLD} fill={C_MIN} textAnchor="start">{t('summary.limMinShort')} {limMin.toFixed(tickDec)}</SvgText>
             </React.Fragment> : null}
         {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill={C_POINT} opacity={0.85} />)}
         {/* Tendencia: MISMO ancho y patrón que las líneas de límite */}
         {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke={C_TREND} strokeWidth={1.6} strokeDasharray="6,4" /> : null}
-        <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
+        <SvgText x={(padL + W - padR) / 2} y={H - 3} fontSize={9} fontFamily={FONT_BOLD} fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
       </Svg>
 
       {/* v100h — Pie en DOS columnas: izquierda la leyenda (muestra de línea
@@ -1092,19 +1104,24 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, 
               ) : null}
             </View>
           ) : null}
+          {/* v100i — divisor vertical entre las dos secciones del pie */}
+          {showLegend && (showStats || (showEq && trendVisible)) ? <View style={styles.footerDivider} /> : null}
           {(showStats || (showEq && trendVisible)) ? (
             <View style={[styles.footerRight, { alignItems: showLegend ? 'flex-end' : 'flex-start' }]}>
               {showStats ? (
                 <View style={styles.chartStatsRow}>
-                  <Text style={styles.chartStat}>x̄ = <Text style={styles.chartStatVal}>{mean.toFixed(statDec)}</Text></Text>
-                  <Text style={styles.chartStat}>σ = <Text style={styles.chartStatVal}>{std.toFixed(statDec)}</Text></Text>
-                  <Text style={styles.chartStat}>n = <Text style={styles.chartStatVal}>{n}</Text></Text>
+                  <Text style={styles.chartStat}>n = {n}</Text>
+                  <Text style={styles.chartStat}>x̄ = {mean.toFixed(statDec)}</Text>
+                  <Text style={styles.chartStat}>σ = {std.toFixed(statDec)}</Text>
                 </View>
               ) : null}
               {showEq && trendVisible ? (
-                <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={3}>
-                  {eq}  ·  R² = {r2 != null ? r2.toFixed(3) : '—'} <Text style={styles.chartEqNote}>{t('summary.daysNote')}</Text>
-                </Text>
+                <View style={{ alignItems: showLegend ? 'flex-end' : 'flex-start' }}>
+                  <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>{eq}</Text>
+                  <Text style={[styles.chartEq, { textAlign: showLegend ? 'right' : 'left' }]} numberOfLines={2}>
+                    R² = {r2 != null ? r2.toFixed(3) : '—'}  {t('summary.daysNote')}
+                  </Text>
+                </View>
               ) : null}
             </View>
           ) : null}
@@ -1140,17 +1157,17 @@ const styles = StyleSheet.create({
   chartIcons: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', gap: 2, zIndex: 5 },
   chartIconBtn: { padding: 4 },
   chartShot: { backgroundColor: Colors.white, borderRadius: Radius.md, paddingTop: 2, paddingBottom: 4 },
-  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
+  chartTitle: { fontSize: 12.5, fontFamily: FONT_BOLD, color: Colors.navy, textAlign: 'center', textDecorationLine: 'underline', paddingHorizontal: 36, marginBottom: 8 },
   chartFooter: { width: '100%', flexDirection: 'row', marginTop: 4, paddingTop: 6, paddingHorizontal: 2, borderTopWidth: 1, borderTopColor: '#eef2f7', gap: 8 },
   footerLeft: { flex: 1, alignItems: 'flex-start', gap: 3 },
+  footerDivider: { width: 1, alignSelf: 'stretch', backgroundColor: '#e4e9f0' },
   footerRight: { flex: 1.2, gap: 3 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendTxt: { fontSize: 10, color: '#64748b', fontWeight: '700' },
-  chartEq: { fontSize: 9.5, color: '#334155', fontWeight: '700' },
-  chartEqNote: { fontSize: 8.5, color: '#94a3b8', fontWeight: '400' },
+  legendTxt: { fontSize: 10, color: '#64748b', fontFamily: FONT_MED },
+  // v100i — cálculos y ecuación SIN negrita, mismo cuerpo de letra.
+  chartEq: { fontSize: 10, color: '#334155', fontFamily: FONT_REG },
   chartStatsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  chartStat: { fontSize: 11, color: '#64748b' },
-  chartStatVal: { fontSize: 11, color: Colors.navy, fontWeight: '800' },
+  chartStat: { fontSize: 10, color: '#334155', fontFamily: FONT_REG },
   chartsHiddenBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 8, paddingVertical: 8, borderRadius: Radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
   chartEmpty: { height: 200, alignItems: 'center', justifyContent: 'center' },
 
