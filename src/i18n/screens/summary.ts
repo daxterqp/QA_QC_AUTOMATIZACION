@@ -101,6 +101,7 @@ const summary: Record<string, { es: string; en: string; pt: string }> = {
   },
   'summary.axisYParam': { es: 'Eje Y (parámetro)', en: 'Y axis (parameter)', pt: 'Eixo Y (parâmetro)' },
   'summary.trendLine': { es: 'Línea de tendencia', en: 'Trend line', pt: 'Linha de tendência' },
+  'summary.trendNone': { es: 'Ninguna', en: 'None', pt: 'Nenhuma' },
   'summary.trendLinear': { es: 'Lineal', en: 'Linear', pt: 'Linear' },
   'summary.trendQuad': { es: 'Cuadrática', en: 'Quadratic', pt: 'Quadrática' },
   'summary.trendCubic': { es: 'Cúbica', en: 'Cubic', pt: 'Cúbica' },

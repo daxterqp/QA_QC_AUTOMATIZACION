@@ -47,14 +47,16 @@ interface Row {
   status: string | null; values: Record<string, unknown>;
 }
 
-type Trend = 'linear' | 'quad' | 'cubic';
+type Trend = 'none' | 'linear' | 'quad' | 'cubic';
 /** v100d — Config por gráfico (persistida): ejes manuales + fechas verticales.
- *  yMin/yMax null/undefined = automático; xMin/xMax = YYYY-MM-DD o null. */
+ *  yMin/yMax null/undefined = automático; xMin/xMax = YYYY-MM-DD o null.
+ *  v100e — limMin/limMax = líneas horizontales de límite (punteadas) o null. */
 type ChartCfg = {
   id: string; yKey: string; trend: Trend;
   yMin?: number | null; yMax?: number | null;
   xMin?: string | null; xMax?: string | null;
   xVertical?: boolean;
+  limMin?: number | null; limMax?: number | null;
 };
 const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
@@ -393,12 +395,18 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const [axXMin, setAxXMin] = useState(''); const [axXMax, setAxXMax] = useState('');
   const [axVert, setAxVert] = useState(false);
   const [axDatePick, setAxDatePick] = useState<null | 'from' | 'to'>(null);
+  // v100e — límites horizontales + tendencia editable por gráfico.
+  const [axLimMin, setAxLimMin] = useState(''); const [axLimMax, setAxLimMax] = useState('');
+  const [axTrend, setAxTrend] = useState<Trend>('linear');
   const openAxisCfg = useCallback((ch: ChartCfg) => {
     setAxisChart(ch);
     setAxYMin(ch.yMin != null ? String(ch.yMin) : '');
     setAxYMax(ch.yMax != null ? String(ch.yMax) : '');
     setAxXMin(ch.xMin ?? ''); setAxXMax(ch.xMax ?? '');
     setAxVert(!!ch.xVertical); setAxDatePick(null);
+    setAxLimMin(ch.limMin != null ? String(ch.limMin) : '');
+    setAxLimMax(ch.limMax != null ? String(ch.limMax) : '');
+    setAxTrend(ch.trend ?? 'linear');
   }, []);
   const saveAxisCfg = useCallback(() => {
     if (!axisChart) return;
@@ -406,9 +414,10 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setCharts(prev => prev.map(c => c.id === axisChart.id ? {
       ...c, yMin: numOrNull(axYMin), yMax: numOrNull(axYMax),
       xMin: axXMin || null, xMax: axXMax || null, xVertical: axVert,
+      limMin: numOrNull(axLimMin), limMax: numOrNull(axLimMax), trend: axTrend,
     } : c));
     setAxisChart(null);
-  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert]);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend]);
 
   const toggleStatus = (k: string) => setStatusFilter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const activeFilterCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sectorFilter ? 1 : 0) + (statusFilter.size !== 3 ? 1 : 0);
@@ -537,13 +546,14 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                 return (
                   /* v100d — mantener presionado (o la ruedita) abre la config de ejes del gráfico */
                   <TouchableOpacity key={ch.id} style={styles.chartCard} activeOpacity={0.9} onLongPress={() => openAxisCfg(ch)} delayLongPress={350}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={[styles.chartTitle, { flex: 1 }]} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
-                      <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8}><Ionicons name="settings-outline" size={15} color={Colors.textMuted} /></TouchableOpacity>
+                    <View style={styles.chartTitleRow}>
+                      <Text style={styles.chartTitle} numberOfLines={1}>{yLabelOf(ch.yKey)}{t('summary.vsTime')}</Text>
+                      <TouchableOpacity onPress={() => openAxisCfg(ch)} hitSlop={8} style={styles.chartGear}><Ionicons name="settings-outline" size={15} color={Colors.textMuted} /></TouchableOpacity>
                     </View>
                     {data.length > 0
                       ? <ScatterChartRN data={data} yLabel={yLabelOf(ch.yKey)} trend={ch.trend}
-                          decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical} />
+                          decimals={decimalsOf(ch.yKey)} yMin={ch.yMin} yMax={ch.yMax} xVertical={!!ch.xVertical}
+                          limMin={ch.limMin} limMax={ch.limMax} />
                       : <View style={styles.chartEmpty}><Text style={styles.emptyText}>{t('summary.noneMatch')}</Text></View>}
                   </TouchableOpacity>
                 );
@@ -689,7 +699,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                   {charts.map((ch, i) => (
                     <ManagerRow key={ch.id} index={i} count={charts.length}
                       label={yLabelOf(ch.yKey)}
-                      sub={ch.trend === 'linear' ? t('summary.trendLinear') : ch.trend === 'quad' ? t('summary.trendQuad') : t('summary.trendCubic')}
+                      sub={ch.trend === 'none' ? t('summary.trendNone') : ch.trend === 'linear' ? t('summary.trendLinear') : ch.trend === 'quad' ? t('summary.trendQuad') : t('summary.trendCubic')}
                       onReorder={reorderCharts}
                       onDelete={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} />
                   ))}
@@ -712,7 +722,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
             </ScrollView>
             <Text style={styles.chartFieldLabel}>{t('summary.trendLine')}</Text>
             <View style={styles.chipRow}>
-              {([['linear', t('summary.trendLinear')], ['quad', t('summary.trendQuad')], ['cubic', t('summary.trendCubic')]] as [Trend, string][]).map(([k, l]) => (
+              {([['none', t('summary.trendNone')], ['linear', t('summary.trendLinear')], ['quad', t('summary.trendQuad')], ['cubic', t('summary.trendCubic')]] as [Trend, string][]).map(([k, l]) => (
                 <TouchableOpacity key={k} onPress={() => setAddTrend(k)} style={[styles.choice, addTrend === k && styles.choiceOn]}>
                   <Text style={[styles.choiceText, addTrend === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
               ))}
@@ -737,7 +747,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
             </View>
             <Text style={styles.smallMuted}>{axisChart ? yLabelOf(axisChart.yKey) : ''}</Text>
 
-            <Text style={styles.filterLabel}>Eje Y — límites (vacío = automático)</Text>
+            <Text style={styles.filterLabel}>Eje Y — rango (vacío = automático)</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
               <View style={styles.dateField}>
                 <Text style={styles.dateFieldLabel}>Mínimo</Text>
@@ -747,6 +757,26 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                 <Text style={styles.dateFieldLabel}>Máximo</Text>
                 <TextInput style={styles.axisInput} keyboardType="numeric" value={axYMax} onChangeText={setAxYMax} placeholder="auto" />
               </View>
+            </View>
+
+            <Text style={styles.filterLabel}>Líneas de límite (horizontales punteadas)</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <View style={styles.dateField}>
+                <Text style={[styles.dateFieldLabel, { color: '#2563eb' }]}>Límite mín.</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axLimMin} onChangeText={setAxLimMin} placeholder="ninguno" />
+              </View>
+              <View style={styles.dateField}>
+                <Text style={[styles.dateFieldLabel, { color: '#d93025' }]}>Límite máx.</Text>
+                <TextInput style={styles.axisInput} keyboardType="numeric" value={axLimMax} onChangeText={setAxLimMax} placeholder="ninguno" />
+              </View>
+            </View>
+
+            <Text style={styles.filterLabel}>Línea de tendencia</Text>
+            <View style={styles.chipRow}>
+              {([['none', t('summary.trendNone')], ['linear', t('summary.trendLinear')], ['quad', t('summary.trendQuad')], ['cubic', t('summary.trendCubic')]] as [Trend, string][]).map(([k, l]) => (
+                <TouchableOpacity key={k} onPress={() => setAxTrend(k)} style={[styles.choice, axTrend === k && styles.choiceOn]}>
+                  <Text style={[styles.choiceText, axTrend === k && styles.choiceTextOn]}>{l}</Text></TouchableOpacity>
+              ))}
             </View>
 
             <Text style={styles.filterLabel}>Eje X — rango de fechas (vacío = automático)</Text>
@@ -807,7 +837,7 @@ function ManagerRow({ index, count, label, sub, onReorder, onDelete }: {
   }));
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.mgrRow, aStyle]}>
+      <Animated.View style={[styles.mgrRow, { top: index * MGR_H }, aStyle]}>
         <Ionicons name="reorder-three" size={22} color={Colors.textMuted} />
         <View style={{ flex: 1 }}>
           <Text style={styles.mgrLabel} numberOfLines={1}>{label}</Text>
@@ -828,16 +858,22 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 // centrado, se dibujan recortados al borde), ticks con los MISMOS decimales de
 // la columna (subiendo precisión solo si el paso lo exige). Overrides yMin/yMax
 // y fechas verticales vienen de la config por gráfico.
-function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical }: {
-  data: { x: number; y: number; code: string }[]; yLabel: string; trend: 'linear' | 'quad' | 'cubic';
+function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical, limMin, limMax }: {
+  data: { x: number; y: number; code: string }[]; yLabel: string; trend: Trend;
   decimals?: number; yMin?: number | null; yMax?: number | null; xVertical?: boolean;
+  limMin?: number | null; limMax?: number | null;
 }) {
   const { t } = useI18n();
-  const W = 320, H = 230, padL = 44, padR = 10, padT = 10, padB = xVertical ? 56 : 38;
+  // v100e — el eje X vertical muestra TODAS las fechas → más alto abajo para que quepan apiladas.
+  const W = 320, H = 230, padL = 46, padR = 12, padT = 12, padB = xVertical ? 62 : 40;
   const xs = data.map(d => d.x), ys = data.map(d => d.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs) || minX + 1;
   const dx = maxX - minX || 1;
-  const { lo, hi } = niceYRange(ys, yMin, yMax);
+  // Rango Y: los límites configurados deben quedar VISIBLES dentro del área de ploteo.
+  let { lo, hi } = niceYRange(ys, yMin, yMax);
+  if (yMin == null && limMin != null && Number.isFinite(limMin)) lo = Math.min(lo, limMin);
+  if (yMax == null && limMax != null && Number.isFinite(limMax)) hi = Math.max(hi, limMax);
+  if (hi <= lo) hi = lo + 1;
   const dy = hi - lo;
   const sx = (x: number) => padL + ((x - minX) / dx) * (W - padL - padR);
   const syRaw = (y: number) => H - padB - ((y - lo) / dy) * (H - padT - padB);
@@ -848,15 +884,20 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical }
   const step = dy / 4;
   const needed = step > 0 ? Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)))) : 0;
   const tickDec = Math.max(decimals ?? 0, needed);
-  const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : 3;
+  // v100e — tendencia opcional ('none' = sin línea) y punteada.
+  const degree = trend === 'linear' ? 1 : trend === 'quad' ? 2 : trend === 'cubic' ? 3 : 0;
   const nx = xs.map(x => (x - minX) / dx);
-  const coef = polyfit(nx, ys, degree);
+  const coef = trend === 'none' ? null : polyfit(nx, ys, degree);
   const trendPts: string[] = [];
   if (coef) for (let i = 0; i <= 50; i++) { const tt = i / 50; trendPts.push(`${sx(minX + tt * dx).toFixed(1)},${sy(polyval(coef, tt)).toFixed(1)}`); }
   const fmtD = (tm: number) => { const d = new Date(tm); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`; };
-  const xTicks = [minX, (minX + maxX) / 2, maxX];
+  // v100e — X vertical: todas las fechas presentes (deduplicadas y ordenadas). Horizontal: 3 marcas.
+  const xTicks = xVertical
+    ? Array.from(new Set(xs)).sort((a, b) => a - b)
+    : [minX, (minX + maxX) / 2, maxX];
+  const trendVisible = coef && trend !== 'none';
   return (
-    <View>
+    <View style={{ alignItems: 'center' }}>
       <Svg width={W} height={H}>
         <SvgLine x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
         <SvgLine x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#cbd5e1" strokeWidth={1} />
@@ -866,15 +907,26 @@ function ScatterChartRN({ data, yLabel, trend, decimals, yMin, yMax, xVertical }
             <SvgText x={padL - 4} y={yy + 3} fontSize={8} fill="#64748b" textAnchor="end">{yv.toFixed(tickDec)}</SvgText>
           </React.Fragment>); })}
         {xTicks.map((xv, i) => xVertical
-          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={8} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
+          ? <SvgText key={i} x={sx(xv)} y={H - padB + 6} fontSize={7.5} fill="#64748b" textAnchor="end" transform={`rotate(-90, ${sx(xv)}, ${H - padB + 6})`} dy={3}>{fmtD(xv)}</SvgText>
           : <SvgText key={i} x={sx(xv)} y={H - padB + 14} fontSize={8} fill="#64748b" textAnchor="middle">{fmtD(xv)}</SvgText>)}
+        {/* Líneas de límite (punteadas): mín. azul, máx. rojo */}
+        {limMin != null && Number.isFinite(limMin) && limMin >= lo && limMin <= hi
+          ? <React.Fragment>
+              <SvgLine x1={padL} y1={syRaw(limMin)} x2={W - padR} y2={syRaw(limMin)} stroke="#2563eb" strokeWidth={1.3} strokeDasharray="5,4" />
+              <SvgText x={W - padR - 2} y={syRaw(limMin) - 3} fontSize={7.5} fill="#2563eb" textAnchor="end">mín {limMin.toFixed(tickDec)}</SvgText>
+            </React.Fragment> : null}
+        {limMax != null && Number.isFinite(limMax) && limMax >= lo && limMax <= hi
+          ? <React.Fragment>
+              <SvgLine x1={padL} y1={syRaw(limMax)} x2={W - padR} y2={syRaw(limMax)} stroke="#d93025" strokeWidth={1.3} strokeDasharray="5,4" />
+              <SvgText x={W - padR - 2} y={syRaw(limMax) - 3} fontSize={7.5} fill="#d93025" textAnchor="end">máx {limMax.toFixed(tickDec)}</SvgText>
+            </React.Fragment> : null}
         {data.map((d, i) => <SvgCircle key={i} cx={sx(d.x)} cy={sy(d.y)} r={3} fill="#1a4f7a" opacity={0.8} />)}
-        {coef ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={2} /> : null}
+        {trendVisible ? <SvgPolyline points={trendPts.join(' ')} fill="none" stroke="#e37400" strokeWidth={2} strokeDasharray="6,4" /> : null}
         <SvgText x={W / 2} y={H - 4} fontSize={9} fontWeight="700" fill="#1a1a2e" textAnchor="middle">{t('summary.timeAxisLabel')}</SvgText>
       </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 14, marginTop: 2 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 12, marginTop: 2 }}>
         <Text style={{ fontSize: 10, color: '#64748b' }}>{t('summary.testsLegend', { label: yLabel })}</Text>
-        <Text style={{ fontSize: 10, color: '#e37400' }}>{t('summary.trendLegend', { kind: trend === 'linear' ? t('summary.trendKindLinear') : trend === 'quad' ? t('summary.trendKindQuad') : t('summary.trendKindCubic') })}</Text>
+        {trendVisible ? <Text style={{ fontSize: 10, color: '#e37400' }}>{t('summary.trendLegend', { kind: trend === 'linear' ? t('summary.trendKindLinear') : trend === 'quad' ? t('summary.trendKindQuad') : t('summary.trendKindCubic') })}</Text> : null}
       </View>
     </View>
   );
@@ -903,7 +955,9 @@ const styles = StyleSheet.create({
   carouselEmpty: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, margin: 10, padding: 14, borderRadius: Radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.border, backgroundColor: Colors.white },
   carouselEmptyText: { fontSize: 12.5, color: Colors.primary, fontWeight: '700' },
   chartCard: { backgroundColor: Colors.white, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, width: 344 },
-  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, marginBottom: 6 },
+  chartTitleRow: { position: 'relative', justifyContent: 'center', minHeight: 22, marginBottom: 6 },
+  chartTitle: { fontSize: 13, fontWeight: '800', color: Colors.navy, textAlign: 'center', paddingHorizontal: 24 },
+  chartGear: { position: 'absolute', right: 0, top: 0, padding: 2 },
   chartEmpty: { height: 200, alignItems: 'center', justifyContent: 'center' },
 
   filterLabel: { fontSize: 10, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', marginTop: 8 },
