@@ -19,6 +19,9 @@ export interface SummaryTemplate {
   id_protocolo: string;
   name: string | null;
   config: SummaryConfig | null;
+  /** v100m — JSON crudo de summary_config_json: de ahí salen los gráficos del
+   *  dashboard (clave `charts`) y sirve para mezclarlos sin pisar `columns`. */
+  rawConfig: unknown;
   count: number;
 }
 
@@ -58,6 +61,7 @@ export function useSummaryTemplates(projectId: string) {
       id_protocolo: t?.id_protocolo ?? id,
       name: t?.name ?? null,
       config: parseSummaryConfig(t?.summary_config_json),
+      rawConfig: t?.summary_config_json ?? null,
       count,
     };
   }).sort((a, b) => a.id_protocolo.localeCompare(b.id_protocolo));

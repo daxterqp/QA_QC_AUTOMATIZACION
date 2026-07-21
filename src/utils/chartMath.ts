@@ -174,6 +174,37 @@ export function tickDecimals(step: number, columnDecimals?: number): number {
   return Math.max(columnDecimals ?? 0, needed);
 }
 
+// ── Persistencia EN NUBE de los gráficos ─────────────────────────────────────
+// v100m — Los gráficos del Dashboard se guardan dentro de
+// `protocol_templates.summary_config_json` (campo ya compartido y sincronizado),
+// bajo la clave `charts`. Así la configuración es la MISMA para todos los
+// usuarios y en todos los dispositivos: quien entra ve el mismo dashboard.
+// Antes vivían en AsyncStorage (móvil) / localStorage (web) → cada usuario veía
+// los suyos y no se veían entre plataformas.
+
+/** Lee los gráficos guardados dentro de summary_config_json. */
+export function parseChartsConfig(raw: unknown): ChartCfg[] {
+  let v: unknown = raw;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return [];
+  const arr = (v as { charts?: unknown }).charts;
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(c => !!c && typeof c === 'object'
+    && typeof (c as ChartCfg).id === 'string'
+    && typeof (c as ChartCfg).yKey === 'string') as ChartCfg[];
+}
+
+/** Mezcla los gráficos dentro del summary_config_json existente SIN tocar el
+ *  resto (columns/aggregations se preservan). Si no había config, NO inventa
+ *  columnas: queda un objeto solo con `charts` y las columnas siguen siendo
+ *  automáticas (parseSummaryConfig lo seguirá considerando "sin config"). */
+export function mergeChartsIntoConfig(raw: unknown, charts: ChartCfg[]): Record<string, unknown> {
+  let v: unknown = raw;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+  const base = (v && typeof v === 'object' && !Array.isArray(v)) ? { ...(v as Record<string, unknown>) } : {};
+  return { ...base, charts };
+}
+
 /** Fecha corta dd/mm/aa para el eje de tiempo. */
 export function fmtShortDate(tm: number): string {
   const d = new Date(tm);

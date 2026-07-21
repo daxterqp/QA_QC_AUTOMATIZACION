@@ -19,7 +19,8 @@ import Animated, { useSharedValue, useAnimatedStyle, runOnJS } from 'react-nativ
 import AppHeader from '@components/AppHeader';
 import CalendarPicker from '@components/CalendarPicker';
 import { Colors, Radius } from '../theme/colors';
-import { summaryRowsCollection, protocolTemplatesCollection, protocolTemplateItemsCollection, projectsCollection } from '@db/index';
+import { database, summaryRowsCollection, protocolTemplatesCollection, protocolTemplateItemsCollection, projectsCollection } from '@db/index';
+import { supabase } from '@config/supabase';
 import { pullSummaryRows, backfillLocalSummary } from '@services/SummaryRowService';
 import { parseFeatureFlagsJson, isLinearProject } from '@utils/featureFlags';
 import { useRealtimeProjectPull } from '@hooks/useRealtimeProjectPull';
@@ -33,7 +34,7 @@ import {
   type Trend, type Join, type ChartCfg,
   AXIS_GRAY, VGRID_GRAY, C_MAX, C_MIN, C_TREND, C_POINT, DAY_MS, V_DIV,
   niceYRange, niceTicks, ticksWithStep, polyfit, polyval, equationStr, rSquared,
-  smoothPath, describe, tickDecimals, fmtShortDate,
+  smoothPath, describe, tickDecimals, fmtShortDate, parseChartsConfig, mergeChartsIntoConfig,
 } from '@utils/chartMath';
 import { formatComputed } from '@utils/numericProtocol';
 import Svg, { Line as SvgLine, Circle as SvgCircle, Polyline as SvgPolyline, Path as SvgPath, Text as SvgText } from 'react-native-svg';
@@ -127,6 +128,9 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
 
   const [allRows, setAllRows] = useState<Row[]>([]);
   const [configByTpl, setConfigByTpl] = useState<Record<string, ReturnType<typeof parseSummaryConfig>>>({});
+  // v100m — JSON crudo de summary_config_json por plantilla (para mezclar los
+  // gráficos sin pisar columns/aggregations).
+  const [rawCfgByTpl, setRawCfgByTpl] = useState<Record<string, unknown>>({});
   const [labelByTpl, setLabelByTpl] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [templateId, setTemplateId] = useState<string | null>(null);
@@ -174,15 +178,55 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     AsyncStorage.setItem(`summary_measures_${templateId}`, JSON.stringify(measures)).catch(() => {});
   }, [measures, templateId]);
 
-  // Gráficos (dashboard) guardados por tipo de ensayo.
+  // v100m — Gráficos del dashboard: viven EN LA NUBE dentro de
+  // protocol_templates.summary_config_json (clave `charts`), no en el
+  // dispositivo. Así todos los usuarios (móvil y PC) ven el MISMO dashboard.
+  // Migración suave: si la nube aún no tiene gráficos pero este dispositivo
+  // tenía los suyos en AsyncStorage, se suben una vez y se limpia el local.
   useEffect(() => {
     if (!templateId) { setCharts([]); return; }
-    AsyncStorage.getItem(`summary_charts_${templateId}`).then(raw => { try { setCharts(raw ? JSON.parse(raw) : []); } catch { setCharts([]); } });
-  }, [templateId]);
-  useEffect(() => {
-    if (!templateId) return;
-    AsyncStorage.setItem(`summary_charts_${templateId}`, JSON.stringify(charts)).catch(() => {});
-  }, [charts, templateId]);
+    // ⚠ Espera a que la config de la plantilla esté CARGADA: si migráramos el
+    // legacy antes, el push pisaría los gráficos que ya viven en la nube.
+    if (!(templateId in rawCfgByTpl)) return;
+    const cloud = parseChartsConfig(rawCfgByTpl[templateId]);
+    if (cloud.length > 0) { setCharts(cloud); return; }
+    AsyncStorage.getItem(`summary_charts_${templateId}`).then(raw => {
+      let legacy: ChartCfg[] = [];
+      try { legacy = raw ? JSON.parse(raw) : []; } catch { legacy = []; }
+      setCharts(legacy);
+      if (legacy.length > 0) {
+        pushChartsToCloud(templateId, legacy);
+        AsyncStorage.removeItem(`summary_charts_${templateId}`).catch(() => {});
+      }
+    });
+  }, [templateId, rawCfgByTpl]);
+
+  // v100m — Persiste los gráficos en la NUBE (y en la copia local WMDB para que
+  // la pantalla no dependa de la red). Mismo patrón que el toggle de plantillas
+  // ocultas: WMDB primero + push directo a Supabase.
+  const pushChartsToCloud = useCallback(async (tplId: string, next: ChartCfg[]) => {
+    try {
+      const tpl: any = await protocolTemplatesCollection.find(tplId).catch(() => null);
+      const merged = mergeChartsIntoConfig(tpl?.summaryConfigJson ?? rawCfgByTpl[tplId], next);
+      const json = JSON.stringify(merged);
+      if (tpl) {
+        await database.write(async () => { await tpl.update((r: any) => { r.summaryConfigJson = json; }); });
+      }
+      setRawCfgByTpl(prev => ({ ...prev, [tplId]: json }));
+      const { error } = await supabase.from('protocol_templates').update({ summary_config_json: merged }).eq('id', tplId);
+      if (error) console.warn('[charts push] no se pudo guardar en la nube:', error.message);
+    } catch (e) {
+      console.warn('[charts push]', e);
+    }
+  }, [rawCfgByTpl]);
+  /** Cambia los gráficos en pantalla y los guarda en la nube. */
+  const updateCharts = useCallback((updater: (prev: ChartCfg[]) => ChartCfg[]) => {
+    setCharts(prev => {
+      const next = updater(prev);
+      if (templateId) pushChartsToCloud(templateId, next);
+      return next;
+    });
+  }, [templateId, pushChartsToCloud]);
 
   // Backfill local solo 1 vez por montaje (los protocolos viejos sin fila).
   const didBackfill = useRef(false);
@@ -209,11 +253,15 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
     setAllRows(rows);
     const tpls: any[] = await protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch();
     const cfg: Record<string, any> = {}; const lbl: Record<string, string> = {};
+    const rawCfg: Record<string, unknown> = {};
     for (const t of tpls) {
       cfg[t.id] = parseSummaryConfig((t as any).summaryConfigJson);
+      // v100m — el JSON CRUDO se guarda para poder mezclar los gráficos sin
+      // pisar columns/aggregations al escribir en la nube.
+      rawCfg[t.id] = (t as any).summaryConfigJson;
       lbl[t.id] = (t as any).idProtocolo || (t as any).name || tx('summary.testTypeFallback');
     }
-    setConfigByTpl(cfg); setLabelByTpl(lbl);
+    setConfigByTpl(cfg); setLabelByTpl(lbl); setRawCfgByTpl(rawCfg);
     try {
       const proj: any = await projectsCollection.find(projectId);
       setIsLinear(isLinearProject(parseFeatureFlagsJson(proj?.featureFlags)));
@@ -408,7 +456,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const saveAxisCfg = useCallback(() => {
     if (!axisChart) return;
     const numOrNull = (s: string) => { const n = Number(String(s).trim().replace(',', '.')); return s.trim() !== '' && Number.isFinite(n) ? n : null; };
-    setCharts(prev => prev.map(c => c.id === axisChart.id ? {
+    updateCharts(prev => prev.map(c => c.id === axisChart.id ? {
       ...c, yMin: numOrNull(axYMin), yMax: numOrNull(axYMax),
       xMin: axXMin || null, xMax: axXMax || null, xVertical: axVert,
       limMin: numOrNull(axLimMin), limMax: numOrNull(axLimMax), trend: axTrend,
@@ -417,7 +465,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
       yStep: numOrNull(axYStep), xStep: numOrNull(axXStep),
     } : c));
     setAxisChart(null);
-  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid, axJoin, axVxMin, axVxMax, axYStep, axXStep]);
+  }, [axisChart, axYMin, axYMax, axXMin, axXMax, axVert, axLimMin, axLimMax, axTrend, axShowEq, axShowStats, axShowLegend, axShowVGrid, axJoin, axVxMin, axVxMax, axYStep, axXStep, updateCharts]);
 
   // v100f — ocultar temporalmente los gráficos para ver la tabla completa (móvil).
   const [chartsHidden, setChartsHidden] = useState(false);
@@ -425,7 +473,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
   const toggleStatus = (k: string) => setStatusFilter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const activeFilterCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sectorFilter ? 1 : 0) + (statusFilter.size !== 3 ? 1 : 0);
   const clearFilters = () => { setStatusFilter(new Set(['APPROVED', 'SUBMITTED', 'REJECTED'])); setSectorFilter(''); setDateFrom(''); setDateTo(''); };
-  const reorderCharts = useCallback((from: number, to: number) => setCharts(prev => {
+  const reorderCharts = useCallback((from: number, to: number) => updateCharts(prev => {
     if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
     const n = [...prev]; const [m] = n.splice(from, 1); n.splice(to, 0, m); return n;
   }), []);
@@ -729,7 +777,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
                       label={`${yLabelOf(ch.yKey)}${ch.xKey ? ` vs ${yLabelOf(ch.xKey)}` : ''}`}
                       sub={ch.trend === 'none' ? t('summary.trendNone') : ch.trend === 'linear' ? t('summary.trendLinear') : ch.trend === 'quad' ? t('summary.trendQuad') : t('summary.trendCubic')}
                       onReorder={reorderCharts}
-                      onDelete={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} />
+                      onDelete={() => updateCharts(prev => prev.filter(c => c.id !== ch.id))} />
                   ))}
                 </View>
               </>
@@ -774,7 +822,7 @@ export default function SummaryTablesScreen({ route, navigation }: Props) {
             </View>
             </ScrollView>
             <TouchableOpacity disabled={!addY || yOptions.length === 0}
-              onPress={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
+              onPress={() => { if (addY) { updateCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
               style={[styles.addBtn, (!addY || yOptions.length === 0) && { opacity: 0.4 }]}>
               <Ionicons name="add" size={16} color={Colors.white} /><Text style={styles.genBtnText}>{t('summary.addChart')}</Text>
             </TouchableOpacity>

@@ -18,14 +18,18 @@ import { FIXED_SUMMARY_COLUMNS, dynamicColumnsFromRows, summaryStatus, type Summ
 import { buildAutoColumns, chartYOptions } from '@lib/summaryColumns';
 import { useI18n } from '@lib/i18n';
 import { usePageRefresh } from '@hooks/usePageRefresh';
+import { createClient } from '@lib/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
 // v100l — Espejo EXACTO de src/utils/chartMath.ts: toda la matemática y la paleta
 // de los gráficos es compartida con el móvil para que no puedan divergir.
 import {
   type Trend, type Join, type ChartCfg,
   AXIS_GRAY, VGRID_GRAY, C_MAX, C_MIN, C_TREND, C_POINT, DAY_MS, V_DIV,
   niceYRange, niceTicks, ticksWithStep, polyfit, polyval, equationStr, rSquared,
-  smoothPath, describe, tickDecimals, fmtShortDate,
+  smoothPath, describe, tickDecimals, fmtShortDate, parseChartsConfig, mergeChartsIntoConfig,
 } from '@lib/chartMath';
+
+const supabase = createClient();
 
 const STATUS_FILTERS = [
   { key: 'APPROVED', labelKey: 'webDash.approved', color: '#1e8e3e' },
@@ -90,6 +94,7 @@ const genId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e6
 function SummaryTablesInner() {
   const { refreshing, onRefresh } = usePageRefresh();
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const { id: projectId } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -122,16 +127,44 @@ function SummaryTablesInner() {
     try { localStorage.setItem(`summary_measures_${templateId}`, JSON.stringify(measures)); } catch { /* cuota */ }
   }, [measures, templateId]);
 
-  // Dashboard de gráficos: ARRAY ordenado, persistido por tipo de ensayo (templateId).
+  // v100m — Gráficos del dashboard: viven EN LA NUBE dentro de
+  // protocol_templates.summary_config_json (clave `charts`), no en el navegador.
+  // Así todos los usuarios (PC y móvil) ven el MISMO dashboard.
+  // Migración suave: si la nube aún no tiene gráficos pero este navegador tenía
+  // los suyos en localStorage, se suben una vez y se limpia el local.
   const [charts, setCharts] = useState<ChartCfg[]>([]);
   useEffect(() => {
     if (!templateId) { setCharts([]); return; }
-    try { const raw = localStorage.getItem(`summary_charts_${templateId}`); setCharts(raw ? JSON.parse(raw) : []); } catch { setCharts([]); }
-  }, [templateId]);
-  useEffect(() => {
-    if (!templateId) return;
-    try { localStorage.setItem(`summary_charts_${templateId}`, JSON.stringify(charts)); } catch { /* cuota */ }
-  }, [charts, templateId]);
+    // ⚠ Espera a que la plantilla esté CARGADA: si migráramos el legacy antes,
+    // el push pisaría los gráficos que ya viven en la nube.
+    if (!selectedTpl) return;
+    const cloud = parseChartsConfig(selectedTpl.rawConfig);
+    if (cloud.length > 0) { setCharts(cloud); return; }
+    let legacy: ChartCfg[] = [];
+    try { const raw = localStorage.getItem(`summary_charts_${templateId}`); legacy = raw ? JSON.parse(raw) : []; } catch { legacy = []; }
+    setCharts(legacy);
+    if (legacy.length > 0) {
+      pushChartsToCloud(templateId, legacy);
+      try { localStorage.removeItem(`summary_charts_${templateId}`); } catch { /* ignore */ }
+    }
+    // selectedTpl?.rawConfig entra como dependencia para recargar al llegar los datos
+  }, [templateId, selectedTpl?.rawConfig]);
+
+  /** Persiste los gráficos en la nube (summary_config_json.charts) sin pisar columns. */
+  const pushChartsToCloud = async (tplId: string, next: ChartCfg[]) => {
+    const merged = mergeChartsIntoConfig(selectedTpl?.rawConfig, next);
+    const { error } = await supabase.from('protocol_templates').update({ summary_config_json: merged }).eq('id', tplId);
+    if (error) { console.warn('[charts push] no se pudo guardar en la nube:', error.message); return; }
+    queryClient.invalidateQueries({ queryKey: ['summary-template-labels', projectId] });
+  };
+  /** Cambia los gráficos en pantalla y los guarda en la nube. */
+  const updateCharts = (updater: (prev: ChartCfg[]) => ChartCfg[]) => {
+    setCharts(prev => {
+      const next = updater(prev);
+      if (templateId) pushChartsToCloud(templateId, next);
+      return next;
+    });
+  };
 
   // Modales
   const [showFilters, setShowFilters] = useState(false);
@@ -164,7 +197,7 @@ function SummaryTablesInner() {
   const saveAxisCfg = () => {
     if (!axisChart) return;
     const nOrNull = (v: string) => { const x = Number(String(v).trim().replace(',', '.')); return v.trim() !== '' && Number.isFinite(x) ? x : null; };
-    setCharts(prev => prev.map(c => c.id === axisChart.id ? {
+    updateCharts(prev => prev.map(c => c.id === axisChart.id ? {
       ...c, yMin: nOrNull(ax.yMin), yMax: nOrNull(ax.yMax), xMin: ax.xMin || null, xMax: ax.xMax || null,
       vxMin: nOrNull(ax.vxMin), vxMax: nOrNull(ax.vxMax), yStep: nOrNull(ax.yStep), xStep: nOrNull(ax.xStep),
       limMin: nOrNull(ax.limMin), limMax: nOrNull(ax.limMax), trend: ax.trend, join: ax.join,
@@ -260,7 +293,7 @@ function SummaryTablesInner() {
 
   // Reordenar gráficos al soltar (drag HTML5).
   const dropChart = (to: number) => {
-    setCharts(prev => {
+    updateCharts(prev => {
       if (dragIdx === null || dragIdx === to) return prev;
       const next = [...prev];
       const [moved] = next.splice(dragIdx, 1);
@@ -474,7 +507,7 @@ function SummaryTablesInner() {
                         className={`flex items-center gap-2 px-2 py-2 rounded-lg border bg-surface/60 ${dragIdx === i ? 'border-primary opacity-60' : 'border-border'}`}>
                         <GripVertical size={16} className="text-gray-400 cursor-grab shrink-0" />
                         <span className="flex-1 min-w-0 text-sm text-textPrimary truncate">{yLabelOf(ch.yKey)}{ch.xKey ? ` vs ${yLabelOf(ch.xKey)}` : ''} <span className="text-[10px] text-gray-400">· {ch.trend === 'none' ? t('webDash.trendNone') : ch.trend === 'linear' ? t('webDash.trendLinear') : ch.trend === 'quad' ? t('webDash.trendQuad') : t('webDash.trendCubic')}</span></span>
-                        <button onClick={() => setCharts(prev => prev.filter(c => c.id !== ch.id))} title={t('webDash.deleteChartTitle')} className="text-gray-400 hover:text-danger shrink-0"><Trash2 size={15} /></button>
+                        <button onClick={() => updateCharts(prev => prev.filter(c => c.id !== ch.id))} title={t('webDash.deleteChartTitle')} className="text-gray-400 hover:text-danger shrink-0"><Trash2 size={15} /></button>
                       </div>
                     ))}
                   </div>
@@ -506,7 +539,7 @@ function SummaryTablesInner() {
                 <select value={addJoin} onChange={e => setAddJoin(e.target.value as Join)} className="border border-border rounded px-2 py-1.5 text-sm bg-white">
                   <option value="none">{t('webDash.joinNone')}</option><option value="linear">{t('webDash.joinLinear')}</option><option value="smooth">{t('webDash.joinSmooth')}</option>
                 </select></label>
-              <button onClick={() => { if (addY) { setCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
+              <button onClick={() => { if (addY) { updateCharts(prev => [...prev, { id: genId(), yKey: addY, trend: addTrend, xKey: addX || null, join: addJoin }]); setAddY(''); setAddTrend('linear'); setAddX(''); setAddJoin('none'); } }}
                 disabled={!addY || yOptions.length === 0}
                 className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40"><Plus size={14} /> {t('webDash.addChart')}</button>
             </div>

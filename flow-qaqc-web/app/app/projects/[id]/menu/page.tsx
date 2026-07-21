@@ -95,7 +95,8 @@ export default function ProjectMenuPage() {
       href: `/app/projects/${projectId}/locations`,
       icon: List,
       tone: 'primary',
-      visible: true,
+      // v100m — respeta el flag igual que el móvil.
+      visible: !!flags && !!flags.module_protocols_by_location,
     },
     // ── v31 (Parte D) — modos de llenado adicionales (conviven entre sí) ──
     {
@@ -141,7 +142,8 @@ export default function ProjectMenuPage() {
       href: `/app/projects/${projectId}/summary`,
       icon: Table2,
       tone: 'secondary',
-      visible: !!flags && !!flags.numeric_protocols,
+      // v100m — el móvil gatea el Dashboard con module_summary_tables (no numeric_protocols).
+      visible: !!flags && !!flags.module_summary_tables,
     },
     {
       key: 'plans',
@@ -150,7 +152,8 @@ export default function ProjectMenuPage() {
       href: `/app/projects/${projectId}/plans`,
       icon: FileText,
       tone: 'navy',
-      visible: true,
+      // v100m — respeta el flag igual que el móvil (antes estaba forzado a true).
+      visible: !!flags && !!flags.module_plans,
     },
     {
       key: 'file-upload',
@@ -168,7 +171,8 @@ export default function ProjectMenuPage() {
       href: `/app/projects/${projectId}/contacts`,
       icon: Phone,
       tone: 'warning',
-      visible: true,
+      // v100m — respeta el flag igual que el móvil.
+      visible: !!flags && !!flags.module_contacts,
     },
     {
       key: 'report-templates',
