@@ -162,3 +162,13 @@ button:not(:disabled):active { transform: scale(0.98); }
 .chart-font, .chart-font text, .chart-font span, .chart-font div {
   font-family: var(--font-chart), 'Poppins', system-ui, sans-serif;
 }
+
+/* v100n — Barra de desplazamiento VISIBLE (carrusel de gráficos y tabla del
+   Dashboard). Por defecto Windows la dibuja finísima y el usuario no la ve. */
+.pretty-scroll { scrollbar-width: auto; scrollbar-color: #94a3b8 #eef2f7; }
+.pretty-scroll::-webkit-scrollbar { height: 12px; width: 12px; }
+.pretty-scroll::-webkit-scrollbar-track { background: #eef2f7; border-radius: 8px; }
+.pretty-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8; border-radius: 8px; border: 2px solid #eef2f7;
+}
+.pretty-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }

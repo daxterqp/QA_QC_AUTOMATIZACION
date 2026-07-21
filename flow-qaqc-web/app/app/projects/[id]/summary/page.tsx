@@ -352,13 +352,17 @@ function SummaryTablesInner() {
 
         {templateId && (
           <>
-            {/* Carrusel de gráficos (scroll horizontal; orden = el del modal ⚙) */}
+            {/* Carrusel de gráficos (scroll horizontal; orden = el del modal ⚙).
+                v100n — `min-w-0` es OBLIGATORIO: sin él, este hijo flex toma
+                min-width:auto y se estira al ancho de las tarjetas, desbordando
+                la página entera (el gráfico se cortaba y los botones del header
+                quedaban fuera de pantalla). `pretty-scroll` = barra visible. */}
             {charts.length === 0 ? (
               <button onClick={() => setShowCharts(true)} className="bg-white rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted hover:border-primary/40 hover:text-primary transition flex items-center justify-center gap-2">
                 <LineChart size={16} /> {t('webDash.chartsCarouselEmpty')}
               </button>
             ) : (
-              <div className="flex gap-4 overflow-x-auto pb-2 snap-x">
+              <div className="min-w-0 flex gap-4 overflow-x-auto pb-2 snap-x pretty-scroll">
                 {charts.map(ch => {
                   const pts = buildPts(ch);
                   const title = ch.xKey
@@ -388,7 +392,7 @@ function SummaryTablesInner() {
             )}
 
             {/* Tabla — congela solo el encabezado (fila de nombres). Sin freeze de 1ª columna. */}
-            <div className="bg-white rounded-xl border border-border overflow-auto max-h-[70vh]">
+            <div className="min-w-0 bg-white rounded-xl border border-border overflow-auto max-h-[70vh] pretty-scroll">
               {loadingRows ? <div className="flex items-center gap-2 text-muted text-sm p-8"><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</div>
                 : filtered.length === 0 ? <div className="p-8 text-center text-sm text-muted">{t('webDash.noTestMatches')}</div>
                 : <table className="text-[12px] border-collapse">
