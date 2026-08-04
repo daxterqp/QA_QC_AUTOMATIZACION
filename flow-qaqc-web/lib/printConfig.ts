@@ -53,10 +53,72 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'id_protocolo', label: 'ID Protocolo' },
   { key: 'ubicacion', label: 'Coordenadas / Ubicación' },
   { key: 'especialidad', label: 'Especialidad' },
+  // v103 — Partes del contrato. NO entran en DEFAULT_HEADER_FIELDS: solo salen si
+  // el proyecto las llenó Y el usuario las eligió (si no, ocuparían ancho en vano).
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'supervision', label: 'Supervisión' },
+  { key: 'contratista', label: 'Contratista' },
 ];
 // Especialidad seleccionada por defecto; al renderizar solo aparece en
 // protocolos CLÁSICOS (en numéricos se ignora).
 export const DEFAULT_HEADER_FIELDS = ['proyecto', 'supervisor', 'f_realizacion', 'f_aprobacion', 'id_protocolo', 'ubicacion', 'especialidad'];
+
+// ─── v103 — Partes del contrato y firmas del PDF ────────────────────────────
+// ESPEJO de src/utils/featureFlags.ts. Cualquier cambio va en los DOS.
+
+/** Cliente / supervisión / contratista. Fijos del proyecto, no del ensayo. */
+export interface ProjectParties {
+  cliente?: string;
+  supervision?: string;
+  contratista?: string;
+}
+/** Orden y etiqueta de las partes (mismo orden en pantalla, PDF y config). */
+export const PROJECT_PARTY_FIELDS: { key: keyof ProjectParties; label: string }[] = [
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'supervision', label: 'Supervisión' },
+  { key: 'contratista', label: 'Contratista' },
+];
+/** Partes con los vacíos ya podados (para no renderizar filas en blanco). */
+export function getProjectParties(flags: unknown): ProjectParties {
+  const f = asFlags(flags);
+  const p = (f.project_parties && typeof f.project_parties === 'object') ? f.project_parties : {};
+  const out: ProjectParties = {};
+  for (const { key } of PROJECT_PARTY_FIELDS) {
+    const v = typeof p[key] === 'string' ? p[key].trim() : '';
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
+/** Una casilla de firma del pie del PDF. */
+export interface PdfSignatureSlot {
+  /** Rótulo bajo la línea (p. ej. "Ing. de Calidad"). */
+  role: string;
+  /** Nombre impreso bajo el rótulo. Vacío → solo la línea y el rótulo. */
+  name?: string;
+  /** De dónde sale el nombre: 'fixed' = el texto de `name`; 'approver' = el
+   *  usuario que realmente aprobó el ensayo (solo tiene sentido en UNA casilla). */
+  source?: 'fixed' | 'approver';
+}
+/** Casillas por defecto para proyectos que activan las 3 firmas del cliente. */
+export const DEFAULT_PDF_SIGNATURES: PdfSignatureSlot[] = [
+  { role: 'Ing. de Calidad', source: 'approver' },
+  { role: 'Residente de Obra', source: 'fixed' },
+  { role: 'Supervisor de Obra', source: 'fixed' },
+];
+/** Casillas saneadas. Vacío → el PDF usa su firma única de siempre. */
+export function getPdfSignatures(flags: unknown): PdfSignatureSlot[] {
+  const f = asFlags(flags);
+  const raw = Array.isArray(f.pdf_signatures) ? f.pdf_signatures : [];
+  return raw
+    .map((s: any) => ({
+      role: typeof s?.role === 'string' ? s.role.trim() : '',
+      name: typeof s?.name === 'string' ? s.name.trim() : '',
+      source: s?.source === 'approver' ? 'approver' as const : 'fixed' as const,
+    }))
+    .filter((s: PdfSignatureSlot) => !!s.role)
+    .slice(0, 4);   // más de 4 no entran a lo ancho de la hoja
+}
 
 export function getCroquisConfig(c: CroquisConfig | undefined): ResolvedCroquis {
   const pl: CroquisPlacement = (c?.placement === 'start' || c?.placement === 'photos') ? c.placement : 'end';

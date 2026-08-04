@@ -17,6 +17,11 @@ const protoFill: Record<string, { es: string; en: string; pt: string }> = {
   'protoFill.dg.test': { es: 'Ensayo', en: 'Test', pt: 'Ensaio' },
   'protoFill.dg.dateTime': { es: 'Fecha / hora', en: 'Date / time', pt: 'Data / hora' },
   'protoFill.dg.location': { es: 'Ubicación', en: 'Location', pt: 'Local' },
+  // v103 — Partes del contrato (fijas del proyecto). Solo se muestran si el
+  // proyecto las llenó; si no, la fila entera desaparece.
+  'protoFill.dg.cliente': { es: 'Cliente', en: 'Client', pt: 'Cliente' },
+  'protoFill.dg.supervision': { es: 'Supervisión', en: 'Supervision', pt: 'Supervisão' },
+  'protoFill.dg.contratista': { es: 'Contratista', en: 'Contractor', pt: 'Empreiteiro' },
 
   // Planos
   'protoFill.plans.btn': { es: 'Planos', en: 'Drawings', pt: 'Plantas' },

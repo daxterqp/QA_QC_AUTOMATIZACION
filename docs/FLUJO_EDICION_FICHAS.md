@@ -348,6 +348,44 @@ NO copiar: protocols/protocol_items (instancias), protocol_summary_rows,
 protocol_code_counters (secuencias arrancan de cero en destino).
 Verificar en destino: crear 1 instancia de prueba de cada ficha + export PDF.
 
+## 7bis. Reescribir SOLO los textos de una ficha ya en producción
+
+Caso real (v103, Mercado Mayorista): mejorar la redacción de las 201 preguntas
+de 13 fichas que YA tenían ensayos creados.
+
+**Nunca DELETE + INSERT si hay instancias.** `protocol_items` enlaza con la
+plantilla por `(protocol_id, partida_item)`; reinsertar rompe ese enlace y los
+ensayos pierden sus respuestas. Se actualiza **en sitio**:
+
+1. Editar los textos en el generador (fuente de verdad), no en la nube:
+   `01 Proyecto_Mercado_Mayorista/_genMaestro.js` → `node …/_genMaestro.js`.
+2. `node …/_genUpdateTextos.js` genera **una sola sentencia** con CTEs que
+   modifican datos: respaldo + UPDATE plantilla + UPDATE instancias + touch.
+   Una sentencia = atómica sin depender de que el cliente respete BEGIN/COMMIT,
+   y todos los CTEs leen el mismo snapshot, así que el respaldo captura el
+   estado PREVIO aunque aparezca "antes" en el texto.
+3. Reglas del UPDATE:
+   - **Solo `item_description`.** En fichas numéricas `validation_method` es el
+     DSL de celdas: sobrescribirlo destruye las fórmulas.
+   - Instancias: **solo las `status='DRAFT'`.** Un ensayo aprobado es registro
+     firmado y no se toca jamás.
+   - No renumerar ni descartar partidas: las pantallas ordenan por
+     `partida_item` y las instancias enlazan por él.
+   - `updated_at` fijo (no `now()`) → reruns idempotentes con LWW.
+4. Verificar con los conteos que devuelve la propia sentencia y luego:
+   fórmulas `numerico-fx` vivas, 0 textos en MAYÚSCULAS, 0 instancias
+   desfasadas respecto a su plantilla.
+
+**Redacción (regla permanente del servicio):** no se copia el protocolo del
+cliente tal cual. Cada ítem se reescribe como pregunta cerrada verificable en
+campo, en frase normal (nunca TODO EN MAYÚSCULAS), con el criterio de
+aceptación entre paréntesis. Los ítems escritos como instructivo ("Utiliza un
+rotomartillo…") pasan a verificación del resultado ("¿La perforación se ejecutó
+con…?"): lo que se firma es la conformidad, no el instructivo. Los ítems de
+CAPTURA de datos de las numéricas siguen siendo etiquetas (sustantivos), porque
+no se responden con SÍ/NO. El generador tiene una guarda que aborta si algún
+texto vuelve a quedar en mayúsculas.
+
 ## 8. Piezas del flujo
 
 - Respaldo/rollback: tabla `ficha_edit_backups` (Supabase, RLS cerrado).

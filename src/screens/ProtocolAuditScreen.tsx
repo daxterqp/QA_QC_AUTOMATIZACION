@@ -24,7 +24,7 @@ import { GPSCaptureBar } from '@components/GPSCaptureBar';
 import { TopoCoordCard } from '@components/topo/TopoCoordCard';
 import { decideCoordCards } from '@utils/topoVisibility';
 import { topoColumns } from '@utils/featureFlags';
-import { parseFeatureFlagsJson } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, getProjectParties, PROJECT_PARTY_FIELDS, isGpsCaptureNumericEnabled, isGpsCaptureSubjectiveEnabled } from '@utils/featureFlags';
 import { useTour } from '@context/TourContext';
 import { useTourStepWithLayout } from '@hooks/useTourStep';
 import type Protocol from '@models/Protocol';
@@ -627,6 +627,21 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
                 <InfoCell label={t('protoAudit.field.specialty')} value={(location as any).specialty} />
               )}
             </View>
+            {/* v103 — Partes del contrato: cliente / supervisión / contratista.
+                Fijas del proyecto (feature_flags.project_parties). Espejo del
+                bloque equivalente en ProtocolFillScreen. */}
+            {(() => {
+              const parties = getProjectParties(projectFlags);
+              const cells = PROJECT_PARTY_FIELDS
+                .filter(f => !!parties[f.key])
+                .map(f => <InfoCell key={f.key} label={t(`protoAudit.field.${f.key}`)} value={parties[f.key]!} />);
+              if (cells.length === 0) return null;
+              const rows = [];
+              for (let i = 0; i < cells.length; i += 2) {
+                rows.push(<View key={i} style={styles.infoRow}>{cells.slice(i, i + 2)}</View>);
+              }
+              return <>{rows}</>;
+            })()}
             {p.rejectionReason && p.status !== 'APPROVED' ? (
               <View style={styles.rejectionRow}>
                 <Text style={styles.rejectionLabel}>{t('protoAudit.rejectionLabel')}</Text>
@@ -671,7 +686,11 @@ export default function ProtocolAuditScreen({ navigation, route }: Props) {
             const hasGps = pa.latitude != null && pa.longitude != null;
             const hasTopo = pa.topoCoordEast != null || pa.topoCoordNorth != null || pa.topoCoordElevation != null || !!pa.topoValuesJson;
             const decision = decideCoordCards(projectFlags, hasGps, hasTopo);
-            const gpsCaptureOn = (numericMode && projectFlags.gps_capture_numeric) || (!numericMode && projectFlags.gps_capture_subjective);
+            // v103 — Espejo del arreglo en ProtocolFillScreen: el flag HIJO se leía
+            // directo, saltándose el padre `map_enabled`.
+            const gpsCaptureOn = numericMode
+              ? isGpsCaptureNumericEnabled(projectFlags)
+              : isGpsCaptureSubjectiveEnabled(projectFlags);
             return (
               <>
                 {gpsCaptureOn && decision.showGps && (

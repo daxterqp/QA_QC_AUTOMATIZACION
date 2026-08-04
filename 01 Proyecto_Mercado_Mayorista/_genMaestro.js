@@ -10,6 +10,16 @@
  * REGLA DE ORO: todas las preguntas en TODAS las secciones (no deduplicar).
  * PartidaItem = enteros secuenciales por protocolo, sin huecos (las pantallas ordenan por él).
  *
+ * REDACCIÓN (v2, ago-2026) — regla permanente del servicio: NO se copian los
+ * textos del cliente tal cual. Cada ítem se reescribe como PREGUNTA CERRADA
+ * verificable en campo, en frase normal (nunca TODO EN MAYÚSCULAS), con el
+ * criterio de aceptación explícito entre paréntesis cuando aporta. Los ítems
+ * que en el original eran instrucciones ("Utiliza un rotomartillo…") pasan a
+ * verificación del resultado ("¿La perforación se ejecutó con…?"), porque lo
+ * que se firma es la CONFORMIDAD, no el instructivo.
+ * Se conservan la cantidad y el orden de partidas del cliente: renumerar
+ * rompería los ensayos ya creados.
+ *
  * Ejecutar DESDE la raíz del repo:  node "01 Proyecto_Mercado_Mayorista/_genMaestro.js"
  */
 const XLSX = require('xlsx');
@@ -30,8 +40,18 @@ const M = {
   texto: 'texto-[]',
 };
 
-// Opciones de respuesta de los checklist clásicos del cliente
-const SI_NO_NA = 'Inspección visual';   // el sistema ya provee SI/NO/NA en fichas clásicas
+// Preguntas que se repiten literalmente en varias secciones/protocolos.
+// Centralizadas para que una mejora de redacción se propague a todas.
+const Q = {
+  limpieza: '¿El área de trabajo quedó limpia y ordenada?',
+  seguridad: '¿El frente de trabajo cuenta con las protecciones de seguridad requeridas?',
+  ubicPuntos: '¿Los puntos están ubicados según el plano?',
+  cantSalidas: '¿La cantidad de puntos de salida coincide con el plano?',
+  diamRecorrido: '¿El diámetro y el recorrido de la tubería corresponden al plano?',
+  cantTuberias: '¿La cantidad de tuberías coincide con el plano?',
+  sepTuberias: '¿La separación entre tuberías cumple el detalle?',
+  soporte: '¿Las tuberías y accesorios están adecuadamente soportados y fijados?',
+};
 
 /** Helper: arma filas de un protocolo clásico a partir de secciones. */
 function clasico(id, nombre, secciones) {
@@ -60,76 +80,77 @@ function clasico(id, nombre, secciones) {
 const PA = clasico('PA', 'PROTOCOLO DE ACERO', [{
   seccion: 'INSPECCIÓN',
   items: [
-    ['CUMPLIMIENTO DEL PROCEDIMIENTO DE TRABAJO', M.doc],
-    ['CONTRASTE DE ESPECIALIDADES (Arquitectura, Estructuras e Instalaciones)', M.plano],
-    ['VERIFICACIÓN TOPOGRÁFICA (trazo, alineamiento y niveles)', M.topo],
-    ['VERIFICACIÓN DE LOS DIÁMETROS DE ACERO, SEGÚN DETALLES DEL PLANO', M.medicion],
-    ['VERIFICACIÓN DE LA DISTRIBUCIÓN DE ACERO (cantidad y espaciamiento entre barras)', M.medicion],
-    ['CORRECTA UBICACIÓN DE EMPALMES (traslapes, según el RNE)', M.plano],
-    ['CORRECTA EQUIDISTANCIA DE ESTRIBOS SEGÚN DETALLES', M.medicion],
-    ['VERIFICACIÓN DE COLOCACIÓN DE MECHAS, ANCLAJES, FIJACIÓN Y ARRIOSTRE DE LAS ARMADURAS (según detalles de planos)', M.plano],
-    ['VERIFICACIÓN DE LA LIMPIEZA DE LAS ARMADURAS (libre de rebabas, sin deformaciones)', M.visual],
-    ['ÓPTIMAS CONDICIONES DE SEGURIDAD (líneas de vida, plataformas de acceso, barandas, etc.)', M.visual],
+    ['¿Se ejecutó el trabajo conforme al procedimiento aprobado?', M.doc],
+    ['¿Se contrastaron los planos de las especialidades y se resolvieron las interferencias? (arquitectura, estructuras e instalaciones)', M.plano],
+    ['¿Se realizó la verificación topográfica? (trazo, alineamiento y niveles)', M.topo],
+    ['¿Los diámetros del acero corresponden a los detalles del plano?', M.medicion],
+    ['¿La distribución del acero cumple lo indicado? (cantidad y espaciamiento entre barras)', M.medicion],
+    ['¿Los empalmes están ubicados donde corresponde? (traslapes según el RNE)', M.plano],
+    ['¿El espaciamiento de estribos coincide con los detalles del plano?', M.medicion],
+    ['¿Las armaduras están correctamente ancladas, fijadas y arriostradas? (mechas, anclajes y arriostres según planos)', M.plano],
+    ['¿Las armaduras están limpias y sin defectos? (libres de óxido suelto, rebabas y deformaciones)', M.visual],
+    [Q.seguridad + ' (líneas de vida, plataformas de acceso y barandas)', M.visual],
   ],
 }]);
 
 const PE = clasico('PE', 'PROTOCOLO DE ENCOFRADO', [{
   seccion: 'INSPECCIÓN',
   items: [
-    ['CUMPLIMIENTO DEL PROCEDIMIENTO DE TRABAJO', M.doc],
-    ['VERIFICACIÓN DE TRAZO Y UBICACIÓN (ejes, alineamiento, distancias, coordenadas y niveles)', M.topo],
-    ['VERIFICACIÓN DE ENCOFRADOS (alineamiento, verticalidad y sin deformaciones)', M.medicion],
-    ['CORRECTA COLOCACIÓN DE DADOS Y SEPARADORES LATERALES', M.visual],
-    ['CORRECTO MONTAJE, FIJACIÓN Y ARRIOSTRE DEL ENCOFRADO', M.visual],
-    ['DIMENSIONES DEL ENCOFRADO DE ACUERDO A LO ESPECIFICADO', M.medicion],
-    ['VERIFICACIÓN DE COLOCACIÓN DE DESMOLDANTE Y LIMPIEZA INTERIOR DE LOS ENCOFRADOS', M.visual],
-    ['VERIFICACIÓN DE PASES O TUBOS DE INSTALACIONES SANITARIAS', M.plano],
-    ['VERIFICACIÓN DE PASES O TUBOS DE INSTALACIONES ELÉCTRICAS', M.plano],
-    ['VERIFICACIÓN DE COLOCACIÓN DE SOPORTES Y/O ANCLAJES PARA PASES E INSTALACIONES VARIAS', M.plano],
-    ['CONDICIONES DE SEGURIDAD ADECUADAS', M.visual],
+    ['¿Se ejecutó el trabajo conforme al procedimiento aprobado?', M.doc],
+    ['¿El trazo y la ubicación del encofrado coinciden con el plano? (ejes, alineamiento, distancias y niveles)', M.topo],
+    ['¿El encofrado está alineado, aplomado y sin deformaciones?', M.medicion],
+    ['¿Se colocaron los dados y separadores laterales que garantizan el recubrimiento?', M.visual],
+    ['¿El encofrado está montado, fijado y arriostrado de forma estable?', M.visual],
+    ['¿Las dimensiones internas del encofrado corresponden a lo especificado?', M.medicion],
+    ['¿Se aplicó desmoldante y el interior del encofrado quedó limpio?', M.visual],
+    ['¿Están colocados los pases y tubos de instalaciones sanitarias según plano?', M.plano],
+    ['¿Están colocados los pases y tubos de instalaciones eléctricas según plano?', M.plano],
+    ['¿Se colocaron los soportes y anclajes para los pases e instalaciones varias?', M.plano],
+    [Q.seguridad, M.visual],
   ],
 }]);
 
 // ⚠ Código propio (PAA): en el Excel original compartía PE-VRS-2026-004 con Encofrado.
+// El original venía redactado como instructivo (imperativo); aquí se verifica el RESULTADO.
 const PAA = clasico('PAA', 'PROTOCOLO DE PERFORACIÓN Y ANCLAJE DE ACERO', [{
   seccion: 'INSPECCIÓN',
   items: [
-    ['Alinea y centra la columna o varilla en la posición definitiva', M.topo],
-    ['Respeta siempre un recubrimiento de concreto mínimo de 2 cm en los bordes para evitar la oxidación futura del acero', M.medicion],
-    ['Utiliza un rotomartillo con broca para concreto (punta de carburo)', M.visual],
-    ['Diámetro del agujero: debe ser más grande que el diámetro de la varilla', M.medicion],
-    ['Debe penetrar al menos 200 mm en el concreto estructural', M.medicion],
-    ['Limpieza: soplar con aire comprimido, limpiar con escobilla y volver a soplar', M.visual],
-    ['Inyectar desde el fondo hasta los 2/3 del volumen', M.visual],
-    ['Insertar girando hasta el fondo para que la resina llegue a cubrir todo el corrugado', M.visual],
-    ['El tiempo de curado dependerá de la temperatura del día (20 °C - 24 horas, 10 °C - 48 horas y <5 °C - 72 horas)', M.doc],
-    ['Condiciones de seguridad adecuadas', M.visual],
+    ['¿La varilla quedó alineada y centrada en su posición definitiva?', M.topo],
+    ['¿Se respetó el recubrimiento mínimo de 2 cm respecto al borde del concreto?', M.medicion],
+    ['¿La perforación se ejecutó con rotomartillo y broca de carburo para concreto?', M.visual],
+    ['¿El diámetro de la perforación es mayor que el de la varilla, según la ficha técnica del anclaje?', M.medicion],
+    ['¿La perforación alcanza al menos 200 mm de profundidad en el concreto estructural?', M.medicion],
+    ['¿Se limpió la perforación con aire comprimido y escobilla antes de inyectar?', M.visual],
+    ['¿El adhesivo se inyectó desde el fondo hasta dos tercios del volumen de la perforación?', M.visual],
+    ['¿La varilla se insertó girando hasta el fondo, cubriendo todo el corrugado con resina?', M.visual],
+    ['¿Se respetó el tiempo de curado según la temperatura ambiente? (20 °C: 24 h · 10 °C: 48 h · menos de 5 °C: 72 h)', M.doc],
+    [Q.seguridad, M.visual],
   ],
 }]);
 
 const PIS = clasico('PIS', 'PROTOCOLO DE TUBERÍA (INSTALACIONES SANITARIAS)', [{
   seccion: 'DESCRIPCIÓN DE ACTIVIDADES',
   items: [
-    ['Instalación de tuberías y accesorios de acuerdo a planos', M.plano],
-    ['Material especificado (PVC)', M.visual],
-    ['Verificar diámetro de tubería, de acuerdo al plano', M.medicion],
-    ['Material libre de defectos (inspección visual)', M.visual],
-    ['Soportada adecuadamente (fijación de tuberías y accesorios)', M.visual],
-    ['Taponear los terminales expuestos de la tubería así como las cajas de pase', M.visual],
+    ['¿Las tuberías y accesorios se instalaron según el plano?', M.plano],
+    ['¿El material instalado corresponde al especificado? (PVC)', M.visual],
+    ['¿El diámetro de la tubería corresponde al indicado en el plano?', M.medicion],
+    ['¿El material está libre de defectos? (fisuras, deformaciones o golpes)', M.visual],
+    [Q.soporte, M.visual],
+    ['¿Los terminales expuestos de tubería y las cajas de paso quedaron taponeados?', M.visual],
   ],
 }]);
 
 const PIE = clasico('PIE', 'PROTOCOLO DE INSTALACIONES ELÉCTRICAS', [{
   seccion: 'DESCRIPCIÓN DE ACTIVIDADES',
   items: [
-    ['Correcta ubicación de puntos, según plano', M.plano],
-    ['Las tuberías están libres de aplastamientos, roturas o dobleces excesivos que reduzcan su diámetro interior', M.visual],
-    ['Los accesorios (uniones, conectores y curvas) son del mismo material y clase que la tubería (PVC)', M.visual],
-    ['Colocación de las cajas (octogonales, rectangulares, de paso) según trazo topográfico', M.topo],
-    ['Soporte adecuado (fijación de tuberías y accesorios)', M.visual],
-    ['Limpieza de área de trabajo', M.visual],
-    ['Diámetro de tubería de acuerdo al plano', M.medicion],
-    ['Condición en buen estado (tuberías, accesorios)', M.visual],
+    [Q.ubicPuntos, M.plano],
+    ['¿Las tuberías están libres de aplastamientos, roturas o dobleces que reduzcan su diámetro interior?', M.visual],
+    ['¿Los accesorios son del mismo material y clase que la tubería? (uniones, conectores y curvas en PVC)', M.visual],
+    ['¿Las cajas se colocaron según el trazo topográfico? (octogonales, rectangulares y de paso)', M.topo],
+    [Q.soporte, M.visual],
+    [Q.limpieza, M.visual],
+    ['¿El diámetro de la tubería corresponde al indicado en el plano?', M.medicion],
+    ['¿Las tuberías y accesorios están en buen estado?', M.visual],
   ],
 }]);
 
@@ -141,19 +162,19 @@ const CTTR = clasico('CTTR', 'CONTROL TOPOGRÁFICO TRAZO Y REPLANTEO', [
   {
     seccion: 'TRAZO INICIAL',
     items: [
-      ['Personal calificado - Topógrafo', M.doc],
-      ['Terreno liberado', M.doc],
-      ['Verificación de alineamiento, medidas y escuadra', M.topo],
-      ['Modificación al plano base', M.plano],
+      ['¿El trazo lo ejecutó un topógrafo calificado?', M.doc],
+      ['¿El terreno fue liberado y entregado para iniciar el trazo?', M.doc],
+      ['¿Se verificaron el alineamiento, las medidas y la escuadra del trazo?', M.topo],
+      ['¿El trazo coincide con el plano base, sin modificaciones? (de haberlas, detallarlas en observaciones)', M.plano],
     ],
   },
   {
     seccion: 'TRAZO REPLANTEADO',
     items: [
-      ['Verificación de dimensiones de estructura', M.topo],
-      ['Trazo de vértices en campo', M.topo],
-      ['Trazo final de estructura', M.topo],
-      ['Equipo topográfico calibrado', M.doc],
+      ['¿Las dimensiones replanteadas de la estructura coinciden con el plano?', M.topo],
+      ['¿Se materializaron en campo los vértices de la estructura?', M.topo],
+      ['¿El trazo final de la estructura quedó marcado y verificado?', M.topo],
+      ['¿El equipo topográfico cuenta con certificado de calibración vigente?', M.doc],
     ],
   },
 ]);
@@ -162,19 +183,19 @@ const CTPT = clasico('CTPT', 'CONTROL TOPOGRÁFICO LEVANTAMIENTO DEL TERRENO', [
   {
     seccion: 'TRAZO INICIAL',
     items: [
-      ['Personal calificado - Topógrafo', M.doc],
-      ['Terreno liberado', M.doc],
-      ['Verificación de alineamiento, medidas y escuadra', M.topo],
-      ['Modificación al plano base', M.plano],
+      ['¿El levantamiento lo ejecutó un topógrafo calificado?', M.doc],
+      ['¿El terreno fue liberado y entregado para iniciar el levantamiento?', M.doc],
+      ['¿Se verificaron el alineamiento, las medidas y la escuadra del levantamiento?', M.topo],
+      ['¿El levantamiento coincide con el plano base, sin modificaciones? (de haberlas, detallarlas en observaciones)', M.plano],
     ],
   },
   {
     seccion: 'TRAZO REPLANTEADO',
     items: [
-      ['Verificación de dimensiones de estructura', M.topo],
-      ['Trazo de vértices en campo', M.topo],
-      ['Trazo final de estructura', M.topo],
-      ['Señalización de espacios', M.visual],
+      ['¿Las dimensiones levantadas de la estructura coinciden con el plano?', M.topo],
+      ['¿Se materializaron en campo los vértices de la estructura?', M.topo],
+      ['¿El trazo final de la estructura quedó marcado y verificado?', M.topo],
+      ['¿Los espacios levantados quedaron señalizados en campo?', M.visual],
     ],
   },
 ]);
@@ -188,60 +209,60 @@ const PPIS = clasico('PPIS', 'PROTOCOLO DE COLOCACIÓN DE PUNTOS DE INSTALACIONE
   {
     seccion: 'VERIFICACIÓN PUNTOS DE AGUA',
     items: [
-      ['Verificación de red: agua fría / agua caliente', M.plano],
-      ['Material de red: PVC / PPR / acero', M.visual],
-      ['Correcta ubicación de puntos, según plano', M.plano],
-      ['Cantidad de puntos de salida', M.medicion],
-      ['Inspección visual de diámetro y recorrido de tubería', M.visual],
-      ['Tipo de salida de agua: ovalín / inodoro', M.visual],
-      ['Válvula de paso', M.visual],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿La red instalada corresponde al tipo previsto? (agua fría o agua caliente)', M.plano],
+      ['¿El material de la red corresponde al especificado? (PVC, PPR o acero)', M.visual],
+      ['¿Los puntos de agua están ubicados según el plano?', M.plano],
+      [Q.cantSalidas, M.medicion],
+      [Q.diamRecorrido, M.visual],
+      ['¿El tipo de salida corresponde al aparato previsto? (ovalín, inodoro u otro)', M.visual],
+      ['¿Se instaló la válvula de paso donde indica el plano?', M.visual],
+      [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'VERIFICACIÓN PUNTOS DE DESAGÜE',
     items: [
-      ['Correcta ubicación de puntos, según plano', M.plano],
-      ['Material de red: PVC / PPR', M.visual],
-      ['Cantidad de puntos de salida', M.medicion],
-      ['Inspección visual de diámetro y recorrido de tubería', M.visual],
-      ['Tipo de salida de desagüe: ovalín / inodoro', M.visual],
-      ['Urinario / registro / sumidero', M.visual],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿Los puntos de desagüe están ubicados según el plano?', M.plano],
+      ['¿El material de la red corresponde al especificado? (PVC o PPR)', M.visual],
+      [Q.cantSalidas, M.medicion],
+      [Q.diamRecorrido, M.visual],
+      ['¿El tipo de salida corresponde al aparato previsto? (ovalín, inodoro u otro)', M.visual],
+      ['¿Se instalaron los puntos de urinario, registro y sumidero previstos?', M.visual],
+      [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'VERIFICACIÓN PUNTOS DE VENTILACIÓN',
     items: [
-      ['Correcta ubicación de puntos, según plano', M.plano],
-      ['Material de red: PVC / PPR', M.visual],
-      ['Cantidad de puntos de salida', M.medicion],
-      ['Inspección visual de diámetro y recorrido de tubería', M.visual],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿Los puntos de ventilación están ubicados según el plano?', M.plano],
+      ['¿El material de la red corresponde al especificado? (PVC o PPR)', M.visual],
+      [Q.cantSalidas, M.medicion],
+      [Q.diamRecorrido, M.visual],
+      [Q.limpieza, M.visual],
     ],
   },
 ]);
 
 // PPIE — 9 secciones × 4 preguntas = 36 filas (REGLA DE ORO)
 const PPIE_SECCIONES = [
-  ['VERIFICACIÓN SISTEMA DE PUESTA A TIERRA', 'Ubicación de caja equipotencial y caja de paso, según plano'],
-  ['VERIFICACIÓN PUNTOS DE FUERZA', 'Correcta ubicación de puntos, según plano'],
-  ['ALUMBRADO', 'Correcta ubicación de puntos, según plano'],
-  ['TOMACORRIENTES', 'Correcta ubicación de puntos, según plano'],
-  ['LUZ DE EMERGENCIA', 'Correcta ubicación de puntos, según plano'],
-  ['SISTEMA DE ALARMA', 'Correcta ubicación de puntos, según plano (ACI / plano de intrusión)'],
-  ['SISTEMA DE AIRE ACONDICIONADO', 'Correcta ubicación de puntos, según plano'],
-  ['DATA', 'Correcta ubicación de puntos, según plano'],
-  ['CIRCUITO CERRADO TV - CCTV', 'Correcta ubicación de puntos, según plano'],
+  ['VERIFICACIÓN SISTEMA DE PUESTA A TIERRA', '¿La caja equipotencial y las cajas de paso están ubicadas según el plano?'],
+  ['VERIFICACIÓN PUNTOS DE FUERZA', Q.ubicPuntos],
+  ['ALUMBRADO', Q.ubicPuntos],
+  ['TOMACORRIENTES', Q.ubicPuntos],
+  ['LUZ DE EMERGENCIA', Q.ubicPuntos],
+  ['SISTEMA DE ALARMA', '¿Los puntos están ubicados según el plano? (ACI y plano de intrusión)'],
+  ['SISTEMA DE AIRE ACONDICIONADO', Q.ubicPuntos],
+  ['DATA', Q.ubicPuntos],
+  ['CIRCUITO CERRADO TV - CCTV', Q.ubicPuntos],
 ];
 const PPIE = clasico('PPIE', 'PROTOCOLO DE PUNTOS EN INSTALACIONES ELÉCTRICAS',
   PPIE_SECCIONES.map(([seccion, primera]) => ({
     seccion,
     items: [
       [primera, M.plano],
-      ['Inspección visual: diámetro, recorrido de tubería, caja y altura', M.visual],
-      ['Cantidad de puntos de salida', M.medicion],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿El diámetro, el recorrido de la tubería, la caja y la altura corresponden al plano?', M.visual],
+      [Q.cantSalidas, M.medicion],
+      [Q.limpieza, M.visual],
     ],
   })),
 );
@@ -250,36 +271,36 @@ const PRE = clasico('PRE', 'PROTOCOLO DE REDES ELÉCTRICAS', [
   {
     seccion: 'TRABAJOS EN TERRENO',
     items: [
-      ['Ubicación de zanja', M.plano],
-      ['Verificación de corte de zanja', M.medicion],
-      ['Altura de cama de arena (según detalle)', M.medicion],
-      ['Inspección visual de diámetro y recorrido de tubería', M.visual],
-      ['Verificación de cantidad de tuberías', M.medicion],
-      ['Separación entre tuberías según detalle', M.medicion],
-      ['Señalización según detalle', M.visual],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿La zanja está ubicada según el plano?', M.plano],
+      ['¿Las dimensiones de corte de la zanja cumplen el detalle? (ancho y profundidad)', M.medicion],
+      ['¿La cama de arena tiene la altura indicada en el detalle?', M.medicion],
+      [Q.diamRecorrido, M.visual],
+      [Q.cantTuberias, M.medicion],
+      [Q.sepTuberias, M.medicion],
+      ['¿Se colocó la señalización de la red según el detalle? (cinta o malla de advertencia)', M.visual],
+      [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'TRABAJOS EN BUZÓN',
     items: [
-      ['Inspección visual de diámetro de tubería', M.visual],
-      ['Verificación de cantidad de tuberías', M.medicion],
-      ['Separación entre tuberías según detalle', M.medicion],
-      ['Distancia mínima entre NPT y tubería', M.medicion],
-      ['Verificación de sumidero (según detalle)', M.plano],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿El diámetro de la tubería que llega al buzón corresponde al plano?', M.visual],
+      [Q.cantTuberias, M.medicion],
+      [Q.sepTuberias, M.medicion],
+      ['¿Se respeta la distancia mínima entre el NPT y la tubería?', M.medicion],
+      ['¿El sumidero del buzón se ejecutó según el detalle?', M.plano],
+      [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'REDES COLGADAS',
     items: [
-      ['Trazo y replanteo', M.topo],
-      ['Inspección visual de diámetro de tubería / bandeja', M.visual],
-      ['Verificación de cantidad de tuberías / bandejas', M.medicion],
-      ['Separación entre tuberías / bandeja según detalle', M.medicion],
-      ['Distancia mínima entre NPT y tubería / bandeja', M.medicion],
-      ['Limpieza de área de trabajo', M.visual],
+      ['¿El trazo y replanteo de la red colgada fue verificado?', M.topo],
+      ['¿El diámetro de la tubería o bandeja corresponde al plano?', M.visual],
+      ['¿La cantidad de tuberías o bandejas coincide con el plano?', M.medicion],
+      ['¿La separación entre tuberías o bandejas cumple el detalle?', M.medicion],
+      ['¿Se respeta la distancia mínima entre el NPT y la tubería o bandeja?', M.medicion],
+      [Q.limpieza, M.visual],
     ],
   },
 ]);
@@ -290,16 +311,19 @@ const PDA = clasico('PDA', 'PROTOCOLO DE DETECCIÓN Y ALARMAS CONTRA INCENDIO',
   [1, 2, 3, 4, 5].map(n => ({
     seccion: `AMBIENTE ${n}`,
     items: [
-      ['Ubicación correcta según detalles y plano (sensor de temperatura, detector de humo, luz estroboscópica, estación manual, sirena)', M.plano],
-      ['Correcto funcionamiento de sirena al detectar el sensor de temperatura y activación de alarma contra incendios', M.func],
-      ['Correcto funcionamiento de sirena al detectar el detector de humo y activación de alarma contra incendios', M.func],
-      ['Reconocimiento y correspondencia del tablero de control detector del circuito de alarmas contra incendios', M.func],
+      ['¿Los dispositivos están ubicados según el plano? (sensor de temperatura, detector de humo, luz estroboscópica, estación manual y sirena)', M.plano],
+      ['¿La sirena se activa al operar el sensor de temperatura?', M.func],
+      ['¿La sirena se activa al operar el detector de humo?', M.func],
+      ['¿El tablero de control reconoce e identifica correctamente el circuito de alarma?', M.func],
     ],
   })),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FICHAS NUMÉRICAS
+//   En las numéricas el "Método de validación" es el DSL de celdas: NO se toca.
+//   Los ítems de captura de datos siguen siendo etiquetas de campo (sustantivos),
+//   porque no se responden con SÍ/NO — solo los checklist son preguntas.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** PCC — Colocación de concreto: checklist previo/posterior + datos + tabla de batches. */
@@ -314,15 +338,15 @@ function buildPCC() {
 
   const S1 = 'INSPECCIÓN PREVIA AL VACIADO';
   const previa = [
-    'Cumplimiento del procedimiento de trabajo',
-    'Verificación topográfica',
-    'Preparación y verificación de juntas',
-    'Verificación acero de refuerzo',
-    'Verificación encofrado',
-    'Verificación instalaciones sanitarias',
-    'Verificación instalaciones eléctricas',
-    'Verificación instalaciones mecánicas',
-    'Verificación anclajes de estructuras metálicas',
+    '¿Se ejecutó el trabajo conforme al procedimiento aprobado?',
+    '¿Se verificaron los niveles y el alineamiento antes del vaciado?',
+    '¿Las juntas fueron preparadas y verificadas?',
+    '¿El acero de refuerzo fue liberado?',
+    '¿El encofrado fue liberado?',
+    '¿Las instalaciones sanitarias embebidas fueron verificadas?',
+    '¿Las instalaciones eléctricas embebidas fueron verificadas?',
+    '¿Las instalaciones mecánicas embebidas fueron verificadas?',
+    '¿Los anclajes para estructuras metálicas fueron verificados?',
   ];
   for (const it of previa) add(it, 'list-[SI, NO, NA]', S1);
 
@@ -350,11 +374,11 @@ function buildPCC() {
 
   const S4 = 'INSPECCIÓN POSTERIOR AL VACIADO';
   const posterior = [
-    'Acabado superficial de acuerdo a lo especificado',
-    'Nivel y aplomo final del elemento de acuerdo a lo indicado en planos',
-    'Correcta posición final de elementos embebidos',
-    'Verificación del orden y limpieza',
-    'Curado adecuado (agua / membrana / otros)',
+    '¿El acabado superficial corresponde a lo especificado?',
+    '¿El nivel y el aplomo final del elemento cumplen lo indicado en planos?',
+    '¿Los elementos embebidos quedaron en su posición final correcta?',
+    '¿El área quedó ordenada y limpia tras el vaciado?',
+    '¿Se aplicó el curado especificado? (agua, membrana u otro)',
   ];
   for (const it of posterior) add(it, 'list-[SI, NO, NA]', S4);
 
@@ -379,11 +403,11 @@ function buildLIPMPP() {
 
   const S2 = 'CHECK LIST — INSTALACIÓN DE PLANCHAS Y PERNOS';
   const check = [
-    'Base de planchas metálicas',
-    'Pernos de anclaje (longitud y diámetro)',
-    'Alineamiento de plancha metálica',
-    'Nivelación de plancha metálica y pernos',
-    'Alineamiento de plancha y pernos de anclaje',
+    '¿La base de la plancha metálica está correctamente ejecutada?',
+    '¿Los pernos de anclaje tienen la longitud y el diámetro especificados?',
+    '¿La plancha metálica está alineada según el plano?',
+    '¿La plancha metálica y los pernos están nivelados?',
+    '¿La plancha y los pernos de anclaje guardan el alineamiento entre sí?',
   ];
   for (const it of check) add(it, 'list-[CONFORME, OBSERVADO, N/A]', S2);
 
@@ -433,6 +457,15 @@ for (const [id, rows] of porProto) {
   }
   const nombres = new Set(rows.map(r => r.Protocolo));
   if (nombres.size !== 1) { console.error(`✗ ${id}: nombre inconsistente`); errores++; }
+  // Guardas de redacción v2: ningún texto puede volver a quedar TODO EN MAYÚSCULAS.
+  // Se exceptúan las numéricas, cuyos ítems de captura son etiquetas de campo.
+  for (const r of rows) {
+    const t = r['Actividad realizada'];
+    if (/[A-ZÁÉÍÓÚÑ]{6,}/.test(t) && !/^col-\[/.test(t) && t === t.toUpperCase()) {
+      console.error(`✗ ${id} #${r.PartidaItem}: texto en MAYÚSCULAS → "${t}"`);
+      errores++;
+    }
+  }
 }
 if (errores) { console.error(`\n${errores} error(es). No se escribe el archivo.`); process.exit(1); }
 
@@ -451,3 +484,7 @@ for (const [id, rows] of porProto) {
   const secs = [...new Set(rows.map(r => r['Sección']).filter(Boolean))];
   console.log(`  ${id.padEnd(7)} ${String(rows.length).padStart(3)} filas · ${secs.length || 1} secc. · ${rows[0].Protocolo}`);
 }
+
+// Export para el generador de UPDATEs (_genUpdateTextos.js). Al requerirlo desde
+// otro script se ejecuta también la escritura del Excel, que es idempotente.
+module.exports = { ALL };

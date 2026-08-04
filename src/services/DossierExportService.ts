@@ -38,7 +38,7 @@ import type User from '@db/models/User';
 import type SampleModel from '@db/models/Sample';
 import { isNumericProtocol } from '@utils/numericProtocol';
 import { generateProtocolQrImg } from '@utils/qrCode';
-import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, isLinearProject, linearSubtramoLength, type ProjectFeatureFlags } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, getTemplatePrintConfig, getPrintHeaderColor, PRINT_FONT_SCALE, PRINT_GRAPH_SCALE, PRINT_HEADER_ROWS, isLinearProject, linearSubtramoLength, getProjectParties, getPdfSignatures, type ProjectFeatureFlags, type PdfSignatureSlot } from '@utils/featureFlags';
 import { formatProgresiva, subtramoRangeLabel, subtramoIndexFor } from '@utils/CoordinateSystem';
 import {
   buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfItem, type NumericPdfBlock,
@@ -86,6 +86,45 @@ async function loadPdfAuxTables(projectId: string): Promise<void> {
       }
     }
   } catch { /* sin tramos → celdas lineales con '—' */ }
+}
+
+/**
+ * v103 — Casillas de firma del pie de página.
+ *
+ * Sin `pdf_signatures` configuradas devuelve el bloque ÚNICO de siempre, así que
+ * ningún proyecto existente cambia de aspecto.
+ *
+ * Con casillas configuradas imprime una fila con todas — el formato del cliente
+ * pide 3 (calidad / residente / supervisión). OJO: son casillas de PAPEL, no
+ * niveles de aprobación: el flujo del sistema sigue siendo de una sola firma y
+ * solo la casilla `source: 'approver'` lleva el nombre y la imagen de quien
+ * aprobó de verdad. Las demás salen con la línea en blanco para firmar a mano.
+ *
+ * @param signatureHtml  <img> de la firma del aprobador, o la línea vacía.
+ * @param signedName     Nombre del aprobador (o el rótulo por defecto).
+ */
+function buildSignatureBlocks(signatureHtml: string, signedName: string): string {
+  const slots = getPdfSignatures(_pdfFlags);
+  if (slots.length === 0) {
+    return `<div class="signature-block">
+      ${signatureHtml}
+      <div class="signature-name">${escHtml(signedName)}</div>
+      <div class="signature-role">Jefe de Calidad</div>
+    </div>`;
+  }
+  const blocks = slots.map(s => {
+    const isApprover = s.source === 'approver';
+    // Solo el aprobador puede estampar imagen: las otras partes son de otras
+    // empresas y todavía no autorizaron el uso de su firma.
+    const sign = isApprover ? signatureHtml : '<div class="signature-line"></div>';
+    const name = isApprover ? signedName : (s.name ?? '');
+    return `<div class="signature-block">
+      ${sign}
+      <div class="signature-name">${escHtml(name)}</div>
+      <div class="signature-role">${escHtml(s.role)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="signature-row">${blocks}</div>`;
 }
 
 /** v100b — Celdas Tramo/Subtramo/Progresiva del PDF (solo en obra lineal). El
@@ -419,6 +458,14 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .signature-name { font-size: 10px; font-weight: 700; color: #0e213d; }
 .signature-role { font-size: 9px; color: #666; }
 .footer-right { flex: 1; text-align: right; font-size: 9px; color: #aaa; line-height: 1.6; }
+/* v103 — Varias casillas de firma (formato del cliente). Se reparten el ancho
+   disponible; las líneas se acortan para que 3 o 4 quepan sin encimarse.
+   El .signature-name reserva alto aunque venga vacío, así las líneas de todas
+   las casillas quedan a la MISMA altura (una sin nombre desalinearía la fila). */
+.signature-row { display: flex; flex-direction: row; align-items: flex-end; gap: 12px; flex: 1; }
+.signature-row .signature-block { flex: 1; min-width: 0; }
+.signature-row .signature-line { width: 100%; max-width: 150px; margin-left: auto; margin-right: auto; }
+.signature-row .signature-name { min-height: 12px; }
 
 /* Ocultar elemento si vacío */
 .hide-if-empty:empty { display: none; }
@@ -853,6 +900,7 @@ function buildProtocolPages(
     // (header_fields) y el nivel define el N° de FILAS (3/2/1). Los campos elegidos se
     // reparten en esas filas (izquierda→derecha).
     const cell = (label: string, value: string) => `<div class="proto-info-cell"><span class="proto-info-label">${escHtml(label)}</span><span class="proto-info-value">${escHtml(value)}</span></div>`;
+    const parties = getProjectParties(_pdfFlags);
     // Valor de cada campo disponible.
     const fieldHtml: Record<string, string> = {
       proyecto: cell('Proyecto', projectName),
@@ -863,6 +911,11 @@ function buildProtocolPages(
       id_protocolo: cell('ID Protocolo', idProtocolo ?? protocol.protocolNumber),
       ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', locationOnly ?? protocol.locationReference),
       especialidad: !isNumeric && specialty ? cell('Especialidad', specialty) : '',
+      // v103 — Partes del contrato (fijas del proyecto). Si el proyecto no las
+      // llenó, la celda queda vacía y `.filter(Boolean)` la descarta.
+      cliente: parties.cliente ? cell('Cliente', parties.cliente) : '',
+      supervision: parties.supervision ? cell('Supervisión', parties.supervision) : '',
+      contratista: parties.contratista ? cell('Contratista', parties.contratista) : '',
     };
     const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
     // v100b — Obra lineal: Tramo/Subtramo/Progresiva SIEMPRE (independiente de
@@ -911,11 +964,7 @@ function buildProtocolPages(
   // Footer común a ambos formatos (clásico y numérico).
   const footerFor = (pageIdx: number) => `
   <div class="proto-footer">
-    <div class="signature-block">
-      ${signatureHtml}
-      <div class="signature-name">${escHtml(signedName)}</div>
-      <div class="signature-role">Jefe de Calidad</div>
-    </div>
+    ${buildSignatureBlocks(signatureHtml, signedName)}
     <div class="footer-right">
       Dosier de Calidad<br/>
       Página ${globalPageStart + pageIdx} de ${totalDocPages}
@@ -1138,11 +1187,7 @@ async function buildPhotoPanel(
   ${vertHtml}
   ${horizHtml}
   <div class="proto-footer">
-    <div class="signature-block">
-      ${signatureHtml}
-      <div class="signature-name">${escHtml(signerName)}</div>
-      <div class="signature-role">Jefe de Calidad</div>
-    </div>
+    ${buildSignatureBlocks(signatureHtml, signerName)}
     <div class="footer-right">
       Dosier de Calidad<br/>
       Página ${currentPage} de ${totalDocPages}
@@ -1184,11 +1229,7 @@ function buildCroquisPage(
     </div>
   </div>
   <div class="proto-footer">
-    <div class="signature-block">
-      ${signatureHtml}
-      <div class="signature-name">${escHtml(signerName)}</div>
-      <div class="signature-role">Jefe de Calidad</div>
-    </div>
+    ${buildSignatureBlocks(signatureHtml, signerName)}
     <div class="footer-right">
       Dosier de Calidad<br/>
       Página ${pageNumber} de ${totalDocPages}
@@ -1786,11 +1827,7 @@ function buildSampleDataPage(
   <hr class="proto-divider"/>
   <div class="proto-info-grid">${rows}${notesRow}</div>
   <div class="proto-footer">
-    <div class="signature-block">
-      ${signatureHtml}
-      <div class="signature-name">${escHtml(signerName)}</div>
-      <div class="signature-role">Jefe de Calidad</div>
-    </div>
+    ${buildSignatureBlocks(signatureHtml, signerName)}
     <div class="footer-right">
       Dosier de Calidad — Muestra<br/>
       Página ${pageNumber} de ${totalDocPages}

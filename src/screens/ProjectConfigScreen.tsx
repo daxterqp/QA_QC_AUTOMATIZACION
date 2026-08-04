@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
 import { useAuth } from '@context/AuthContext';
-import { DEFAULT_FEATURE_FLAGS, parseFeatureFlagsJson, type ProjectFeatureFlags, type CoordinateSystem } from '@utils/featureFlags';
+import { DEFAULT_FEATURE_FLAGS, parseFeatureFlagsJson, PROJECT_PARTY_FIELDS, DEFAULT_PDF_SIGNATURES, type ProjectFeatureFlags, type CoordinateSystem } from '@utils/featureFlags';
 import { validateMask, buildProtocolCode } from '@utils/protocolCode';
 import { supabase } from '@config/supabase';
 import { Q } from '@nozbe/watermelondb';
@@ -331,6 +331,66 @@ export default function ProjectConfigScreen({ route, navigation }: Props) {
             value={!!flags.dossier_observe_inline}
             onToggle={() => toggleFlag('dossier_observe_inline')}
           />
+
+          {/* ── v103: Partes del contrato ──────────────────────────────────
+              Cliente / supervisión / contratista son del PROYECTO, no del
+              ensayo: se escriben una vez y salen en el encabezado de todas las
+              fichas. Vacío = el campo no aparece en ningún lado. */}
+          <Text style={styles.fieldLabel}>Partes del contrato</Text>
+          <Text style={styles.helperText}>
+            Salen en el encabezado de todas las fichas (pantalla y PDF). Deja en blanco
+            las que no apliquen. Para que aparezcan en el PDF hay que marcarlas además
+            en los campos del encabezado (engranaje del Dosier).
+          </Text>
+          {PROJECT_PARTY_FIELDS.map(f => (
+            <View key={f.key} style={{ marginBottom: 8 }}>
+              <Text style={styles.subRowLabel}>{f.label}</Text>
+              <TextInput
+                value={flags.project_parties?.[f.key] ?? ''}
+                onChangeText={txt => setFlag('project_parties', { ...(flags.project_parties ?? {}), [f.key]: txt.slice(0, 120) })}
+                placeholder={`Razón social de ${f.label.toLowerCase()}`}
+                placeholderTextColor={Colors.textMuted}
+                style={styles.urlInput}
+              />
+            </View>
+          ))}
+
+          {/* ── v103: Firmas del PDF ────────────────────────────────────────
+              OJO: son casillas de PAPEL, no niveles de aprobación. El flujo del
+              sistema sigue siendo de una sola firma; las otras casillas salen en
+              blanco para firmarse a mano. */}
+          <Text style={styles.fieldLabel}>Firmas del PDF</Text>
+          <Text style={styles.helperText}>
+            Casillas de firma del pie de página. NO cambian el flujo de aprobación:
+            sigue aprobando solo el Ing. de Calidad; las demás salen con la línea en
+            blanco para firmarse a mano.
+          </Text>
+          <CheckRow
+            label="Tres firmas (calidad / residente / supervisión)"
+            description="Formato de protocolo del cliente. Si está apagado, el PDF lleva una sola firma como siempre."
+            value={(flags.pdf_signatures?.length ?? 0) > 0}
+            onToggle={() => setFlag('pdf_signatures', (flags.pdf_signatures?.length ?? 0) > 0 ? [] : DEFAULT_PDF_SIGNATURES)}
+          />
+          {(flags.pdf_signatures ?? []).map((slot, i) => (
+            <View key={i} style={{ marginBottom: 8 }}>
+              <Text style={styles.subRowLabel}>
+                {slot.role}{slot.source === 'approver' ? '  ·  usa el nombre y la firma de quien aprueba' : ''}
+              </Text>
+              {slot.source !== 'approver' && (
+                <TextInput
+                  value={slot.name ?? ''}
+                  onChangeText={txt => {
+                    const next = [...(flags.pdf_signatures ?? [])];
+                    next[i] = { ...next[i], name: txt.slice(0, 80) };
+                    setFlag('pdf_signatures', next);
+                  }}
+                  placeholder="Nombre impreso (opcional)"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.urlInput}
+                />
+              )}
+            </View>
+          ))}
 
           {/* ── v43: Módulos opcionales del proyecto (visibilidad en el menú) ── */}
           <Text style={styles.fieldLabel}>{t('projectConfig.projectModulesLabel')}</Text>

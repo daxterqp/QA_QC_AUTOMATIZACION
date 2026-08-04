@@ -45,7 +45,7 @@ import { SyncWorker } from '@services/SyncWorker';
 import { GPSCaptureBar } from '@components/GPSCaptureBar';
 import { TopoCoordCard } from '@components/topo/TopoCoordCard';
 import { decideCoordCards } from '@utils/topoVisibility';
-import { parseFeatureFlagsJson, topoColumns } from '@utils/featureFlags';
+import { parseFeatureFlagsJson, topoColumns, getProjectParties, PROJECT_PARTY_FIELDS, isGpsCaptureNumericEnabled, isGpsCaptureSubjectiveEnabled } from '@utils/featureFlags';
 import { supabase } from '@config/supabase';
 import { listS3Keys, downloadFromS3 } from '@services/S3Service';
 import { s3ProjectPrefix } from '@config/aws';
@@ -1063,6 +1063,27 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
                   </View>
                 </View>
               )}
+              {/* v103 — Partes del contrato: cliente / supervisión / contratista.
+                  Son FIJAS del proyecto (feature_flags.project_parties), no del
+                  ensayo. Si el proyecto no las llenó, no se renderiza nada. */}
+              {(() => {
+                const parties = getProjectParties(projectFlags);
+                const cells = PROJECT_PARTY_FIELDS
+                  .filter(f => !!parties[f.key])
+                  .map(f => (
+                    <View key={f.key} style={styles.dgCell}>
+                      <Text style={styles.dgLabel}>{t(`protoFill.dg.${f.key}`)}</Text>
+                      <Text style={styles.dgValue} numberOfLines={2}>{parties[f.key]}</Text>
+                    </View>
+                  ));
+                if (cells.length === 0) return null;
+                // De a 2 por fila, igual que el resto del grid.
+                const rows = [];
+                for (let i = 0; i < cells.length; i += 2) {
+                  rows.push(<View key={i} style={styles.dgRow}>{cells.slice(i, i + 2)}</View>);
+                }
+                return <>{rows}</>;
+              })()}
               {location && (
                 <View style={styles.dgRow}>
                   <View style={styles.dgCell}>
@@ -1103,7 +1124,13 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
               const hasGps = pa.latitude != null && pa.longitude != null;
               const hasTopo = pa.topoCoordEast != null || pa.topoCoordNorth != null || pa.topoCoordElevation != null || !!pa.topoValuesJson;
               const decision = decideCoordCards(projectFlags, hasGps, hasTopo);
-              const gpsCaptureOn = (numericMode && projectFlags.gps_capture_numeric) || (!numericMode && projectFlags.gps_capture_subjective);
+              // v103 — Se leía el flag HIJO directo, saltándose el padre `map_enabled`:
+              // apagar el módulo de mapa dejaba la barra de GPS visible igual. Los
+              // helpers aplican el gateo padre→hijo (auditado: ningún proyecto quedaba
+              // en ese estado, así que el arreglo no cambia nada de lo existente).
+              const gpsCaptureOn = numericMode
+                ? isGpsCaptureNumericEnabled(projectFlags)
+                : isGpsCaptureSubjectiveEnabled(projectFlags);
               // En modo EDICIÓN, la barra GPS debe mostrarse para poder CAPTURAR aunque
               // el ensayo aún no tenga coordenadas. `decision.showGps` se basa en hasGps
               // (correcto para solo-lectura: oculta tarjeta vacía), pero eso creaba un
@@ -1195,12 +1222,13 @@ export default function ProtocolFillScreen({ navigation, route }: Props) {
               <View style={styles.itemHeader}>
                 <Text style={styles.itemNum}>{index + 1}</Text>
                 <Text style={styles.itemDesc}>{i.itemDescription}</Text>
-                {i.validationMethod && (
-                  <View style={styles.methodBadge}>
-                    <Text style={styles.methodText}>{i.validationMethod}</Text>
-                  </View>
-                )}
               </View>
+              {/* v103 — El método va en LÍNEA PROPIA bajo la pregunta (antes era un
+                  badge azul a la derecha que le comía ancho al texto). Sin etiqueta
+                  ni recuadro: texto pequeño en gris, alineado con la pregunta. */}
+              {i.validationMethod && (
+                <Text style={styles.methodLine}>{i.validationMethod}</Text>
+              )}
 
               {/* Sí / No / N/A */}
               {!isReadOnly && (
@@ -1554,11 +1582,10 @@ const styles = StyleSheet.create({
     flexShrink: 0, marginTop: 1,
   },
   partida: { fontSize: 11, color: Colors.textMuted },
-  methodBadge: {
-    backgroundColor: Colors.light, borderRadius: Radius.sm, paddingHorizontal: 8, paddingVertical: 2,
-    flexShrink: 0,
-  },
-  methodText: { fontSize: 11, color: Colors.primary, fontWeight: '600' },
+  // v103 — Método de validación en línea propia bajo la pregunta. El marginLeft
+  // (24 del círculo + 8 del gap del header) lo alinea con el texto de la
+  // pregunta, no con el número.
+  methodLine: { fontSize: 11, color: Colors.textMuted, marginLeft: 32, marginTop: -4 },
   itemDesc: { flex: 1, fontSize: 13, color: Colors.textPrimary, lineHeight: 20 },
   siNoRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   siNoBtn: {

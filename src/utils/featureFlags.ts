@@ -91,6 +91,63 @@ export function getCroquisConfig(c: CroquisConfig | undefined): Required<Croquis
     full_width: c?.full_width ?? false,
   };
 }
+// ─── v103 — Partes del contrato y firmas del PDF ────────────────────────────
+// ESPEJO de flow-qaqc-web/lib/printConfig.ts. Cualquier cambio va en los DOS.
+
+/** Cliente / supervisión / contratista. Fijos del proyecto, no del ensayo. */
+export interface ProjectParties {
+  cliente?: string;
+  supervision?: string;
+  contratista?: string;
+}
+/** Orden y etiqueta de las partes (mismo orden en pantalla, PDF y config). */
+export const PROJECT_PARTY_FIELDS: { key: keyof ProjectParties; label: string }[] = [
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'supervision', label: 'Supervisión' },
+  { key: 'contratista', label: 'Contratista' },
+];
+/** Partes con los vacíos ya podados (para no renderizar filas en blanco). */
+export function getProjectParties(flags: unknown): ProjectParties {
+  const f = (flags && typeof flags === 'object') ? flags as Record<string, any> : {};
+  const p = (f.project_parties && typeof f.project_parties === 'object') ? f.project_parties : {};
+  const out: ProjectParties = {};
+  for (const { key } of PROJECT_PARTY_FIELDS) {
+    const v = typeof p[key] === 'string' ? p[key].trim() : '';
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
+/** Una casilla de firma del pie del PDF. */
+export interface PdfSignatureSlot {
+  /** Rótulo bajo la línea (p. ej. "Ing. de Calidad"). */
+  role: string;
+  /** Nombre impreso bajo el rótulo. Vacío → solo la línea y el rótulo. */
+  name?: string;
+  /** De dónde sale el nombre: 'fixed' = el texto de `name`; 'approver' = el
+   *  usuario que realmente aprobó el ensayo (solo tiene sentido en UNA casilla). */
+  source?: 'fixed' | 'approver';
+}
+/** Casillas por defecto para proyectos que activan las 3 firmas del cliente. */
+export const DEFAULT_PDF_SIGNATURES: PdfSignatureSlot[] = [
+  { role: 'Ing. de Calidad', source: 'approver' },
+  { role: 'Residente de Obra', source: 'fixed' },
+  { role: 'Supervisor de Obra', source: 'fixed' },
+];
+/** Casillas saneadas. Vacío → el PDF usa su firma única de siempre. */
+export function getPdfSignatures(flags: unknown): PdfSignatureSlot[] {
+  const f = (flags && typeof flags === 'object') ? flags as Record<string, any> : {};
+  const raw = Array.isArray(f.pdf_signatures) ? f.pdf_signatures : [];
+  return raw
+    .map((s: any) => ({
+      role: typeof s?.role === 'string' ? s.role.trim() : '',
+      name: typeof s?.name === 'string' ? s.name.trim() : '',
+      source: s?.source === 'approver' ? 'approver' as const : 'fixed' as const,
+    }))
+    .filter((s: PdfSignatureSlot) => !!s.role)
+    .slice(0, 4);   // más de 4 no entran a lo ancho de la hoja
+}
+
 export type PrintHeaderSize = 'normal' | 'compact' | 'xcompact';
 /** Paleta de colores sugeridos para encabezados de ficha. */
 export const PRINT_HEADER_COLORS: { label: string; value: string }[] = [
@@ -115,6 +172,11 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'id_protocolo', label: 'ID Protocolo' },
   { key: 'ubicacion', label: 'Coordenadas / Ubicación' },
   { key: 'especialidad', label: 'Especialidad' },
+  // v103 — Partes del contrato. NO entran en DEFAULT_HEADER_FIELDS: solo salen si
+  // el proyecto las llenó Y el usuario las eligió (si no, ocuparían ancho en vano).
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'supervision', label: 'Supervisión' },
+  { key: 'contratista', label: 'Contratista' },
 ];
 // Especialidad va seleccionada por defecto; al renderizar solo aparece en
 // protocolos CLÁSICOS (en numéricos se ignora), por lo que es seguro incluirla.
@@ -305,6 +367,15 @@ export interface ProjectFeatureFlags {
    *  de ficha que llama (clave = idProtocolo donde aparecen). Se siembran en masa desde
    *  la hoja AGRUPACIONES del Excel maestro y el usuario los puede editar después. */
   grouping_presets?: Record<string, GroupingPreset[]>;
+  /** v103 — Partes del contrato (cliente / supervisión / contratista). Son FIJAS a
+   *  nivel proyecto: se escriben una vez y salen en el encabezado de TODAS las fichas
+   *  (pantalla y PDF). Vacío = el campo no se muestra. */
+  project_parties?: ProjectParties;
+  /** v103 — Firmas del pie del PDF. Los protocolos del cliente se firman en 3
+   *  casillas (calidad / residente / supervisión) aunque el FLUJO DE APROBACIÓN
+   *  del sistema siga siendo de un solo nivel: las casillas son formato impreso,
+   *  no niveles de aprobación. Vacío = comportamiento anterior (una sola firma). */
+  pdf_signatures?: PdfSignatureSlot[];
 
   // ── Módulo de Trazabilidad (padre + hijos) ────────────────────────────
   traceability_module: boolean;        // padre — si OFF, los hijos se ignoran

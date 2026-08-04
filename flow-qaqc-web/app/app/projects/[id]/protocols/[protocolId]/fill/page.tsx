@@ -31,6 +31,7 @@ import { useUpdateProtocolGeneralComment } from '@hooks/useUpdateProtocolGeneral
 import { useQuery } from '@tanstack/react-query';
 import { createClient } from '@lib/supabase/client';
 import { useI18n } from '@lib/i18n';
+import { getProjectParties, PROJECT_PARTY_FIELDS } from '@lib/printConfig';
 import type { ProtocolItem, Evidence } from '@/types';
 
 const _sb = createClient();
@@ -475,6 +476,15 @@ export default function ProtocolFillPage() {
             {locationObj && <InfoCell label={t('webProto.location')} value={(locationObj as any).location_only ?? locationObj.name ?? '—'} />}
             {locationObj && (locationObj as any).specialty && <InfoCell label={t('webProto.specialty')} value={(locationObj as any).specialty} />}
           </div>
+          {/* v103 — Partes del contrato (fijas del proyecto). ESPEJO del móvil
+              (ProtocolFillScreen). Si el proyecto no las llenó, no sale la fila. */}
+          {(() => {
+            const parties = getProjectParties(project?.feature_flags);
+            const cells = PROJECT_PARTY_FIELDS
+              .filter(f => !!parties[f.key])
+              .map(f => <InfoCell key={f.key} label={t(`webProto.${f.key}`)} value={parties[f.key]!} />);
+            return cells.length > 0 ? <div className="flex flex-wrap gap-1.5">{cells}</div> : null;
+          })()}
         </div>
       </div>
 
@@ -748,10 +758,13 @@ function ItemCard({
           </span>
           <div className="min-w-0">
             <p className="text-navy text-xs font-semibold leading-snug">{item.item_description}</p>
+            {/* v103 — ESPEJO del móvil (ProtocolFillScreen.tsx, styles.methodLine):
+                el método va como texto pequeño en gris bajo la pregunta, sin
+                recuadro ni etiqueta, para no robarle ancho al enunciado. */}
             {item.validation_method && (
-              <span className="inline-block mt-0.5 bg-secondary/15 text-secondary text-[9px] font-bold px-1.5 py-0.5 rounded">
+              <p className="mt-0.5 text-[10px] text-muted leading-snug">
                 {item.validation_method}
-              </span>
+              </p>
             )}
           </div>
         </div>

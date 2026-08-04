@@ -10,6 +10,10 @@ export const STRINGS_WEB_PROTO: Record<string, { es: string; en: string; pt: str
   'webProto.projects': { es: 'Proyectos', en: 'Projects', pt: 'Projetos' },
   'webProto.plans': { es: 'Planos', en: 'Plans', pt: 'Plantas' },
   'webProto.location': { es: 'Ubicación', en: 'Location', pt: 'Localização' },
+  // v103 — Partes del contrato (fijas del proyecto). Espejo de protoFill.dg.* del móvil.
+  'webProto.cliente': { es: 'Cliente', en: 'Client', pt: 'Cliente' },
+  'webProto.supervision': { es: 'Supervisión', en: 'Supervision', pt: 'Supervisão' },
+  'webProto.contratista': { es: 'Contratista', en: 'Contractor', pt: 'Empreiteiro' },
   'webProto.noLocation': { es: 'Sin ubicación', en: 'No location', pt: 'Sem localização' },
   'webProto.project': { es: 'Proyecto', en: 'Project', pt: 'Projeto' },
   'webProto.date': { es: 'Fecha', en: 'Date', pt: 'Data' },

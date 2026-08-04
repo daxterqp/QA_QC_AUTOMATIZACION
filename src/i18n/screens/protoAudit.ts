@@ -47,6 +47,10 @@ const protoAudit: Record<string, { es: string; en: string; pt: string }> = {
   'protoAudit.field.approvedAt': { es: 'Fecha aprobación', en: 'Approval date', pt: 'Data de aprovação' },
   'protoAudit.field.protocolId': { es: 'ID Protocolo', en: 'Protocol ID', pt: 'ID do Protocolo' },
   'protoAudit.field.location': { es: 'Ubicación', en: 'Location', pt: 'Local' },
+  // v103 — Partes del contrato (fijas del proyecto). Espejo de protoFill.dg.*.
+  'protoAudit.field.cliente': { es: 'Cliente', en: 'Client', pt: 'Cliente' },
+  'protoAudit.field.supervision': { es: 'Supervisión', en: 'Supervision', pt: 'Supervisão' },
+  'protoAudit.field.contratista': { es: 'Contratista', en: 'Contractor', pt: 'Empreiteiro' },
   'protoAudit.field.specialty': { es: 'Especialidad', en: 'Specialty', pt: 'Especialidade' },
   'protoAudit.rejectionLabel': { es: 'MOTIVO RECHAZO', en: 'REJECTION REASON', pt: 'MOTIVO DA REJEIÇÃO' },
 

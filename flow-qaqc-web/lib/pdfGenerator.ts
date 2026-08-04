@@ -10,7 +10,7 @@
  */
 
 import { createClient } from '@lib/supabase/client';
-import type { DossierProtocolFull, DossierProtocol } from '@hooks/useDossier';
+import type { DossierProtocolFull, DossierProtocol, DossierApproval } from '@hooks/useDossier';
 import type { PreloadedProjectData } from '@hooks/useProjectPreload';
 import type { Protocol, Location, ProtocolItem } from '@/types';
 import { fetchDossierProtocolFull } from '@hooks/useDossier';
@@ -21,6 +21,7 @@ import { sectorsForDate } from '@lib/sectorSets';
 import { buildNumericProtocolBlocks, paginateNumericBlocks, type NumericPdfBlock } from '@lib/numericPdfHtml';
 import {
   getTemplatePrintConfig, getPrintHeaderColor, chartWidthFor,
+  getProjectParties, getPdfSignatures,
   PRINT_FONT_SCALE, PRINT_HEADER_ROWS, PRINT_HEADER_FIELDS, DEFAULT_HEADER_COLOR,
   type ResolvedPrintConfig,
 } from '@lib/printConfig';
@@ -298,6 +299,13 @@ tbody td { padding: 7px 10px; border-bottom: 1px solid #e5e8ec; vertical-align: 
 .signature-name { font-size: 10px; font-weight: 700; color: #0e213d; }
 .signature-role { font-size: 9px; color: #666; }
 .footer-right { flex: 1; text-align: right; font-size: 9px; color: #aaa; line-height: 1.6; }
+/* v103 — Varias casillas de firma (formato del cliente). ESPEJO del móvil
+   (DossierExportService.ts). El min-height del nombre mantiene las líneas de
+   todas las casillas a la misma altura aunque una venga sin nombre. */
+.signature-row { display: flex; flex-direction: row; align-items: flex-end; gap: 12px; flex: 1; }
+.signature-row .signature-block { flex: 1; min-width: 0; }
+.signature-row .signature-line { width: 100%; max-width: 150px; margin-left: auto; margin-right: auto; }
+.signature-row .signature-name { min-height: 12px; }
 a[href^="#proto-"]:hover { text-decoration: underline !important; }
 .photo-panel-title { flex: 1; font-size: 13px; font-weight: 900; color: #0e213d; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
 .photo-page-header { display: flex; flex-direction: row; align-items: center; gap: 12px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 2px solid #0e213d; }
@@ -591,6 +599,55 @@ function xrefCommentsForPdf(vm: string | null, comments: string | null): string 
   }).join(', ')).join(' // ');
 }
 
+/**
+ * v103 — Casillas de firma del pie. ESPEJO de `buildSignatureBlocks` del móvil
+ * (src/services/DossierExportService.ts). Precedencia:
+ *   1. `pdf_signatures` → formato del CLIENTE (calidad / residente / supervisión).
+ *      Son casillas de PAPEL, no niveles: el flujo de aprobación del sistema sigue
+ *      siendo de un solo nivel y solo la casilla `source:'approver'` lleva el
+ *      nombre y la imagen de quien aprobó de verdad; las demás van en blanco para
+ *      firmar a mano (las otras empresas aún no autorizaron su firma digital).
+ *   2. `approvals` > 1 → aprobación multinivel del sistema (comportamiento previo).
+ *   3. Firma única → lo de siempre.
+ */
+function buildSignatureBlocksHtml(
+  signatureHtml: string,
+  signedName: string,
+  sigSlots: ReturnType<typeof getPdfSignatures>,
+  approvals?: DossierApproval[],
+  signatureMap?: Record<string, string | null>,
+): string {
+  if (sigSlots.length > 0) {
+    const blocks = sigSlots.map(s => {
+      const isApprover = s.source === 'approver';
+      const sign = isApprover ? signatureHtml : '<div class="signature-line"></div>';
+      const nm = isApprover ? signedName : (s.name ?? '');
+      return `<div class="signature-block">
+        ${sign}
+        <div class="signature-name">${escHtml(nm)}</div>
+        <div class="signature-role">${escHtml(s.role)}</div>
+      </div>`;
+    }).join('');
+    return `<div class="signature-row">${blocks}</div>`;
+  }
+  if (approvals && approvals.length > 1) {
+    return `<div class="signature-block" style="display:flex;gap:18px;flex:1;">
+         ${approvals.filter(a => a.status === 'APPROVED').map(a => {
+           const sigB64 = (a.signer_id && signatureMap?.[a.signer_id]) || null;
+           const sigHtml = sigB64 ? `<img src="${sigB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
+           const nm = [a.signer_name, a.signer_apellido].filter(Boolean).join(' ') || '—';
+           return `<div style="text-align:center;flex:1;">
+              ${sigHtml}
+              <div class="signature-name">${escHtml(nm)}</div>
+              <div class="signature-role">Nivel ${a.level} / ${approvals.length}</div>
+              <div style="font-size:8px;color:#888;">${a.signed_at ? fmtDateTime(a.signed_at) : ''}</div>
+           </div>`;
+         }).join('')}
+       </div>`;
+  }
+  return `<div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signedName)}</div><div class="signature-role">Jefe de Calidad</div></div>`;
+}
+
 function numericProtoBlocks(
   full: DossierProtocolFull,
   xrefValues?: XrefValues,
@@ -689,8 +746,14 @@ function buildProtocolPages(
   idProtocolo: string | null = null,
   /** v43.6 — Croquis (figura vectorial) a insertar como sección (start/end). */
   croquis?: { block: NumericPdfBlock; placement: 'start' | 'end' } | null,
+  /** v103 — feature_flags del proyecto: partes del contrato + casillas de firma.
+   *  Va como PARÁMETRO (no variable de módulo como en móvil) porque el servidor
+   *  web puede estar generando PDFs de dos proyectos a la vez. */
+  projectFlags?: unknown,
 ): string {
   const { protocol: p, items, approvals } = full;
+  const parties = getProjectParties(projectFlags);
+  const sigSlots = getPdfSignatures(projectFlags);
   const loc = p.location;
   // v42d — En ensayos NUMÉRICOS, Datos Generales no lleva "Ubicación/Especialidad"
   // (se trabaja por coordenadas/sector, igual que el Audit). En clásicos se mantiene.
@@ -739,6 +802,10 @@ function buildProtocolPages(
       id_protocolo: cell('ID Protocolo', idProtocolo ?? p.protocol_number ?? '—'),
       ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', loc?.name ?? '—'),
       especialidad: (!isNumeric && loc?.specialty) ? cell('Especialidad', loc.specialty) : '',
+      // v103 — Partes del contrato (fijas del proyecto). Espejo del móvil.
+      cliente: parties.cliente ? cell('Cliente', parties.cliente) : '',
+      supervision: parties.supervision ? cell('Supervisión', parties.supervision) : '',
+      contratista: parties.contratista ? cell('Contratista', parties.contratista) : '',
     };
     const cells = (cfg.header_fields ?? []).map(k => fieldHtml[k]).filter(Boolean);
     // v100b — Obra lineal: Tramo/Subtramo/Progresiva SIEMPRE (independiente de
@@ -769,23 +836,13 @@ function buildProtocolPages(
   ${headerGrid}
   <hr class="proto-divider"/>`;
 
+  const signatureBlocksHtml = buildSignatureBlocksHtml(
+    signatureHtml, signedName, sigSlots, approvals, signatureMap,
+  );
+
   // Footer común a ambos formatos (clásico y numérico).
   const footerFor = (pageIdx: number) => `<div class="proto-footer">
-    ${approvals && approvals.length > 1
-      ? `<div class="signature-block" style="display:flex;gap:18px;flex:1;">
-           ${approvals.filter(a => a.status === 'APPROVED').map(a => {
-             const sigB64 = (a.signer_id && signatureMap?.[a.signer_id]) || null;
-             const sigHtml = sigB64 ? `<img src="${sigB64}" class="signature-img" alt="Firma"/>` : '<div class="signature-line"></div>';
-             const nm = [a.signer_name, a.signer_apellido].filter(Boolean).join(' ') || '—';
-             return `<div style="text-align:center;flex:1;">
-                ${sigHtml}
-                <div class="signature-name">${escHtml(nm)}</div>
-                <div class="signature-role">Nivel ${a.level} / ${approvals.length}</div>
-                <div style="font-size:8px;color:#888;">${a.signed_at ? fmtDateTime(a.signed_at) : ''}</div>
-             </div>`;
-           }).join('')}
-         </div>`
-      : `<div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signedName)}</div><div class="signature-role">Jefe de Calidad</div></div>`}
+    ${signatureBlocksHtml}
     <div class="footer-right">Dosier de Calidad<br/>Página ${globalPageStart + pageIdx} de ${totalDocPages}</div>
   </div>`;
 
@@ -1084,6 +1141,8 @@ async function buildPhotoPanel(
   protocolName: string, locationName: string | null, evidenceEntries: { url: string; s3Key: string | null }[],
   logoB64: string | null, signB64: string | null, signerName: string,
   pageNumber: number, totalDocPages: number,
+  /** v103 — feature_flags del proyecto (casillas de firma del pie). */
+  projectFlags?: unknown,
 ): Promise<string> {
   if (evidenceEntries.length === 0) return '';
 
@@ -1137,7 +1196,7 @@ async function buildPhotoPanel(
   ${vertHtml}
   ${horizHtml}
   <div class="proto-footer">
-    <div class="signature-block">${signatureHtml}<div class="signature-name">${escHtml(signerName)}</div><div class="signature-role">Jefe de Calidad</div></div>
+    ${buildSignatureBlocksHtml(signatureHtml, signerName, getPdfSignatures(projectFlags))}
     <div class="footer-right">Dosier de Calidad<br/>Página ${pageNumber + idx} de ${totalDocPages}</div>
   </div>
 </div>`;
@@ -1442,7 +1501,7 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
         xrefValuesForPdf = await fetchXrefValues(projectId, full.items);
       } catch (e) { console.warn('[PDF] xref fetch failed:', e); }
     }
-    const pHtml = buildProtocolPages(full, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages, projectName, signatureMap, qrSvg, xrefValuesForPdf, equipmentEnabled, auxTablesForPdf, cfgR, headerColor, idProtoR, croquisR);
+    const pHtml = buildProtocolPages(full, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages, projectName, signatureMap, qrSvg, xrefValuesForPdf, equipmentEnabled, auxTablesForPdf, cfgR, headerColor, idProtoR, croquisR, projectFlags);
     contentParts.push(pHtml);
     globalPage += protoPages;
 
@@ -1456,6 +1515,7 @@ export async function exportFullDossier(opts: DossierExportOptions): Promise<voi
         full.protocol.protocol_number ?? full.protocol.id,
         locName,
         entries, logoB64, protoSignB64, protoSignerName, globalPage, totalDocPages,
+        projectFlags,
       );
       if (photoHtml) {
         contentParts.push(photoHtml);
@@ -1592,12 +1652,12 @@ export async function exportSingleProtocolPdf(
     } catch (e) { console.warn('[PDF] xref fetch failed:', e); }
   }
   const auxTablesSingle = await fetchAuxTablesMap(full.protocol.project_id);   // v41 — BUSCAR() en PDF
-  const protoHtml = buildProtocolPages(full, logoB64, signB64, actualSignerName, 1, totalDocPages, projectName, sigMapSingle, qrSvgSingle, xrefValuesSingle, includeEquipment !== false, auxTablesSingle, cfg, headerColor, idProto, croquisS);
+  const protoHtml = buildProtocolPages(full, logoB64, signB64, actualSignerName, 1, totalDocPages, projectName, sigMapSingle, qrSvgSingle, xrefValuesSingle, includeEquipment !== false, auxTablesSingle, cfg, headerColor, idProto, croquisS, projectFlags);
   const locName = full.protocol.location
     ? `${full.protocol.location.location_only ?? ''}-${full.protocol.location.specialty ?? ''}`.replace(/^-|-$/g, '')
     : null;
   const photoHtml = evidenceEntries.length > 0
-    ? await buildPhotoPanel(full.protocol.protocol_number ?? protocolId, locName, evidenceEntries, logoB64, signB64, actualSignerName, chunks + 1, totalDocPages)
+    ? await buildPhotoPanel(full.protocol.protocol_number ?? protocolId, locName, evidenceEntries, logoB64, signB64, actualSignerName, chunks + 1, totalDocPages, projectFlags)
     : '';
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
