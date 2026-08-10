@@ -17,8 +17,29 @@
  * que en el original eran instrucciones ("Utiliza un rotomartillo…") pasan a
  * verificación del resultado ("¿La perforación se ejecutó con…?"), porque lo
  * que se firma es la CONFORMIDAD, no el instructivo.
- * Se conservan la cantidad y el orden de partidas del cliente: renumerar
- * rompería los ensayos ya creados.
+ *
+ * ─── EVALUACIÓN REAL (v3, ago-2026) ─────────────────────────────────────────
+ * Un protocolo solo aporta si sirve para ADVERTIR que algo va mal. Una pregunta
+ * que siempre se responde SÍ no evalúa nada: es papeleo. Por eso:
+ *
+ *  1. CRITERIO CUANTIFICADO. "¿Está según plano?" no se puede reprobar; "¿la
+ *     desviación está dentro de ±2 cm?" sí. Donde hay norma peruana aplicable
+ *     se cita (RNE E.060, NTP 339.033/339.035, RNE IS.010, CNE). Donde el valor
+ *     depende del proyecto se dice "según especificación técnica" en vez de
+ *     inventar un número.
+ *  2. MÉTODO Y MUESTRA. "verificado con calibrador en al menos 3 barras por
+ *     lecho" convierte un vistazo en una medición repetible.
+ *  3. MODO DE FALLA REAL. Se pregunta por lo que de verdad falla en obra
+ *     (traslape en zona de confinamiento, desmoldante sobre el acero, fuga de
+ *     lechada, ducto sin pasahilos), no por lo obvio.
+ *  4. LO QUE FALTABA. Se añaden los controles sin los cuales no hay control de
+ *     calidad: certificado de colada del acero, probetas por volumen vaciado,
+ *     prueba hidráulica de sanitarias, continuidad de ductos eléctricos.
+ *
+ * Consecuencia: los protocolos cambian de CANTIDAD de partidas respecto al
+ * original del cliente. Es seguro porque se hizo con el proyecto sin ensayos;
+ * NO repetir sobre un proyecto con ensayos creados sin releer §7bis de
+ * docs/FLUJO_EDICION_FICHAS.md.
  *
  * Ejecutar DESDE la raíz del repo:  node "01 Proyecto_Mercado_Mayorista/_genMaestro.js"
  */
@@ -43,14 +64,18 @@ const M = {
 // Preguntas que se repiten literalmente en varias secciones/protocolos.
 // Centralizadas para que una mejora de redacción se propague a todas.
 const Q = {
-  limpieza: '¿El área de trabajo quedó limpia y ordenada?',
-  seguridad: '¿El frente de trabajo cuenta con las protecciones de seguridad requeridas?',
-  ubicPuntos: '¿Los puntos están ubicados según el plano?',
-  cantSalidas: '¿La cantidad de puntos de salida coincide con el plano?',
-  diamRecorrido: '¿El diámetro y el recorrido de la tubería corresponden al plano?',
-  cantTuberias: '¿La cantidad de tuberías coincide con el plano?',
-  sepTuberias: '¿La separación entre tuberías cumple el detalle?',
-  soporte: '¿Las tuberías y accesorios están adecuadamente soportados y fijados?',
+  limpieza: '¿El área quedó libre de residuos, recortes y material sobrante que puedan obstruir el trabajo posterior?',
+  ubicPuntos: '¿Los puntos están en la ubicación del plano, con desviación menor a 2 cm respecto al eje de referencia?',
+  cantSalidas: '¿La cantidad de puntos de salida es EXACTAMENTE la del plano? (un punto de menos obliga a picar después)',
+  diamRecorrido: '¿El diámetro y el recorrido de la tubería corresponden al plano, sin reducciones ni desvíos no autorizados?',
+  cantTuberias: '¿La cantidad de tuberías es exactamente la del plano, contadas una a una en el tramo?',
+  // "Cumple el detalle" sin decir CÓMO se comprueba vuelve a ser un vistazo: el
+  // valor lo pone el proyecto, pero el método de medición lo ponemos nosotros.
+  sepTuberias: '¿La separación entre tuberías cumple el detalle, medida en al menos 3 puntos del tramo?',
+  soporte: '¿Los soportes están al espaciamiento especificado y sujetan la tubería sin deformarla ni impedir su dilatación?',
+  // Los ductos sin guía ni tapa son el defecto que obliga a picar losa terminada:
+  // se pregunta explícitamente porque es caro y se detecta tarde.
+  pasahilos: '¿Los ductos quedaron con alambre guía y los extremos tapados, y se verificó que pasa la guía entre cajas?',
 };
 
 /** Helper: arma filas de un protocolo clásico a partir de secciones. */
@@ -77,36 +102,67 @@ function clasico(id, nombre, secciones) {
 // GRUPO A — Protocolos VRS 2026 (Plaza Unicachi / Grupo VRS)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// PA — El acero es el elemento que MÁS caro sale corregir después del vaciado:
+// una vez cubierto por concreto, un recubrimiento insuficiente o un traslape mal
+// ubicado ya no se ve y compromete la estructura por décadas. Por eso las
+// preguntas exigen medición y no vistazo.
 const PA = clasico('PA', 'PROTOCOLO DE ACERO', [{
   seccion: 'INSPECCIÓN',
   items: [
-    ['¿Se ejecutó el trabajo conforme al procedimiento aprobado?', M.doc],
-    ['¿Se contrastaron los planos de las especialidades y se resolvieron las interferencias? (arquitectura, estructuras e instalaciones)', M.plano],
-    ['¿Se realizó la verificación topográfica? (trazo, alineamiento y niveles)', M.topo],
-    ['¿Los diámetros del acero corresponden a los detalles del plano?', M.medicion],
-    ['¿La distribución del acero cumple lo indicado? (cantidad y espaciamiento entre barras)', M.medicion],
-    ['¿Los empalmes están ubicados donde corresponde? (traslapes según el RNE)', M.plano],
-    ['¿El espaciamiento de estribos coincide con los detalles del plano?', M.medicion],
-    ['¿Las armaduras están correctamente ancladas, fijadas y arriostradas? (mechas, anclajes y arriostres según planos)', M.plano],
-    ['¿Las armaduras están limpias y sin defectos? (libres de óxido suelto, rebabas y deformaciones)', M.visual],
-    [Q.seguridad + ' (líneas de vida, plataformas de acceso y barandas)', M.visual],
+    // El certificado de colada es la ÚNICA prueba de que el acero es el grado
+    // especificado. Sin él, todo lo demás se verifica sobre material sin respaldo.
+    ['¿El acero cuenta con certificado de calidad del lote y corresponde al grado especificado? (grado y diámetro trazables a la colada)', M.doc],
+    ['¿El procedimiento de habilitación y colocación vigente está disponible en el frente y el personal fue instruido en él?', M.doc],
+    ['¿Se contrastaron los planos de las tres especialidades y NO quedan interferencias sin resolver? (listarlas en observaciones)', M.plano],
+    ['¿Los ejes y niveles del elemento fueron verificados topográficamente, con desviación dentro de ±10 mm respecto al plano?', M.topo],
+    ['¿Los diámetros de las barras coinciden con el plano, verificados por marca de laminado o calibrador en al menos 3 barras por lecho?', M.medicion],
+    ['¿La cantidad de barras es EXACTAMENTE la del plano y el espaciamiento no se desvía más de ±2 cm?', M.medicion],
+    // El traslape mal ubicado es el defecto estructural clásico: cumple la
+    // longitud pero está en la zona donde el elemento trabaja al máximo.
+    ['¿Los traslapes cumplen la longitud indicada en el plano?', M.medicion],
+    ['¿NINGÚN traslape cae en zona de confinamiento ni donde el plano lo prohíbe? (RNE E.060 — cumplir la longitud no basta si está en la zona de máximo esfuerzo)', M.plano],
+    ['¿El espaciamiento de estribos cumple ±2 cm y la longitud de la zona de confinamiento coincide con el detalle? (RNE E.060)', M.medicion],
+    // El recubrimiento es el defecto más frecuente y el que provoca corrosión a
+    // los pocos años: se verifica que los dados existan Y que no cedan al vaciar.
+    ['¿El recubrimiento está garantizado con dados o separadores del espesor especificado, en cantidad suficiente para que la armadura no ceda durante el vaciado?', M.medicion],
+    ['¿Las armaduras están ancladas, fijadas y arriostradas de modo que no se desplacen durante el vaciado y el vibrado?', M.visual],
+    // El criterio real no es "limpieza" estética sino ADHERENCIA acero-concreto.
+    ['¿Las barras están libres de óxido no adherente, grasa, aceite, pintura o lechada que reduzcan la adherencia con el concreto?', M.visual],
+    ['¿El frente cuenta con las protecciones colectivas requeridas y las esperas verticales están tapadas? (líneas de vida, plataformas, barandas y tapas antiempalamiento)', M.visual],
   ],
 }]);
 
+// PE — El encofrado define la geometría final y sostiene el peso del concreto
+// fresco. Sus dos fallas graves son el colapso del apuntalamiento (seguridad) y
+// la fuga de lechada (cangrejeras); ambas se preguntan explícitamente.
 const PE = clasico('PE', 'PROTOCOLO DE ENCOFRADO', [{
   seccion: 'INSPECCIÓN',
   items: [
-    ['¿Se ejecutó el trabajo conforme al procedimiento aprobado?', M.doc],
-    ['¿El trazo y la ubicación del encofrado coinciden con el plano? (ejes, alineamiento, distancias y niveles)', M.topo],
-    ['¿El encofrado está alineado, aplomado y sin deformaciones?', M.medicion],
-    ['¿Se colocaron los dados y separadores laterales que garantizan el recubrimiento?', M.visual],
-    ['¿El encofrado está montado, fijado y arriostrado de forma estable?', M.visual],
-    ['¿Las dimensiones internas del encofrado corresponden a lo especificado?', M.medicion],
-    ['¿Se aplicó desmoldante y el interior del encofrado quedó limpio?', M.visual],
-    ['¿Están colocados los pases y tubos de instalaciones sanitarias según plano?', M.plano],
-    ['¿Están colocados los pases y tubos de instalaciones eléctricas según plano?', M.plano],
-    ['¿Se colocaron los soportes y anclajes para los pases e instalaciones varias?', M.plano],
-    [Q.seguridad, M.visual],
+    ['¿El diseño del encofrado y del apuntalamiento está aprobado y disponible en el frente, para las cargas de este elemento?', M.doc],
+    ['¿El trazo y los niveles del encofrado fueron verificados topográficamente, con desviación dentro de ±10 mm?', M.topo],
+    ['¿El desplome del encofrado es menor a 6 mm por cada 3 m de altura y no hay paneles alabeados ni deformados?', M.medicion],
+    ['¿Las dimensiones internas están dentro de la tolerancia de la sección? (+12 mm / −6 mm respecto al plano)', M.medicion],
+    // Sin apoyo firme el puntal se hunde durante el vaciado y el elemento pierde
+    // nivel cuando ya no se puede corregir.
+    ['¿El apuntalamiento está completo, arriostrado y apoyado sobre superficie firme y nivelada, capaz de resistir el concreto fresco sin asentarse?', M.visual],
+    // Fuga de lechada = cangrejeras = reparación estructural. Es el defecto de
+    // acabado más común y se origina aquí, no en el vaciado.
+    ['¿Las juntas y encuentros del encofrado están sellados de modo que no se fugue lechada durante el vaciado?', M.visual],
+    // Distinto del dado de armadura que revisa el protocolo de acero: aquí se
+    // comprueba el separador LATERAL contra la cara del encofrado, que es el que
+    // define el recubrimiento de costado.
+    ['¿Los separadores laterales mantienen la armadura a la distancia correcta de la cara del encofrado en toda la altura?', M.medicion],
+    ['¿El interior del encofrado está libre de recortes, alambres, aserrín y agua empozada?', M.visual],
+    // Se separa del anterior a propósito: el desmoldante sobre el acero anula la
+    // adherencia y es un fallo grave e invisible tras el vaciado, mientras que un
+    // resto de aserrín es un defecto menor. Fundirlos en un solo SÍ/NO ocultaría
+    // cuál de los dos ocurrió.
+    ['¿El desmoldante se aplicó ANTES de montar la armadura, o sin contaminarla? (el desmoldante sobre las barras anula la adherencia con el concreto)', M.visual],
+    ['¿Los pases y tubos de instalaciones sanitarias están según plano y fijados para no desplazarse durante el vaciado?', M.plano],
+    ['¿Los pases y tubos de instalaciones eléctricas están según plano y fijados para no desplazarse durante el vaciado?', M.plano],
+    ['¿Los soportes y anclajes para instalaciones y estructuras metálicas están en su posición final y asegurados?', M.plano],
+    ['¿Está definido el plazo mínimo de desencofrado para este elemento y comunicado al personal? (evita el desencofrado prematuro)', M.doc],
+    ['¿El frente cuenta con accesos seguros, barandas y protección de bordes, y la zona bajo el encofrado está señalizada?', M.visual],
   ],
 }]);
 
@@ -128,29 +184,43 @@ const PAA = clasico('PAA', 'PROTOCOLO DE PERFORACIÓN Y ANCLAJE DE ACERO', [{
   ],
 }]);
 
+// PIS — Una red sanitaria solo se puede dar por buena con DOS medidas: la
+// pendiente (si no, no evacúa) y la prueba de estanqueidad (si no, filtra dentro
+// de la losa). El protocolo original no pedía ninguna de las dos.
 const PIS = clasico('PIS', 'PROTOCOLO DE TUBERÍA (INSTALACIONES SANITARIAS)', [{
   seccion: 'DESCRIPCIÓN DE ACTIVIDADES',
   items: [
-    ['¿Las tuberías y accesorios se instalaron según el plano?', M.plano],
-    ['¿El material instalado corresponde al especificado? (PVC)', M.visual],
-    ['¿El diámetro de la tubería corresponde al indicado en el plano?', M.medicion],
-    ['¿El material está libre de defectos? (fisuras, deformaciones o golpes)', M.visual],
+    ['¿Las tuberías y accesorios siguen el trazo del plano y los diámetros coinciden, verificados tramo por tramo?', M.plano],
+    ['¿El material y la clase corresponden a lo especificado, con marcado de fabricante y clase legible en la tubería?', M.doc],
+    ['¿El material está libre de fisuras, deformaciones por calor o golpes que comprometan la estanqueidad?', M.visual],
+    // Sin pendiente la red no evacúa: es el defecto que se descubre recién
+    // cuando el edificio está en uso y ya no hay forma de corregirlo.
+    ['¿La pendiente de los tramos de desagüe cumple el mínimo especificado (≥ 1 %), verificada con nivel en cada tramo?', M.medicion],
+    ['¿Las uniones se ejecutaron con la técnica y el pegamento especificados, respetando el tiempo de fraguado antes de probar?', M.visual],
+    // LA prueba de calidad de una red sanitaria. Sin ella, el protocolo no
+    // evalúa nada: solo declara que las tuberías "se ven bien".
+    ['¿Se ejecutó la prueba de estanqueidad del tramo y se mantuvo SIN pérdida durante el tiempo especificado? (registrar resultado en observaciones)', M.func],
     [Q.soporte, M.visual],
-    ['¿Los terminales expuestos de tubería y las cajas de paso quedaron taponeados?', M.visual],
+    ['¿Los terminales expuestos y las cajas de paso quedaron taponeados para impedir el ingreso de concreto o residuos?', M.visual],
   ],
 }]);
 
+// PIE — Lo que hace inservible un ducto eléctrico embebido no es que "se vea
+// mal", sino que no pase el cable: dobleces cerrados, aplastamientos o falta de
+// guía. Todo eso se descubre al cablear, con la losa ya vaciada.
 const PIE = clasico('PIE', 'PROTOCOLO DE INSTALACIONES ELÉCTRICAS', [{
   seccion: 'DESCRIPCIÓN DE ACTIVIDADES',
   items: [
     [Q.ubicPuntos, M.plano],
-    ['¿Las tuberías están libres de aplastamientos, roturas o dobleces que reduzcan su diámetro interior?', M.visual],
-    ['¿Los accesorios son del mismo material y clase que la tubería? (uniones, conectores y curvas en PVC)', M.visual],
-    ['¿Las cajas se colocaron según el trazo topográfico? (octogonales, rectangulares y de paso)', M.topo],
+    ['¿El diámetro de la tubería corresponde al plano y el material y clase son los especificados?', M.medicion],
+    ['¿Las tuberías están libres de aplastamientos y roturas, y los radios de curvatura son mayores a 6 veces el diámetro? (curvas cerradas impiden el cableado)', M.medicion],
+    ['¿Los accesorios son del mismo material y clase que la tubería, con marcado legible? (uniones, conectores y curvas)', M.visual],
+    ['¿Las cajas están en el trazo y a la altura especificada, con desviación menor a ±2 cm? (octogonales, rectangulares y de paso)', M.topo],
     [Q.soporte, M.visual],
+    // Se comprueba ANTES de vaciar, que es la única oportunidad de corregir.
+    [Q.pasahilos, M.func],
+    ['¿Las tuberías y accesorios están en buen estado, sin tramos expuestos a golpes durante el vaciado?', M.visual],
     [Q.limpieza, M.visual],
-    ['¿El diámetro de la tubería corresponde al indicado en el plano?', M.medicion],
-    ['¿Las tuberías y accesorios están en buen estado?', M.visual],
   ],
 }]);
 
@@ -205,39 +275,48 @@ const CTPT = clasico('CTPT', 'CONTROL TOPOGRÁFICO LEVANTAMIENTO DEL TERRENO', [
 //   Traen el MISMO set de preguntas repetido por sistema → todas las secciones.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// PPIS — Los puntos definen dónde irá cada aparato sanitario: un punto a la
+// altura equivocada obliga a picar tabique terminado. Se exige altura medida,
+// no "ubicación correcta".
 const PPIS = clasico('PPIS', 'PROTOCOLO DE COLOCACIÓN DE PUNTOS DE INSTALACIONES SANITARIAS', [
   {
     seccion: 'VERIFICACIÓN PUNTOS DE AGUA',
     items: [
-      ['¿La red instalada corresponde al tipo previsto? (agua fría o agua caliente)', M.plano],
-      ['¿El material de la red corresponde al especificado? (PVC, PPR o acero)', M.visual],
-      ['¿Los puntos de agua están ubicados según el plano?', M.plano],
+      ['¿La red instalada corresponde al tipo previsto y está diferenciada en obra? (agua fría / agua caliente)', M.plano],
+      ['¿El material y la clase de la red son los especificados? (PVC, PPR o acero, con marcado legible)', M.doc],
+      ['¿Los puntos de agua están en la ubicación y a la ALTURA del plano, con desviación menor a ±2 cm?', M.medicion],
       [Q.cantSalidas, M.medicion],
-      [Q.diamRecorrido, M.visual],
-      ['¿El tipo de salida corresponde al aparato previsto? (ovalín, inodoro u otro)', M.visual],
-      ['¿Se instaló la válvula de paso donde indica el plano?', M.visual],
+      [Q.diamRecorrido, M.medicion],
+      ['¿El tipo y la separación entre salidas corresponden al aparato previsto, medida entre ejes? (ovalín, inodoro, urinario u otro)', M.medicion],
+      ['¿Se instaló la válvula de paso donde indica el plano y queda accesible para mantenimiento?', M.visual],
+      ['¿El tramo pasó la prueba de presión sin pérdida durante el tiempo especificado? (registrar valor en observaciones)', M.func],
       [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'VERIFICACIÓN PUNTOS DE DESAGÜE',
     items: [
-      ['¿Los puntos de desagüe están ubicados según el plano?', M.plano],
-      ['¿El material de la red corresponde al especificado? (PVC o PPR)', M.visual],
+      ['¿Los puntos de desagüe están en la ubicación y a la ALTURA del plano, con desviación menor a ±2 cm?', M.medicion],
+      ['¿El material y la clase de la red son los especificados? (PVC o PPR, con marcado legible)', M.doc],
       [Q.cantSalidas, M.medicion],
-      [Q.diamRecorrido, M.visual],
+      [Q.diamRecorrido, M.medicion],
+      ['¿La pendiente de los ramales cumple el mínimo especificado (≥ 1 %), verificada con nivel?', M.medicion],
       ['¿El tipo de salida corresponde al aparato previsto? (ovalín, inodoro u otro)', M.visual],
-      ['¿Se instalaron los puntos de urinario, registro y sumidero previstos?', M.visual],
+      ['¿Se instalaron los puntos de urinario, registro y sumidero previstos, y los registros quedan accesibles?', M.visual],
+      ['¿El tramo pasó la prueba de estanqueidad sin pérdida durante el tiempo especificado?', M.func],
       [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'VERIFICACIÓN PUNTOS DE VENTILACIÓN',
     items: [
-      ['¿Los puntos de ventilación están ubicados según el plano?', M.plano],
-      ['¿El material de la red corresponde al especificado? (PVC o PPR)', M.visual],
+      ['¿Los puntos de ventilación están en la ubicación y altura del plano, con desviación menor a ±2 cm?', M.medicion],
+      ['¿El material y la clase de la red son los especificados? (PVC o PPR)', M.doc],
       [Q.cantSalidas, M.medicion],
-      [Q.diamRecorrido, M.visual],
+      [Q.diamRecorrido, M.medicion],
+      // Sin ventilación los sifones se desceban y el ambiente toma olor: es el
+      // motivo por el que existe esta red y nadie lo verifica.
+      ['¿La ventilación remata según el plano y el recorrido queda libre de obstrucciones o tramos ahogados?', M.visual],
       [Q.limpieza, M.visual],
     ],
   },
@@ -245,61 +324,74 @@ const PPIS = clasico('PPIS', 'PROTOCOLO DE COLOCACIÓN DE PUNTOS DE INSTALACIONE
 
 // PPIE — 9 secciones × 4 preguntas = 36 filas (REGLA DE ORO)
 const PPIE_SECCIONES = [
-  ['VERIFICACIÓN SISTEMA DE PUESTA A TIERRA', '¿La caja equipotencial y las cajas de paso están ubicadas según el plano?'],
+  // La resistencia del pozo NO se pide aquí: en esta etapa solo existen ductos y
+  // cajas, el pozo se mide en otro momento y preguntarlo daría siempre "NA".
+  ['VERIFICACIÓN SISTEMA DE PUESTA A TIERRA', '¿La caja equipotencial y las cajas de paso están ubicadas según el plano y quedan accesibles para su medición posterior?'],
   ['VERIFICACIÓN PUNTOS DE FUERZA', Q.ubicPuntos],
   ['ALUMBRADO', Q.ubicPuntos],
   ['TOMACORRIENTES', Q.ubicPuntos],
   ['LUZ DE EMERGENCIA', Q.ubicPuntos],
-  ['SISTEMA DE ALARMA', '¿Los puntos están ubicados según el plano? (ACI y plano de intrusión)'],
+  ['SISTEMA DE ALARMA', '¿Los puntos están ubicados según el plano, con desviación menor a 2 cm? (ACI y plano de intrusión)'],
   ['SISTEMA DE AIRE ACONDICIONADO', Q.ubicPuntos],
   ['DATA', Q.ubicPuntos],
   ['CIRCUITO CERRADO TV - CCTV', Q.ubicPuntos],
 ];
+// PPIE — 9 sistemas × 5 verificaciones. Se añade el pasahilos/continuidad a
+// cada sistema: es la única comprobación que demuestra que el ducto SIRVE, y
+// hacerla después del vaciado ya no sirve de nada.
 const PPIE = clasico('PPIE', 'PROTOCOLO DE PUNTOS EN INSTALACIONES ELÉCTRICAS',
   PPIE_SECCIONES.map(([seccion, primera]) => ({
     seccion,
     items: [
       [primera, M.plano],
-      ['¿El diámetro, el recorrido de la tubería, la caja y la altura corresponden al plano?', M.visual],
+      ['¿El diámetro, el recorrido, la caja y la ALTURA corresponden al plano, con desviación menor a ±2 cm?', M.medicion],
       [Q.cantSalidas, M.medicion],
+      [Q.pasahilos, M.func],
       [Q.limpieza, M.visual],
     ],
   })),
 );
 
+// PRE — Red enterrada: una vez tapada la zanja, cualquier error cuesta volver a
+// excavar. La profundidad y la señalización no son detalles estéticos, son lo
+// que evita que una retroexcavadora corte la red viva años después.
 const PRE = clasico('PRE', 'PROTOCOLO DE REDES ELÉCTRICAS', [
   {
     seccion: 'TRABAJOS EN TERRENO',
     items: [
-      ['¿La zanja está ubicada según el plano?', M.plano],
-      ['¿Las dimensiones de corte de la zanja cumplen el detalle? (ancho y profundidad)', M.medicion],
-      ['¿La cama de arena tiene la altura indicada en el detalle?', M.medicion],
-      [Q.diamRecorrido, M.visual],
+      ['¿La zanja está en el trazo del plano y libre de interferencias con otras redes? (registrar cruces en observaciones)', M.plano],
+      ['¿El ancho y la PROFUNDIDAD de la zanja cumplen el detalle, medidos cada tramo? (la profundidad protege la red del tránsito superior)', M.medicion],
+      ['¿La cama de arena tiene el espesor indicado y está libre de piedras que puedan dañar el ducto?', M.medicion],
+      [Q.diamRecorrido, M.medicion],
       [Q.cantTuberias, M.medicion],
       [Q.sepTuberias, M.medicion],
-      ['¿Se colocó la señalización de la red según el detalle? (cinta o malla de advertencia)', M.visual],
+      ['¿Se verificó que pasa la guía por cada ducto ANTES de tapar la zanja?', M.func],
+      ['¿La cinta o malla de advertencia está a la altura del detalle sobre el ducto, medida antes de completar el relleno? (evita el corte accidental en excavaciones futuras)', M.medicion],
+      ['¿El relleno y la compactación se ejecutaron por capas según especificación, sin dañar el ducto?', M.medicion],
       [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'TRABAJOS EN BUZÓN',
     items: [
-      ['¿El diámetro de la tubería que llega al buzón corresponde al plano?', M.visual],
-      [Q.cantTuberias, M.medicion],
+      ['¿El diámetro y la cantidad de tuberías que llegan al buzón corresponden al plano, contadas una a una?', M.medicion],
       [Q.sepTuberias, M.medicion],
-      ['¿Se respeta la distancia mínima entre el NPT y la tubería?', M.medicion],
-      ['¿El sumidero del buzón se ejecutó según el detalle?', M.plano],
+      ['¿Se respeta la distancia mínima entre el NPT y la tubería, medida en el punto más desfavorable del tramo?', M.medicion],
+      ['¿Las entradas al buzón quedaron selladas para impedir el ingreso de agua o tierra a los ductos?', M.visual],
+      ['¿El sumidero del buzón drena sin empozar, verificado vertiendo agua?', M.func],
+      ['¿La tapa instalada es de la clase especificada para el tránsito de esa zona y queda enrasada con el nivel de piso?', M.doc],
       [Q.limpieza, M.visual],
     ],
   },
   {
     seccion: 'REDES COLGADAS',
     items: [
-      ['¿El trazo y replanteo de la red colgada fue verificado?', M.topo],
-      ['¿El diámetro de la tubería o bandeja corresponde al plano?', M.visual],
-      ['¿La cantidad de tuberías o bandejas coincide con el plano?', M.medicion],
-      ['¿La separación entre tuberías o bandejas cumple el detalle?', M.medicion],
-      ['¿Se respeta la distancia mínima entre el NPT y la tubería o bandeja?', M.medicion],
+      ['¿El trazo y replanteo de la red colgada fue verificado topográficamente, con desviación menor a ±2 cm?', M.topo],
+      ['¿El diámetro y la cantidad de tuberías o bandejas corresponden al plano, contadas una a una?', M.medicion],
+      ['¿La separación entre tuberías o bandejas cumple el detalle, medida en al menos 3 puntos?', M.medicion],
+      ['¿Se respeta la distancia mínima entre el NPT y la tubería o bandeja, medida en el punto más desfavorable?', M.medicion],
+      ['¿Los soportes están al espaciamiento especificado y anclados a elemento estructural, no a falso cielo ni a tabique?', M.medicion],
+      ['¿Se verificó que pasa la guía por cada ducto antes de cerrar el falso cielo?', M.func],
       [Q.limpieza, M.visual],
     ],
   },
@@ -336,17 +428,24 @@ function buildPCC() {
     'Actividad realizada': act, 'Método de validación': met, 'Sección': sec,
   });
 
+  // El vaciado es IRREVERSIBLE: es el único momento del proceso en que un error
+  // no se corrige, se demuele. Por eso la inspección previa exige que cada
+  // especialidad esté LIBERADA (protocolo aprobado), no solo "verificada", y se
+  // añade el estado del equipo: una falla de vibrador a media losa deja
+  // cangrejeras estructurales.
   const S1 = 'INSPECCIÓN PREVIA AL VACIADO';
   const previa = [
-    '¿Se ejecutó el trabajo conforme al procedimiento aprobado?',
-    '¿Se verificaron los niveles y el alineamiento antes del vaciado?',
-    '¿Las juntas fueron preparadas y verificadas?',
-    '¿El acero de refuerzo fue liberado?',
-    '¿El encofrado fue liberado?',
-    '¿Las instalaciones sanitarias embebidas fueron verificadas?',
-    '¿Las instalaciones eléctricas embebidas fueron verificadas?',
-    '¿Las instalaciones mecánicas embebidas fueron verificadas?',
-    '¿Los anclajes para estructuras metálicas fueron verificados?',
+    '¿El procedimiento de vaciado está definido para este elemento, incluyendo qué hacer ante lluvia, falla de bomba o junta fría no prevista?',
+    '¿Los niveles de vaciado están marcados en el elemento y verificados topográficamente?',
+    '¿Las juntas de construcción están en la ubicación prevista, con la superficie rugosa, limpia y saturada pero sin agua libre?',
+    '¿El acero de refuerzo está LIBERADO con su protocolo aprobado?',
+    '¿El encofrado está LIBERADO con su protocolo aprobado?',
+    '¿Las instalaciones sanitarias embebidas están liberadas, tapadas y aseguradas para que no se desplacen durante el vaciado?',
+    '¿Las instalaciones eléctricas embebidas están liberadas, con guía y tapadas para que no se llenen de concreto?',
+    '¿Las instalaciones mecánicas embebidas están liberadas y aseguradas?',
+    '¿Los anclajes para estructuras metálicas están en posición, con plantilla y nivel verificados?',
+    '¿El equipo de vaciado está operativo y se cuenta con vibrador de RESERVA en el frente? (una falla a media losa deja cangrejeras)',
+    '¿Las condiciones de clima y temperatura permiten vaciar según especificación, y se previó el manejo si cambian?',
   ];
   for (const it of previa) add(it, 'list-[SI, NO, NA]', S1);
 
@@ -359,26 +458,40 @@ function buildPCC() {
   add('Tipo de colocación', 'list-[DIRECTO, CON BOMBA, OTROS]', S2);
   add('Tipo de acabado', 'list-[CARAVISTA, FROTACHADO, OTROS]', S2);
 
+  // La tabla de batches es donde el protocolo deja de ser un checklist y pasa a
+  // ser un REGISTRO con el que se puede auditar el vaciado después: slump fuera
+  // de rango, temperatura alta o exceso de tiempo entre mezclado y colocación
+  // explican una resistencia baja a los 28 días.
   const S3 = 'REGISTRO DE BATCHES';
-  add('col-[A][Guía / Batch] // col-[B][Hora inicio] // col-[C][Hora fin] // col-[D][Slump (pulg)] // col-[E][Volumen (m³)] // col-[F][Código de testigos]', '', S3);
+  add('col-[A][Guía / Batch] // col-[B][Hora mezclado] // col-[C][Hora colocación] // col-[D][Slump (pulg)] // col-[E][Temp. (°C)] // col-[F][Volumen (m³)] // col-[G][Código de testigos]', '', S3);
   for (let i = 1; i <= 6; i++) {
     add(`Batch ${i}`,
-      'texto-[] // hora-[] // hora-[] // numerico-[1:10]:dec[1] // numerico-[0:100]:dec[2] // texto-[]',
+      'texto-[] // hora-[] // hora-[] // numerico-[1:10]:dec[1] // numerico-[5:40]:dec[1] // numerico-[0:100]:dec[2] // texto-[]',
       S3);
   }
-  // Total de volumen colocado (suma de la columna E de los 6 batches)
+  // Total de volumen colocado = suma de la columna de VOLUMEN de los 6 batches.
+  // ⚠ La letra se deriva del encabezado, NO se escribe a mano: al insertar la
+  // columna de temperatura, el volumen pasó de E a F y una letra hardcodeada
+  // habría hecho que el total sumara temperaturas sin que nada fallara.
+  const COL_VOLUMEN = 'F';                     // A guía · B/C horas · D slump · E temp · F volumen · G testigos
   const primeraFilaBatch = p - 6;              // partida de "Batch 1"
   const ultimaFilaBatch = p - 1;               // partida de "Batch 6"
   add('Volumen total colocado (m³)',
-    `numerico-fx[SUMA(#${primeraFilaBatch}E:#${ultimaFilaBatch}E)]:dec[2]`, S3);
+    `numerico-fx[SUMA(#${primeraFilaBatch}${COL_VOLUMEN}:#${ultimaFilaBatch}${COL_VOLUMEN})]:dec[2]`, S3);
 
+  // Sin probetas no existe control de calidad del concreto: es la única prueba
+  // objetiva de que el elemento alcanza el f'c de diseño, y se toma AQUÍ o no se
+  // toma nunca. Igual el curado: la resistencia final depende de él tanto como
+  // de la dosificación.
   const S4 = 'INSPECCIÓN POSTERIOR AL VACIADO';
   const posterior = [
-    '¿El acabado superficial corresponde a lo especificado?',
-    '¿El nivel y el aplomo final del elemento cumplen lo indicado en planos?',
-    '¿Los elementos embebidos quedaron en su posición final correcta?',
-    '¿El área quedó ordenada y limpia tras el vaciado?',
-    '¿Se aplicó el curado especificado? (agua, membrana u otro)',
+    '¿Se tomaron las probetas según norma (un juego por cada 50 m³ o fracción, mínimo uno por día de vaciado), identificadas y protegidas en obra? (NTP 339.033)',
+    '¿El slump de cada batch se mantuvo dentro de la tolerancia del diseño y se rechazó el que no cumplía? (registrar rechazos en observaciones)',
+    '¿El acabado superficial corresponde al especificado y está libre de cangrejeras, segregación o juntas frías? (describir y ubicar cualquier defecto en observaciones)',
+    '¿El desplome del elemento terminado es menor a 6 mm por cada 3 m de altura y los niveles cumplen ±10 mm?',
+    '¿Los elementos embebidos quedaron en su posición final, sin desplazamiento respecto al plano?',
+    '¿El curado se inició apenas el acabado lo permitió y se mantendrá al menos 7 días? (RNE E.060 — sin curado no se alcanza el f\'c)',
+    '¿El área quedó ordenada y los residuos de concreto se retiraron antes de fraguar?',
   ];
   for (const it of posterior) add(it, 'list-[SI, NO, NA]', S4);
 
