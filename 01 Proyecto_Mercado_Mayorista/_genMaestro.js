@@ -168,19 +168,30 @@ const PE = clasico('PE', 'PROTOCOLO DE ENCOFRADO', [{
 
 // ⚠ Código propio (PAA): en el Excel original compartía PE-VRS-2026-004 con Encofrado.
 // El original venía redactado como instructivo (imperativo); aquí se verifica el RESULTADO.
+// PAA — Un anclaje químico mal ejecutado se ve idéntico a uno bueno: la falla
+// solo aparece cuando se carga. La limpieza de la perforación es la causa nº 1
+// de pérdida de capacidad, y no deja rastro. Por eso se pregunta por cada paso
+// que condiciona la adherencia, y se añade el ensayo de arranque.
 const PAA = clasico('PAA', 'PROTOCOLO DE PERFORACIÓN Y ANCLAJE DE ACERO', [{
   seccion: 'INSPECCIÓN',
   items: [
+    ['¿El adhesivo está vigente (dentro de su fecha de caducidad) y se conservó según su ficha técnica?', M.doc],
+    ['¿Se verificó con detector que la perforación NO corta armadura existente? (marcar los desvíos en observaciones)', M.func],
     ['¿La varilla quedó alineada y centrada en su posición definitiva?', M.topo],
     ['¿Se respetó el recubrimiento mínimo de 2 cm respecto al borde del concreto?', M.medicion],
     ['¿La perforación se ejecutó con rotomartillo y broca de carburo para concreto?', M.visual],
-    ['¿El diámetro de la perforación es mayor que el de la varilla, según la ficha técnica del anclaje?', M.medicion],
-    ['¿La perforación alcanza al menos 200 mm de profundidad en el concreto estructural?', M.medicion],
-    ['¿Se limpió la perforación con aire comprimido y escobilla antes de inyectar?', M.visual],
-    ['¿El adhesivo se inyectó desde el fondo hasta dos tercios del volumen de la perforación?', M.visual],
-    ['¿La varilla se insertó girando hasta el fondo, cubriendo todo el corrugado con resina?', M.visual],
-    ['¿Se respetó el tiempo de curado según la temperatura ambiente? (20 °C: 24 h · 10 °C: 48 h · menos de 5 °C: 72 h)', M.doc],
-    [Q.seguridad, M.visual],
+    ['¿El diámetro de la perforación es el que indica la ficha técnica del anclaje para esa varilla?', M.medicion],
+    ['¿La perforación alcanza al menos 200 mm de profundidad en el concreto estructural, medida con sonda?', M.medicion],
+    // Causa nº 1 de falla y totalmente invisible una vez inyectado el adhesivo.
+    ['¿Se limpió la perforación con el ciclo completo (soplar, escobillar, soplar) hasta que sale sin polvo?', M.visual],
+    ['¿El adhesivo se inyectó desde el fondo hacia afuera, sin dejar burbujas ni vacíos?', M.visual],
+    ['¿La varilla se insertó girando hasta el fondo y rebosó adhesivo, señal de que el corrugado quedó cubierto?', M.visual],
+    ['¿Se respetó el tiempo de curado según la temperatura ambiente MEDIDA? (20 °C: 24 h · 10 °C: 48 h · menos de 5 °C: 72 h)', M.medicion],
+    ['¿Los anclajes se mantuvieron sin carga ni vibración durante todo el curado?', M.visual],
+    // Es el único control que demuestra capacidad real; sin él, el protocolo
+    // solo certifica que el procedimiento "se siguió".
+    ['¿Se ejecutó el ensayo de arranque en la proporción especificada y todos alcanzaron la carga de prueba? (registrar valores en observaciones)', M.func],
+    ['¿El frente de trabajo cuenta con las protecciones de seguridad requeridas y extracción de polvo?', M.visual],
   ],
 }]);
 
@@ -228,44 +239,57 @@ const PIE = clasico('PIE', 'PROTOCOLO DE INSTALACIONES ELÉCTRICAS', [{
 // GRUPO B — Topográficos
 // ─────────────────────────────────────────────────────────────────────────────
 
+// CTTR — El trazo es el origen del error acumulado: si arranca desviado, todo lo
+// que se construya encima hereda la desviación y nadie la detecta hasta que dos
+// elementos no encajan. Por eso se exige tolerancia y equipo calibrado.
 const CTTR = clasico('CTTR', 'CONTROL TOPOGRÁFICO TRAZO Y REPLANTEO', [
   {
     seccion: 'TRAZO INICIAL',
     items: [
-      ['¿El trazo lo ejecutó un topógrafo calificado?', M.doc],
-      ['¿El terreno fue liberado y entregado para iniciar el trazo?', M.doc],
-      ['¿Se verificaron el alineamiento, las medidas y la escuadra del trazo?', M.topo],
+      ['¿El trazo lo ejecutó un topógrafo calificado, con habilitación vigente?', M.doc],
+      // Sin certificado vigente, todas las medidas del protocolo quedan sin
+      // respaldo: es el primer control, no el último.
+      ['¿El equipo topográfico cuenta con certificado de calibración VIGENTE a la fecha del trabajo?', M.doc],
+      ['¿Se partió de puntos de control (BM y ejes) verificados y no alterados desde el último uso?', M.topo],
+      ['¿El terreno fue liberado y entregado, libre de obstrucciones que impidan el trazo?', M.doc],
+      ['¿El alineamiento, las medidas y la escuadra cierran dentro de la tolerancia especificada? (registrar el error de cierre en observaciones)', M.topo],
       ['¿El trazo coincide con el plano base, sin modificaciones? (de haberlas, detallarlas en observaciones)', M.plano],
     ],
   },
   {
     seccion: 'TRAZO REPLANTEADO',
     items: [
-      ['¿Las dimensiones replanteadas de la estructura coinciden con el plano?', M.topo],
-      ['¿Se materializaron en campo los vértices de la estructura?', M.topo],
-      ['¿El trazo final de la estructura quedó marcado y verificado?', M.topo],
-      ['¿El equipo topográfico cuenta con certificado de calibración vigente?', M.doc],
+      ['¿Las dimensiones replanteadas coinciden con el plano, con desviación dentro de ±10 mm?', M.topo],
+      ['¿Se materializaron en campo TODOS los vértices de la estructura, con marca estable y protegida?', M.topo],
+      ['¿Los niveles replanteados están dentro de ±10 mm respecto a la cota de proyecto?', M.topo],
+      ['¿El trazo final quedó marcado, verificado y con referencias que permitan reponerlo si se borra?', M.topo],
     ],
   },
 ]);
 
+// CTPT — El levantamiento define el estado REAL del terreno contra el que se
+// medirán los metrados y las diferencias con el proyecto. Un levantamiento sin
+// densidad suficiente de puntos oculta desniveles que aparecen luego como
+// sobrecosto de movimiento de tierras.
 const CTPT = clasico('CTPT', 'CONTROL TOPOGRÁFICO LEVANTAMIENTO DEL TERRENO', [
   {
     seccion: 'TRAZO INICIAL',
     items: [
-      ['¿El levantamiento lo ejecutó un topógrafo calificado?', M.doc],
-      ['¿El terreno fue liberado y entregado para iniciar el levantamiento?', M.doc],
-      ['¿Se verificaron el alineamiento, las medidas y la escuadra del levantamiento?', M.topo],
-      ['¿El levantamiento coincide con el plano base, sin modificaciones? (de haberlas, detallarlas en observaciones)', M.plano],
+      ['¿El levantamiento lo ejecutó un topógrafo calificado, con habilitación vigente?', M.doc],
+      ['¿El equipo topográfico cuenta con certificado de calibración VIGENTE a la fecha del trabajo?', M.doc],
+      ['¿Se partió de puntos de control (BM y ejes) verificados y no alterados desde el último uso?', M.topo],
+      ['¿El terreno fue liberado y entregado, libre de obstrucciones que impidan el levantamiento?', M.doc],
+      ['¿La densidad de puntos permite representar los quiebres reales del terreno, sin zonas interpoladas de más? (indicar zonas de baja densidad en observaciones)', M.topo],
+      ['¿El cierre del levantamiento está dentro de la tolerancia especificada? (registrar el error en observaciones)', M.topo],
     ],
   },
   {
     seccion: 'TRAZO REPLANTEADO',
     items: [
-      ['¿Las dimensiones levantadas de la estructura coinciden con el plano?', M.topo],
-      ['¿Se materializaron en campo los vértices de la estructura?', M.topo],
-      ['¿El trazo final de la estructura quedó marcado y verificado?', M.topo],
-      ['¿Los espacios levantados quedaron señalizados en campo?', M.visual],
+      ['¿Las dimensiones levantadas coinciden con el plano, con desviación dentro de ±10 mm?', M.topo],
+      ['¿Las diferencias entre el terreno levantado y el plano de proyecto están identificadas y cuantificadas? (afectan metrados y movimiento de tierras)', M.plano],
+      ['¿Se materializaron en campo los vértices, con marca estable y protegida?', M.topo],
+      ['¿Los espacios levantados quedaron señalizados en campo y con referencias reponibles?', M.visual],
     ],
   },
 ]);
@@ -399,14 +423,21 @@ const PRE = clasico('PRE', 'PROTOCOLO DE REDES ELÉCTRICAS', [
 
 // PDA — el original repite el bloque por Departamento (5 veces). Se generaliza a
 // AMBIENTE 1..5: cada ambiente es una sección con las mismas 4 verificaciones.
+// PDA — Es un sistema de vida: no basta con que "funcione", tiene que funcionar
+// CUANDO haga falta y en el ambiente correcto. Se añaden la audibilidad (una
+// sirena que no se oye no evacúa a nadie), la identificación en tablero (si el
+// tablero no dice DÓNDE es la alarma, la respuesta llega tarde) y el respaldo de
+// energía (los incendios suelen cortar la corriente).
 const PDA = clasico('PDA', 'PROTOCOLO DE DETECCIÓN Y ALARMAS CONTRA INCENDIO',
   [1, 2, 3, 4, 5].map(n => ({
     seccion: `AMBIENTE ${n}`,
     items: [
-      ['¿Los dispositivos están ubicados según el plano? (sensor de temperatura, detector de humo, luz estroboscópica, estación manual y sirena)', M.plano],
+      ['¿Los dispositivos están ubicados según el plano, respetando las distancias a muros y difusores de aire? (sensor de temperatura, detector de humo, luz estroboscópica, estación manual y sirena)', M.plano],
       ['¿La sirena se activa al operar el sensor de temperatura?', M.func],
       ['¿La sirena se activa al operar el detector de humo?', M.func],
-      ['¿El tablero de control reconoce e identifica correctamente el circuito de alarma?', M.func],
+      ['¿El tablero identifica la zona CORRECTA al activarse el dispositivo? (una alarma sin zona correcta retrasa la respuesta)', M.func],
+      ['¿La alarma es audible y la luz estroboscópica visible desde todo el ambiente, incluso con las puertas cerradas?', M.func],
+      ['¿El sistema siguió operando al simular corte de energía, con la autonomía de respaldo especificada?', M.func],
     ],
   })),
 );
@@ -514,13 +545,19 @@ function buildLIPMPP() {
   add('N° de serie del equipo', 'texto-[]', S1);
   add('Fecha de calibración del equipo', 'fecha-[]', S1);
 
+  // Una plancha fuera de posición se descubre el día del montaje, con la
+  // estructura metálica ya en obra y la grúa contratada: corregirla implica
+  // demoler el pedestal. De ahí que el control sea por coordenadas medidas y no
+  // por apreciación.
   const S2 = 'CHECK LIST — INSTALACIÓN DE PLANCHAS Y PERNOS';
   const check = [
-    '¿La base de la plancha metálica está correctamente ejecutada?',
-    '¿Los pernos de anclaje tienen la longitud y el diámetro especificados?',
-    '¿La plancha metálica está alineada según el plano?',
-    '¿La plancha metálica y los pernos están nivelados?',
-    '¿La plancha y los pernos de anclaje guardan el alineamiento entre sí?',
+    '¿La superficie de apoyo de la plancha está limpia, nivelada y sin lechada suelta?',
+    '¿Los pernos de anclaje tienen la longitud, el diámetro y el grado especificados, con rosca útil suficiente?',
+    '¿La rosca de los pernos está protegida y sin daños ni concreto adherido?',
+    '¿La plancha está alineada según el plano, con desviación dentro de la tolerancia de montaje?',
+    '¿La plancha y los pernos están nivelados, verificados con nivel de precisión?',
+    '¿La plantilla mantuvo la separación entre pernos durante el vaciado, sin desplazamiento?',
+    '¿Las coordenadas medidas en campo están dentro de la tolerancia de ±2 cm registrada en la tabla?',
   ];
   for (const it of check) add(it, 'list-[CONFORME, OBSERVADO, N/A]', S2);
 
