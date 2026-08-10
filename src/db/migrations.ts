@@ -1047,5 +1047,19 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    // v104 — Separar ESPECIALIDAD (disciplina) de ELEMENTO (componente físico).
+    // Antes convivían en `specialty`, lo que impedía filtrar por cualquiera de
+    // los dos por separado ("todo lo eléctrico" / "todas las losas").
+    {
+      toVersion: 48,
+      steps: [
+        addColumns({
+          table: 'locations',
+          columns: [
+            { name: 'element', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

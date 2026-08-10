@@ -14,10 +14,11 @@ export const LOCATIONS_REQUIRED_COLUMNS = [
 
 export interface ExcelLocation {
   name: string;           // "P1-Sector1-Cimiento"
-  locationOnly: string;   // "P1-Sector1" (columna Ubicación_Sola, opcional)
-  specialty: string;      // "Cimiento"   (columna Especialidad_Sola, opcional)
+  locationOnly: string;   // "P1-Sector1"  (columna Ubicación_Sola, opcional)
+  specialty: string;      // "Estructuras" (columna Especialidad_Sola, opcional) — DISCIPLINA
+  element: string;        // "Losa"        (columna Elemento, opcional) — v104, COMPONENTE
   referencePlan: string;  // "CIM,DetalleCimientos"
-  templateIds: string;    // "PROY-OP-01,PROY-OP-02" — IDs separados por coma
+  templateIds: string;    // "PA,PE,PCC" — CÓDIGOS de ficha (id_protocolo), no ids internos
 }
 
 export interface LocationsImportResult {
@@ -53,6 +54,8 @@ export async function importExcelLocationsFromUri(uri: string): Promise<Location
   const ubIdx       = headers.indexOf('Ubicación');
   const ubSolaIdx   = headers.indexOf('Ubicación_Sola');
   const espSolaIdx  = headers.indexOf('Especialidad_Sola');
+  // v104 — Columna OPCIONAL: los Excel viejos no la traen y siguen importando igual.
+  const elemIdx     = headers.indexOf('Elemento');
   const planIdx     = headers.indexOf('PLANO DE REFERENCIA');
   const idsIdx      = headers.indexOf('ID_Protocolos');
 
@@ -63,9 +66,10 @@ export async function importExcelLocationsFromUri(uri: string): Promise<Location
     if (!name) continue;
     const locationOnly = ubSolaIdx >= 0 ? String(row[ubSolaIdx] ?? '').trim() : '';
     const specialty    = espSolaIdx >= 0 ? String(row[espSolaIdx] ?? '').trim() : '';
+    const element      = elemIdx >= 0 ? String(row[elemIdx] ?? '').trim() : '';
     const referencePlan = String(row[planIdx] ?? '').trim();
     const templateIds   = String(row[idsIdx] ?? '').trim();
-    locations.push({ name, locationOnly, specialty, referencePlan, templateIds });
+    locations.push({ name, locationOnly, specialty, element, referencePlan, templateIds });
   }
   if (locations.length === 0) throw new LocationsImportError('El archivo no contiene ubicaciones validas.');
   return { locations, totalRows: rows.length - 1, fileUri: uri };

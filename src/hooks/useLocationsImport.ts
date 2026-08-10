@@ -59,6 +59,7 @@ export function useLocationsImport(projectId: string, projectName: string) {
             const needsUpdate =
               existing.locationOnly !== (loc.locationOnly || null) ||
               existing.specialty !== (loc.specialty || null) ||
+              existing.element !== (loc.element || null) ||
               existing.referencePlan !== loc.referencePlan ||
               existing.templateIds !== (loc.templateIds || null);
 
@@ -66,6 +67,7 @@ export function useLocationsImport(projectId: string, projectName: string) {
               await existing.update((record) => {
                 record.locationOnly = loc.locationOnly || null;
                 record.specialty = loc.specialty || null;
+                record.element = loc.element || null;
                 record.referencePlan = loc.referencePlan;
                 record.templateIds = loc.templateIds || null;
               });
@@ -78,6 +80,7 @@ export function useLocationsImport(projectId: string, projectName: string) {
               record.name = loc.name;
               record.locationOnly = loc.locationOnly || null;
               record.specialty = loc.specialty || null;
+              record.element = loc.element || null;
               record.referencePlan = loc.referencePlan;
               record.templateIds = loc.templateIds || null;
             }) as Location;

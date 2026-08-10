@@ -25,7 +25,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  *      sin abusar de protocol_item_id.
  */
 export const schema = appSchema({
-  version: 47,
+  version: 48,
   tables: [
     // ── users ────────────────────────────────────────────────────────────────
     tableSchema({
@@ -90,7 +90,11 @@ export const schema = appSchema({
         { name: 'project_id', type: 'string', isIndexed: true },
         { name: 'name', type: 'string' },
         { name: 'location_only', type: 'string', isOptional: true }, // ej: "P1-Sector1"
-        { name: 'specialty', type: 'string', isOptional: true },      // ej: "Cimiento"
+        { name: 'specialty', type: 'string', isOptional: true },      // DISCIPLINA: "Estructuras"
+        // v104 — ELEMENTO físico que se libera ("Losa", "C-1", "VA-202"). Va aparte
+        // de specialty: uno es la disciplina y el otro el componente, y mezclarlos
+        // impedía filtrar por cualquiera de los dos.
+        { name: 'element', type: 'string', isOptional: true },
         { name: 'reference_plan', type: 'string' },
         { name: 'template_ids', type: 'string', isOptional: true }, // IDs separados por coma: "1,2,3"
         { name: 'created_at', type: 'number' },

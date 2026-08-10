@@ -847,6 +847,9 @@ function buildProtocolPages(
   croquisB64: string | null = null,   // v43.5 — croquis (mapa capturado a PNG) del ensayo
   croquisInline = false,   // v43.6 — insertar el croquis como SECCIÓN (start/end per cfg)
   croquisLegend: CroquisLegend | null = null,   // v43.6 — leyenda a la derecha del mapa
+  // v104 — Elemento físico liberado (Losa, C-1, VA-202). Va AL FINAL y opcional
+  // para no correr los parámetros posicionales de las llamadas existentes.
+  element: string | null = null,
 ): string {
   const filledName = protocol.filledById ? (userMap.get(protocol.filledById)?.fullName ?? '—') : '—';
   const signedName = protocol.signedById ? (userMap.get(protocol.signedById)?.fullName ?? signerName) : signerName;
@@ -911,6 +914,9 @@ function buildProtocolPages(
       id_protocolo: cell('ID Protocolo', idProtocolo ?? protocol.protocolNumber),
       ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', locationOnly ?? protocol.locationReference),
       especialidad: !isNumeric && specialty ? cell('Especialidad', specialty) : '',
+      // v104 — El elemento SÍ aplica a numéricos: un ensayo de concreto se hace
+      // sobre una losa o una columna igual que un checklist.
+      elemento: element ? cell('Elemento', element) : '',
       // v103 — Partes del contrato (fijas del proyecto). Si el proyecto no las
       // llenó, la celda queda vacía y `.filter(Boolean)` la descarta.
       cliente: parties.cliente ? cell('Cliente', parties.cliente) : '',
@@ -1521,6 +1527,7 @@ export async function exportDossierPdf(
       croquisB64,
       croquisInline,   // v43.6 — croquis como sección (start/end)
       croquisLegend,
+      location?.element ?? null,   // v104
     );
     pageOffset += its_itemPages;
 
@@ -1703,6 +1710,7 @@ export async function exportSingleProtocolPdf(
     croquisB64,
     croquisInline,   // v43.6 — croquis como sección (start/end)
     croquisLegend,
+    location?.element ?? null,   // v104
   );
 
   const locRef = locationOnly && specialty ? `${locationOnly}-${specialty}` : (locationOnly ?? specialty ?? null);
@@ -1949,7 +1957,7 @@ export async function exportSampleDossierPdf(
       const idProtocolo = p.templateId ? (templateMap.get(p.templateId)?.idProtocolo ?? null) : null;
       let qrImg: string | null = null;
       try { qrImg = (await generateProtocolQrImg({ idProtocolo, externalId: (p as any).externalId ?? null, protocolUuid: p.id })).svg; } catch {}
-      const html = buildProtocolPages(p, its, userMap, logoB64, signB64, signerName, cursor, totalDocPages, projectName, specialty, idProtocolo, locOnly, qrImg, null);
+      const html = buildProtocolPages(p, its, userMap, logoB64, signB64, signerName, cursor, totalDocPages, projectName, specialty, idProtocolo, locOnly, qrImg, null, false, null, location?.element ?? null);
       cursor += protoPageCount(its, idProtocolo);
       const photoUris = evidencesByProtocol.get(p.id) ?? [];
       const showPhotos = getTemplatePrintConfig((_pdfFlags ?? {}) as ProjectFeatureFlags, idProtocolo).show_photos;

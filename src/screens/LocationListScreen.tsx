@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@components/AppHeader';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/types';
-import { locationsCollection, protocolsCollection } from '@db/index';
+import { locationsCollection, protocolsCollection, protocolTemplatesCollection } from '@db/index';
 import { Q } from '@nozbe/watermelondb';
 import type Location from '@models/Location';
 import { Colors, Radius, Shadow } from '../theme/colors';
@@ -45,8 +45,11 @@ export default function LocationListScreen({ navigation, route }: Props) {
   const [search, setSearch] = useState('');
   const [filterLocation, setFilterLocation] = useState('');
   const [filterSpecialty, setFilterSpecialty] = useState('');
-  const [expandLocation, setExpandLocation] = useState(false);
-  const [expandSpecialty, setExpandSpecialty] = useState(false);
+  const [filterElement, setFilterElement] = useState('');   // v104
+  /** v104 — Panel de filtros oculto por defecto (antes ocupaba ~1/4 de pantalla).
+   *  `expandKey` = qué slicer está abierto ('' = ninguno); solo uno a la vez. */
+  const [showFilters, setShowFilters] = useState(false);
+  const [expandKey, setExpandKey] = useState('');
   const [progress, setProgress] = useState<Map<string, { done: number; total: number }>>(new Map());
   const [syncing, setSyncing] = useState(false);
   const pulseAnim = useRef(new Animated.Value(0.4)).current;
@@ -107,14 +110,23 @@ export default function LocationListScreen({ navigation, route }: Props) {
   }, [projectId]);
 
   const loadProgress = async (locs: Location[]) => {
-    const allProtocols = await protocolsCollection
-      .query(Q.where('project_id', projectId))
-      .fetch();
+    const [allProtocols, allTemplates] = await Promise.all([
+      protocolsCollection.query(Q.where('project_id', projectId)).fetch(),
+      protocolTemplatesCollection.query(Q.where('project_id', projectId)).fetch(),
+    ]);
+
+    // v104 — El total se cuenta contra las fichas que EXISTEN y están visibles,
+    // no contando comas en `template_ids`. Antes un código inválido o una ficha
+    // retirada seguía sumando: la tarjeta decía "0/3" y al entrar no había
+    // ninguno, que es exactamente la contradicción que se veía en pantalla.
+    const visibleCodes = new Set(
+      allTemplates.filter(t => !t.isHidden).map(t => t.idProtocolo),
+    );
 
     const map = new Map<string, { done: number; total: number }>();
     for (const loc of locs) {
       const templateCount = loc.templateIds
-        ? loc.templateIds.split(',').filter((s) => s.trim()).length
+        ? loc.templateIds.split(',').map(s => s.trim()).filter(c => c && visibleCodes.has(c)).length
         : 0;
       const locProtocols = allProtocols.filter((p) => p.locationId === loc.id);
       const approved = locProtocols.filter((p) => p.status === 'APPROVED').length;
@@ -125,15 +137,28 @@ export default function LocationListScreen({ navigation, route }: Props) {
 
   const uniqueLocations = [...new Set(locations.map(l => l.locationOnly).filter(Boolean))] as string[];
   const uniqueSpecialties = [...new Set(locations.map(l => l.specialty).filter(Boolean))] as string[];
+  const uniqueElements = [...new Set(locations.map(l => l.element).filter(Boolean))] as string[];
 
   const filtered = locations.filter((l) => {
     const matchSearch = !search || l.name.toLowerCase().includes(search.toLowerCase());
     const matchLoc = !filterLocation || l.locationOnly === filterLocation;
     const matchSpec = !filterSpecialty || l.specialty === filterSpecialty;
-    return matchSearch && matchLoc && matchSpec;
+    const matchElem = !filterElement || l.element === filterElement;
+    return matchSearch && matchLoc && matchSpec && matchElem;
   });
 
-  const activeFilters = [filterLocation, filterSpecialty].filter(Boolean).length;
+  const activeFilters = [filterLocation, filterSpecialty, filterElement].filter(Boolean).length;
+  const clearAllFilters = () => { setFilterLocation(''); setFilterSpecialty(''); setFilterElement(''); };
+
+  /** v104 — Los tres slicers son idénticos salvo por sus datos, así que se
+   *  declaran como tabla y el JSX los recorre (antes eran 3 bloques calcados).
+   *  Un slicer sin opciones se omite: en proyectos sin elementos cargados no
+   *  tiene sentido mostrar un filtro que siempre estaría vacío. */
+  const SLICERS = ([
+    { key: 'loc',  icon: 'layers-outline' as const,    label: t('locList.locationLabel'),   value: filterLocation,  set: setFilterLocation,  options: uniqueLocations },
+    { key: 'spec', icon: 'construct-outline' as const, label: t('locList.specialtyLabel'),  value: filterSpecialty, set: setFilterSpecialty, options: uniqueSpecialties },
+    { key: 'elem', icon: 'cube-outline' as const,      label: t('locList.elementLabel'),    value: filterElement,   set: setFilterElement,   options: uniqueElements },
+  ]).filter(s => s.options.length > 0);
 
   const renderItem = ({ item, index }: { item: Location; index: number }) => {
     const prog = progress.get(item.id) ?? { done: 0, total: 0 };
@@ -199,7 +224,11 @@ export default function LocationListScreen({ navigation, route }: Props) {
         }
       />
 
-      {/* Barra de búsqueda */}
+      {/* v104 — Barra de búsqueda + botón de filtros en UNA sola fila.
+          Antes los slicers siempre desplegados se comían ~1/4 de la pantalla y
+          solo entraban 5 tarjetas. Ahora los filtros viven tras este botón: el
+          badge con el número de filtros activos evita el riesgo clásico de
+          "filtro escondido" (ver pocos resultados sin saber por qué). */}
       <View style={styles.searchBar}>
         <Ionicons name="search-outline" size={16} color={Colors.textMuted} style={styles.searchIcon} />
         <TextInput
@@ -214,129 +243,104 @@ export default function LocationListScreen({ navigation, route }: Props) {
             <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
+        {/* Sin ejes que filtrar (proyecto sin bloques ni especialidades) el botón
+            solo abriría un panel vacío, así que no se muestra. */}
+        {SLICERS.length > 0 && (
+        <TouchableOpacity
+          ref={locationFiltersRef}
+          style={[styles.filterBtn, (activeFilters > 0 || showFilters) && styles.filterBtnOn]}
+          onPress={() => setShowFilters(v => !v)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name="options-outline"
+            size={17}
+            color={activeFilters > 0 || showFilters ? Colors.white : Colors.textSecondary}
+          />
+          {activeFilters > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeTxt}>{activeFilters}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        )}
       </View>
 
-      {/* Slicers desplegables */}
-      <View ref={locationFiltersRef} style={styles.slicersBox}>
-        {/* Slicer Ubicación */}
-        <TouchableOpacity
-          style={[styles.slicerHeader, filterLocation ? styles.slicerHeaderActive : null]}
-          onPress={() => { setExpandLocation(v => !v); setExpandSpecialty(false); }}
-          activeOpacity={0.8}
-        >
-          <View style={styles.slicerLeft}>
-            <View style={styles.slicerLabelRow}>
-              <Ionicons name="layers-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.slicerLabel}>{t('locList.locationLabel')}</Text>
+      {/* v104 — Panel de filtros COLAPSABLE con tres ejes independientes:
+            · Ubicación    → el bloque (A / B / C)
+            · Especialidad → la disciplina (Estructuras / Sanitarias / Eléctricas)
+            · Elemento     → el componente físico (Losa, C-1, VA-202)
+          Especialidad y elemento vivían antes en el mismo campo, así que no se
+          podía pedir "todo lo eléctrico" ni "todas las losas de la obra". */}
+      {showFilters && (
+        <View style={styles.slicersBox}>
+          {SLICERS.map(({ key, icon, label, value, set, options }, i) => (
+            <View key={key}>
+              {i > 0 && <View style={styles.divider} />}
+              <TouchableOpacity
+                style={[styles.slicerHeader, value ? styles.slicerHeaderActive : null]}
+                onPress={() => setExpandKey(k => (k === key ? '' : key))}
+                activeOpacity={0.8}
+              >
+                <View style={styles.slicerLeft}>
+                  <View style={styles.slicerLabelRow}>
+                    <Ionicons name={icon} size={13} color={Colors.textMuted} />
+                    <Text style={styles.slicerLabel}>{label}</Text>
+                  </View>
+                  {value ? (
+                    <Text style={styles.slicerValue}>{value}</Text>
+                  ) : (
+                    <Text style={styles.slicerPlaceholder}>{t('locList.all')}</Text>
+                  )}
+                </View>
+                <View style={styles.slicerRight}>
+                  {value ? (
+                    <TouchableOpacity
+                      onPress={(e) => { e.stopPropagation(); set(''); }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="close-circle" size={16} color={Colors.danger} />
+                    </TouchableOpacity>
+                  ) : null}
+                  <Ionicons
+                    name={expandKey === key ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={Colors.textMuted}
+                  />
+                </View>
+              </TouchableOpacity>
+              {expandKey === key && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                  <TouchableOpacity
+                    style={[styles.chip, !value && styles.chipActive]}
+                    onPress={() => { set(''); setExpandKey(''); }}
+                  >
+                    <Text style={[styles.chipTxt, !value && styles.chipTxtActive]}>{t('locList.all')}</Text>
+                  </TouchableOpacity>
+                  {options.map(opt => (
+                    <TouchableOpacity
+                      key={opt}
+                      style={[styles.chip, value === opt && styles.chipActive]}
+                      onPress={() => { set(opt); setExpandKey(''); }}
+                    >
+                      <Text style={[styles.chipTxt, value === opt && styles.chipTxtActive]}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
-            {filterLocation ? (
-              <Text style={styles.slicerValue}>{filterLocation}</Text>
-            ) : (
-              <Text style={styles.slicerPlaceholder}>{t('locList.all')}</Text>
-            )}
-          </View>
-          <View style={styles.slicerRight}>
-            {filterLocation ? (
-              <TouchableOpacity
-                onPress={(e) => { e.stopPropagation(); setFilterLocation(''); }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="close-circle" size={16} color={Colors.danger} />
-              </TouchableOpacity>
-            ) : null}
-            <Ionicons
-              name={expandLocation ? 'chevron-up' : 'chevron-down'}
-              size={16}
-              color={Colors.textMuted}
-            />
-          </View>
-        </TouchableOpacity>
-        {expandLocation && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            <TouchableOpacity
-              style={[styles.chip, !filterLocation && styles.chipActive]}
-              onPress={() => { setFilterLocation(''); setExpandLocation(false); }}
-            >
-              <Text style={[styles.chipTxt, !filterLocation && styles.chipTxtActive]}>{t('locList.all')}</Text>
+          ))}
+
+          {activeFilters > 0 && (
+            <TouchableOpacity style={styles.clearAllBtn} onPress={clearAllFilters}>
+              <Ionicons name="filter-circle-outline" size={14} color={Colors.primary} />
+              <Text style={styles.clearAllTxt}>
+                {t(activeFilters > 1 ? 'locList.clearFilters_other' : 'locList.clearFilters_one', { count: activeFilters })}
+              </Text>
             </TouchableOpacity>
-            {uniqueLocations.map(val => (
-              <TouchableOpacity
-                key={val}
-                style={[styles.chip, filterLocation === val && styles.chipActive]}
-                onPress={() => { setFilterLocation(val); setExpandLocation(false); }}
-              >
-                <Text style={[styles.chipTxt, filterLocation === val && styles.chipTxtActive]}>{val}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        <View style={styles.divider} />
-
-        {/* Slicer Especialidad */}
-        <TouchableOpacity
-          style={[styles.slicerHeader, filterSpecialty ? styles.slicerHeaderActive : null]}
-          onPress={() => { setExpandSpecialty(v => !v); setExpandLocation(false); }}
-          activeOpacity={0.8}
-        >
-          <View style={styles.slicerLeft}>
-            <View style={styles.slicerLabelRow}>
-              <Ionicons name="construct-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.slicerLabel}>{t('locList.specialtyLabel')}</Text>
-            </View>
-            {filterSpecialty ? (
-              <Text style={styles.slicerValue}>{filterSpecialty}</Text>
-            ) : (
-              <Text style={styles.slicerPlaceholder}>{t('locList.all')}</Text>
-            )}
-          </View>
-          <View style={styles.slicerRight}>
-            {filterSpecialty ? (
-              <TouchableOpacity
-                onPress={(e) => { e.stopPropagation(); setFilterSpecialty(''); }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="close-circle" size={16} color={Colors.danger} />
-              </TouchableOpacity>
-            ) : null}
-            <Ionicons
-              name={expandSpecialty ? 'chevron-up' : 'chevron-down'}
-              size={16}
-              color={Colors.textMuted}
-            />
-          </View>
-        </TouchableOpacity>
-        {expandSpecialty && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            <TouchableOpacity
-              style={[styles.chip, !filterSpecialty && styles.chipActive]}
-              onPress={() => { setFilterSpecialty(''); setExpandSpecialty(false); }}
-            >
-              <Text style={[styles.chipTxt, !filterSpecialty && styles.chipTxtActive]}>{t('locList.all')}</Text>
-            </TouchableOpacity>
-            {uniqueSpecialties.map(val => (
-              <TouchableOpacity
-                key={val}
-                style={[styles.chip, filterSpecialty === val && styles.chipActive]}
-                onPress={() => { setFilterSpecialty(val); setExpandSpecialty(false); }}
-              >
-                <Text style={[styles.chipTxt, filterSpecialty === val && styles.chipTxtActive]}>{val}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        {/* Resumen de filtros activos */}
-        {activeFilters > 0 && (
-          <TouchableOpacity
-            style={styles.clearAllBtn}
-            onPress={() => { setFilterLocation(''); setFilterSpecialty(''); }}
-          >
-            <Ionicons name="filter-circle-outline" size={14} color={Colors.primary} />
-            <Text style={styles.clearAllTxt}>{t(activeFilters > 1 ? 'locList.clearFilters_other' : 'locList.clearFilters_one', { count: activeFilters })}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+          )}
+        </View>
+      )}
 
       {syncing && locations.length === 0 ? (
         // Skeleton mientras carga por primera vez
@@ -399,6 +403,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+
+  // v104 — Botón que despliega el panel de filtros, dentro de la barra de búsqueda.
+  filterBtn: {
+    width: 34, height: 34, borderRadius: Radius.sm,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    flexShrink: 0,
+  },
+  filterBtnOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  // Contador de filtros activos: es lo que evita el "filtro fantasma" cuando el
+  // panel está cerrado y la lista sale corta sin motivo aparente.
+  filterBadge: {
+    position: 'absolute', top: -5, right: -5,
+    minWidth: 16, height: 16, borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.danger,
+    borderWidth: 1.5, borderColor: Colors.white,
+  },
+  filterBadgeTxt: { fontSize: 9, fontWeight: '900', color: Colors.white },
 
   slicersBox: {
     backgroundColor: Colors.white,

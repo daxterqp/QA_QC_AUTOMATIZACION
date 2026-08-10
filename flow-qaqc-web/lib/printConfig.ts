@@ -53,6 +53,9 @@ export const PRINT_HEADER_FIELDS: { key: string; label: string }[] = [
   { key: 'id_protocolo', label: 'ID Protocolo' },
   { key: 'ubicacion', label: 'Coordenadas / Ubicación' },
   { key: 'especialidad', label: 'Especialidad' },
+  // v104 — Elemento físico liberado (Losa, C-1, VA-202). Separado de la
+  // especialidad, que ahora es la disciplina.
+  { key: 'elemento', label: 'Elemento' },
   // v103 — Partes del contrato. NO entran en DEFAULT_HEADER_FIELDS: solo salen si
   // el proyecto las llenó Y el usuario las eligió (si no, ocuparían ancho en vano).
   { key: 'cliente', label: 'Cliente' },

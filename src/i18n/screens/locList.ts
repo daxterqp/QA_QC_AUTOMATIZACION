@@ -53,6 +53,13 @@ const locList: Record<string, { es: string; en: string; pt: string }> = {
     en: 'Specialty',
     pt: 'Especialidade',
   },
+  // v104 — Elemento estructural/componente que se libera. Va aparte de la
+  // especialidad: una es la disciplina y el otro el componente físico.
+  'locList.elementLabel': {
+    es: 'Elemento',
+    en: 'Element',
+    pt: 'Elemento',
+  },
   'locList.all': {
     es: 'Todas',
     en: 'All',

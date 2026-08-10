@@ -14,8 +14,12 @@ export default class Location extends Model {
   @field('name') name!: string;
   /** Solo la parte de ubicación, ej: "P1-Sector1" */
   @field('location_only') locationOnly!: string | null;
-  /** Especialidad, ej: "Cimiento" */
+  /** DISCIPLINA, ej: "Estructuras", "Sanitarias", "Eléctricas" */
   @field('specialty') specialty!: string | null;
+  /** v104 — ELEMENTO físico que se libera, ej: "Losa", "C-1", "VA-202".
+   *  Va aparte de `specialty` porque son ejes distintos: una ubicación puede
+   *  filtrarse por disciplina, por elemento, o por ambos. */
+  @field('element') element!: string | null;
   /** Plano de referencia asociado, ej: "CIM,DetalleCimientos" */
   @field('reference_plan') referencePlan!: string;
   /** IDs de plantillas requeridas, separados por coma, ej: "1,2,3" */

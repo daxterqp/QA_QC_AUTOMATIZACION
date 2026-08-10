@@ -188,8 +188,11 @@ export default function LocationProtocolsScreen({ navigation, route }: Props) {
         .query(Q.where('project_id', projectId))
         .fetch();
 
+      // v104 — Excluir las fichas RETIRADAS (is_hidden). Sin esto, una ficha
+      // dada de baja seguía ofreciéndose desde toda ubicación que la
+      // referenciara, y el retiro solo funcionaba a medias.
       const matchingTemplates = allTemplates.filter((t) =>
-        templateIdList.includes(t.idProtocolo)
+        templateIdList.includes(t.idProtocolo) && !t.isHidden
       );
 
       // 3. Cargar instancias existentes para esta ubicación

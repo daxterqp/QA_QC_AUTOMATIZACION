@@ -802,6 +802,9 @@ function buildProtocolPages(
       id_protocolo: cell('ID Protocolo', idProtocolo ?? p.protocol_number ?? '—'),
       ubicacion: isNumeric ? cell('Coordenadas', coordsStr) : cell('Ubicación', loc?.name ?? '—'),
       especialidad: (!isNumeric && loc?.specialty) ? cell('Especialidad', loc.specialty) : '',
+      // v104 — El elemento SÍ aplica a numéricos (un vaciado de concreto se hace
+      // sobre una losa o una columna igual que un checklist). Espejo del móvil.
+      elemento: (loc as any)?.element ? cell('Elemento', (loc as any).element) : '',
       // v103 — Partes del contrato (fijas del proyecto). Espejo del móvil.
       cliente: parties.cliente ? cell('Cliente', parties.cliente) : '',
       supervision: parties.supervision ? cell('Supervisión', parties.supervision) : '',
