@@ -2043,6 +2043,22 @@ async function pullProject(projectId: string): Promise<number> {
       console.log(`[pull] Eliminadas ${orphanLocations.length} ubicaciones huérfanas`);
     }
 
+    // v106 — Ítems de PLANTILLA huérfanos. Faltaba este cleanup y el efecto era
+    // grave: al reescribir una ficha (borrar sus ítems en la nube e insertar los
+    // nuevos), el móvil conservaba los viejos porque nadie los borraba en local,
+    // y en el siguiente push LOS RESUCITABA en la nube. La ficha terminaba con
+    // los ítems viejos Y los nuevos duplicados por partida.
+    // Se acota igual que las demás: solo si el fetch no falló, y nunca sobre
+    // filas creadas offline que aún no subieron.
+    const remoteTemplateItemIdSet = new Set(remoteTemplateItems.map((r: any) => r.id));
+    const orphanTemplateItems = fetchFailed.has('protocol_template_items') ? [] : localTemplateItems.filter(
+      (i: any) => !remoteTemplateItemIdSet.has(i.id) && i._raw._status !== 'created'
+    );
+    if (orphanTemplateItems.length > 0) {
+      await database.batch(orphanTemplateItems.map((i: any) => i.prepareDestroyPermanently()));
+      console.log(`[pull] Eliminados ${orphanTemplateItems.length} ítems de plantilla huérfanos`);
+    }
+
     // v27 — Orphan cleanup para las 9 tablas de trazabilidad. Mismo patrón que
     // project_sectors: si el row local está 'synced' (no es offline-created) y
     // el remoto ya no lo lista → fue borrado desde web, lo destruimos.
