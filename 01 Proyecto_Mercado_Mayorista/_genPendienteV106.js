@@ -103,6 +103,19 @@ vincula AS (
     AND template_ids NOT LIKE '%RCP%'
   RETURNING 1
 ),
+-- 6b) ⚠ BUMP OBLIGATORIO de updated_at en TODAS las ubicaciones.
+--     El pull tiene un "no-op skip": si la fila local está synced y su
+--     updated_at es IGUAL al remoto, se la salta sin mirar el contenido
+--     (SupabaseSyncService.prepareOverride). Al corregir template_ids se reusó
+--     el timestamp de creación, así que los móviles que ya habían bajado la
+--     versión con los ids internos malos NUNCA volvían a leerla: en la app las
+--     ubicaciones seguían sin protocolos. Editar la DB a mano SIEMPRE exige un
+--     updated_at NUEVO, o el cambio es invisible para los dispositivos.
+bump_locs AS (
+  UPDATE locations SET updated_at = ${TS}
+  WHERE project_id = ${q(PROJECT_ID)} AND updated_at < ${TS}
+  RETURNING 1
+),
 -- 7) Encabezado del PDF de RCP: mismos campos que las demás numéricas.
 cfg AS (
   UPDATE projects p
@@ -128,6 +141,7 @@ SELECT (SELECT count(*) FROM respaldo)    AS respaldadas,
        (SELECT count(*) FROM insertados)  AS items_insertados,
        (SELECT count(*) FROM fix_pend)    AS pendientes_corregidas,
        (SELECT count(*) FROM vincula)     AS ubicaciones_vinculadas,
+       (SELECT count(*) FROM bump_locs)   AS ubicaciones_rebajadas_al_movil,
        (SELECT count(*) FROM cfg)         AS config_pdf;
 `;
 

@@ -386,6 +386,37 @@ CAPTURA de datos de las numéricas siguen siendo etiquetas (sustantivos), porque
 no se responden con SÍ/NO. El generador tiene una guarda que aborta si algún
 texto vuelve a quedar en mayúsculas.
 
+## 7ter. ⚠ El `updated_at` SIEMPRE tiene que ser NUEVO
+
+Editar la nube a mano y reusar el `updated_at` que la fila ya tenía hace que el
+cambio sea **invisible para los dispositivos**, sin ningún error a la vista.
+
+`SupabaseSyncService.prepareOverride` trae un no-op skip:
+
+```ts
+if (local._raw._status === 'synced' && !local._raw._changed
+    && rowMs(local._raw.updated_at) === rowMs(remote.updated_at)) continue;
+```
+
+Si el móvil ya bajó la fila y el `updated_at` remoto no cambió, **se la salta sin
+mirar el contenido**. La suposición del skip ("todo editor bumpea updated_at")
+vale para la app y la web, pero NO para un UPDATE escrito a mano.
+
+Caso real (v104): se corrigió `locations.template_ids` reusando el timestamp de
+creación. En la nube quedó bien, pero los móviles que ya tenían la versión mala
+jamás la volvieron a leer, y en la app las ubicaciones seguían "sin protocolos
+vinculados". El síntoma no apunta al sync: parece un problema de datos.
+
+**Regla:** todo UPDATE manual usa un `updated_at` estrictamente MAYOR al
+anterior. Si se corrige algo ya aplicado, hay que **volver a tocar la tabla con
+un timestamp nuevo** aunque el contenido ya esté correcto en la nube — y esto
+aplica a `locations`, `protocol_templates`, `protocol_template_items`,
+`projects` y cualquier tabla que sincronice por LWW.
+
+**Verificación:** tras aplicar, `updated_at` de las filas tocadas debe ser mayor
+que el de la última sincronización del dispositivo. Si el usuario reporta que
+"no ve el cambio", esto es lo primero que hay que descartar.
+
 ## 8. Piezas del flujo
 
 - Respaldo/rollback: tabla `ficha_edit_backups` (Supabase, RLS cerrado).
