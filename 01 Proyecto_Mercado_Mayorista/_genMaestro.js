@@ -206,7 +206,10 @@ const PIS = clasico('PIS', 'PROTOCOLO DE TUBERÍA (INSTALACIONES SANITARIAS)', [
     ['¿El material está libre de fisuras, deformaciones por calor o golpes que comprometan la estanqueidad?', M.visual],
     // Sin pendiente la red no evacúa: es el defecto que se descubre recién
     // cuando el edificio está en uso y ya no hay forma de corregirlo.
-    ['¿La pendiente de los tramos de desagüe cumple el mínimo especificado (≥ 1 %), verificada con nivel en cada tramo?', M.medicion],
+    // ⚠ La pendiente mínima NO es única: el RNE IS.010 la escala por diámetro.
+    // Un "≥ 1 %" plano aprobaría ramales de 2" y 3" mal ejecutados, que son
+    // justo los que más se atoran.
+    ['¿La pendiente de cada tramo cumple el mínimo POR DIÁMETRO, verificada con nivel? (2": 2 % · 3": 1,5 % · 4" o mayor: 1 % — RNE IS.010)', M.medicion],
     ['¿Las uniones se ejecutaron con la técnica y el pegamento especificados, respetando el tiempo de fraguado antes de probar?', M.visual],
     // LA prueba de calidad de una red sanitaria. Sin ella, el protocolo no
     // evalúa nada: solo declara que las tuberías "se ven bien".
@@ -324,7 +327,7 @@ const PPIS = clasico('PPIS', 'PROTOCOLO DE COLOCACIÓN DE PUNTOS DE INSTALACIONE
       ['¿El material y la clase de la red son los especificados? (PVC o PPR, con marcado legible)', M.doc],
       [Q.cantSalidas, M.medicion],
       [Q.diamRecorrido, M.medicion],
-      ['¿La pendiente de los ramales cumple el mínimo especificado (≥ 1 %), verificada con nivel?', M.medicion],
+      ['¿La pendiente de cada ramal cumple el mínimo POR DIÁMETRO, verificada con nivel? (2": 2 % · 3": 1,5 % · 4" o mayor: 1 % — RNE IS.010)', M.medicion],
       ['¿El tipo de salida corresponde al aparato previsto? (ovalín, inodoro u otro)', M.visual],
       ['¿Se instalaron los puntos de urinario, registro y sumidero previstos, y los registros quedan accesibles?', M.visual],
       ['¿El tramo pasó la prueba de estanqueidad sin pérdida durante el tiempo especificado?', M.func],
@@ -485,6 +488,7 @@ function buildPCC() {
   add('Tipo de concreto', 'list-[HECHO EN OBRA, PREMEZCLADO]', S2);
   add("f'c de diseño (kg/cm²)", 'numerico-[100:700]:dec[0]', S2);
   add('Slump de diseño (pulg)', 'numerico-[1:10]:dec[1]', S2);
+  const PARTIDA_VOL_PREVISTO = p;   // se captura aquí y se compara al final
   add('Volumen total (m³)', 'numerico-[0:500]:dec[2]', S2);
   add('Tipo de colocación', 'list-[DIRECTO, CON BOMBA, OTROS]', S2);
   add('Tipo de acabado', 'list-[CARAVISTA, FROTACHADO, OTROS]', S2);
@@ -493,9 +497,12 @@ function buildPCC() {
   // ser un REGISTRO con el que se puede auditar el vaciado después: slump fuera
   // de rango, temperatura alta o exceso de tiempo entre mezclado y colocación
   // explican una resistencia baja a los 28 días.
+  // 10 filas: un vaciado de ~80 m³ con mixer de 8 m³ son 10 viajes. Con 6 había
+  // que partir el vaciado en dos ensayos, que es peor que dejar filas vacías.
+  const N_BATCHES = 10;
   const S3 = 'REGISTRO DE BATCHES';
   add('col-[A][Guía / Batch] // col-[B][Hora mezclado] // col-[C][Hora colocación] // col-[D][Slump (pulg)] // col-[E][Temp. (°C)] // col-[F][Volumen (m³)] // col-[G][Código de testigos]', '', S3);
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= N_BATCHES; i++) {
     add(`Batch ${i}`,
       'texto-[] // hora-[] // hora-[] // numerico-[1:10]:dec[1] // numerico-[5:40]:dec[1] // numerico-[0:100]:dec[2] // texto-[]',
       S3);
@@ -505,10 +512,17 @@ function buildPCC() {
   // columna de temperatura, el volumen pasó de E a F y una letra hardcodeada
   // habría hecho que el total sumara temperaturas sin que nada fallara.
   const COL_VOLUMEN = 'F';                     // A guía · B/C horas · D slump · E temp · F volumen · G testigos
-  const primeraFilaBatch = p - 6;              // partida de "Batch 1"
-  const ultimaFilaBatch = p - 1;               // partida de "Batch 6"
+  const primeraFilaBatch = p - N_BATCHES;      // partida de "Batch 1"
+  const ultimaFilaBatch = p - 1;               // partida del último batch
+  const filaColocado = p;                      // partida de "Volumen total colocado"
   add('Volumen total colocado (m³)',
     `numerico-fx[SUMA(#${primeraFilaBatch}${COL_VOLUMEN}:#${ultimaFilaBatch}${COL_VOLUMEN})]:dec[2]`, S3);
+  // Desviación entre lo previsto y lo realmente colocado. No es un dato
+  // administrativo: un sobreconsumo alto delata fuga por el encofrado o
+  // sobre-sección, y un consumo por debajo delata que faltó llenar. Se calcula
+  // solo para que salte a la vista sin que nadie tenga que sacar la cuenta.
+  add('Desviación de volumen (%)',
+    `numerico-fx[SI(#${PARTIDA_VOL_PREVISTO}A>0, (#${filaColocado}A-#${PARTIDA_VOL_PREVISTO}A)/#${PARTIDA_VOL_PREVISTO}A*100, 0)]:dec[1]`, S3);
 
   // Sin probetas no existe control de calidad del concreto: es la única prueba
   // objetiva de que el elemento alcanza el f'c de diseño, y se toma AQUÍ o no se
@@ -525,6 +539,80 @@ function buildPCC() {
     '¿El área quedó ordenada y los residuos de concreto se retiraron antes de fraguar?',
   ];
   for (const it of posterior) add(it, 'list-[SI, NO, NA]', S4);
+
+  return rows;
+}
+
+/**
+ * RCP — Resistencia a compresión de probetas.
+ *
+ * Cierra el ciclo que el PCC dejaba abierto: el protocolo de vaciado registra
+ * que se TOMARON las probetas, pero el resultado llega 28 días después, cuando
+ * ese protocolo ya está aprobado. Sin esta ficha el dossier certifica que el
+ * procedimiento se siguió, pero NUNCA que el concreto alcanzó su resistencia,
+ * que es lo único que prueba la calidad del concreto.
+ *
+ * Va como ficha aparte —y no como sección del PCC— justamente porque los
+ * tiempos no coinciden: el vaciado se libera el mismo día y el ensayo un mes
+ * después. Se enlaza al vaciado por el código de testigo y la guía del batch.
+ *
+ * El dictamen NO es "≥ 100 % del diseño": el RNE E.060 (art. 5.6.3.3) acepta un
+ * ensayo individual hasta 35 kg/cm² por debajo del f'c cuando f'c ≤ 350, y hasta
+ * 0,10·f'c cuando es mayor. Lo que no puede bajar del f'c es el PROMEDIO. Por
+ * eso se calculan ambos: el promedio y el mínimo individual.
+ */
+function buildRCP() {
+  const id = 'RCP', nombre = 'RESISTENCIA A COMPRESIÓN DE PROBETAS';
+  const rows = [];
+  let p = 1;
+  const add = (act, met, sec) => rows.push({
+    ID_Protocolo: id, Protocolo: nombre, PartidaItem: String(p++),
+    'Actividad realizada': act, 'Método de validación': met, 'Sección': sec,
+  });
+
+  const S1 = 'DATOS DEL VACIADO Y DISEÑO';
+  add('Elemento vaciado', 'texto-[]', S1);
+  const FILA_FC = p;                    // el f'c de diseño es la referencia de todo el dictamen
+  add("f'c de diseño (kg/cm²)", 'numerico-[100:700]:dec[0]:ej[210]', S1);
+  add('Fecha de vaciado', 'fecha-[]', S1);
+  add('Guía / batch de origen', 'texto-[]', S1);   // enlace al protocolo de vaciado
+  add('Laboratorio que ejecutó el ensayo', 'texto-[]', S1);
+
+  const S2 = 'RESULTADOS DE ROTURA';
+  add('col-[A][Código de testigo] // col-[B][Fecha de rotura] // col-[C][Edad (días)] // col-[D][Diámetro (cm)] // col-[E][Altura (cm)] // col-[F][Carga máxima (kN)] // col-[G][Área (cm²)] // col-[H][f\'c obtenido (kg/cm²)] // col-[I][% del diseño] // col-[J][Cumple individual (1=Sí)]',
+    '', S2);
+  const N_TESTIGOS = 6;
+  const primerTestigo = p;
+  for (let i = 1; i <= N_TESTIGOS; i++) {
+    const f = p;
+    add(`Testigo ${i}`,
+      'texto-[] // fecha-[] // numerico-[1:90]:dec[0]:ej[28] // ' +
+      'numerico-[5:30]:dec[1]:ej[15.0] // numerico-[10:60]:dec[1]:ej[30.0] // numerico-[0:3000]:dec[1]:ej[371.0] // ' +
+      // Área de la probeta cilíndrica a partir del diámetro medido.
+      `numerico-fx[3.14159265*POTENCIA(#${f}D/2, 2)]:dec[2] // ` +
+      // 1 kN = 101,9716 kgf → f'c en kg/cm².
+      `numerico-fx[SI(#${f}G>0, #${f}F*101.9716/#${f}G, 0)]:dec[1] // ` +
+      `numerico-fx[SI(#${FILA_FC}A>0, #${f}H/#${FILA_FC}A*100, 0)]:dec[1] // ` +
+      // Margen del RNE E.060: 35 kg/cm² si f'c ≤ 350; 0,10·f'c si es mayor.
+      `numerico-fx[SI(#${f}H >= #${FILA_FC}A - SI(#${FILA_FC}A<=350, 35, #${FILA_FC}A*0.10), 1, 0)]:dec[0]`,
+      S2);
+  }
+  const ultimoTestigo = p - 1;
+  add("f'c promedio de los testigos (kg/cm²)",
+    `numerico-fx[PROMEDIO(#${primerTestigo}H:#${ultimoTestigo}H)]:dec[1]`, S2);
+  add("f'c mínimo individual (kg/cm²)",
+    `numerico-fx[MIN(#${primerTestigo}H:#${ultimoTestigo}H)]:dec[1]`, S2);
+
+  const S3 = 'EVALUACIÓN DEL RESULTADO';
+  const evaluacion = [
+    "¿El f'c PROMEDIO alcanza o supera el f'c de diseño? (RNE E.060 — es el criterio principal de aceptación)",
+    "¿NINGÚN testigo individual quedó por debajo del margen admitido? (35 kg/cm² si f'c ≤ 350; 10 % si es mayor)",
+    '¿Las probetas se moldearon, curaron y transportaron según norma hasta el ensayo? (NTP 339.033 — un mal curado da resistencias bajas que NO son culpa del concreto)',
+    '¿El tipo de falla observado es el normal, sin indicios de mal moldeo o refrentado defectuoso?',
+    '¿El laboratorio está acreditado y su certificado quedó adjunto al expediente?',
+    '¿El resultado se comunicó al residente y a la supervisión, y de ser NO CONFORME se abrió la no conformidad correspondiente?',
+  ];
+  for (const it of evaluacion) add(it, 'list-[SI, NO, NA]', S3);
 
   return rows;
 }
@@ -587,7 +675,7 @@ function buildLIPMPP() {
 
 const ALL = [
   ...CTTR, ...CTPT, ...buildLIPMPP(),
-  ...PA, ...buildPCC(), ...PE, ...PAA, ...PIS, ...PIE,
+  ...PA, ...buildPCC(), ...buildRCP(), ...PE, ...PAA, ...PIS, ...PIE,
   ...PPIS, ...PPIE, ...PRE, ...PDA,
 ];
 
