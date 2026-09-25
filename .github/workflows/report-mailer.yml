@@ -3,6 +3,19 @@ name: Report Mailer
 # Envía los reportes por correo programados. Barre cada hora los modelos vencidos
 # (report_templates.status='active' AND next_send_at <= now) y manda cada uno por AWS SES.
 # Mismo patrón que backup.yml. Manual con "Run workflow" (workflow_dispatch).
+#
+# Requiere estos SECRETS en el repo (Settings → Secrets and variables → Actions).
+# Guía completa de configuración: docs/REPORTES_CORREO_SETUP.md
+#   SUPABASE_URL               → https://<ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  → service_role key (Supabase → Settings → API)
+#   SES_FROM                   → remitente verificado, ej. "Reportes QA/QC <reportes@dominio.com>"
+#   SES_AWS_ACCESS_KEY_ID      → IAM con permiso ses:SendRawEmail
+#   SES_AWS_SECRET_ACCESS_KEY
+#   SES_REGION                 → opcional; si no está, usa us-east-2
+#
+# Mientras falte cualquiera de los obligatorios, el cron NO falla: se salta con un aviso
+# (si fallara, mandaría un correo de error CADA HORA). Lanzado a mano sí falla, para que
+# la prueba diga la verdad. Al cargar los secrets se activa solo, sin tocar este archivo.
 on:
   schedule:
     - cron: '0 * * * *'   # cada hora en punto (UTC)
@@ -22,11 +35,41 @@ jobs:
       SES_AWS_ACCESS_KEY_ID: ${{ secrets.SES_AWS_ACCESS_KEY_ID }}
       SES_AWS_SECRET_ACCESS_KEY: ${{ secrets.SES_AWS_SECRET_ACCESS_KEY }}
     steps:
+      # Va ANTES del checkout: si no hay configuración, no gastamos el minuto de npm ci.
+      - name: Verificar configuración
+        id: check
+        working-directory: .
+        run: |
+          MISSING=""
+          for v in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SES_FROM SES_AWS_ACCESS_KEY_ID SES_AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!v}" ]; then MISSING="$MISSING $v"; fi
+          done
+          if [ -z "$MISSING" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Configuración completa."
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "### Reportes por correo: sin configurar" >> "$GITHUB_STEP_SUMMARY"
+          echo "Faltan estos secrets:$MISSING" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cárgalos en Settings → Secrets and variables → Actions." >> "$GITHUB_STEP_SUMMARY"
+          echo "Guía: docs/REPORTES_CORREO_SETUP.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::No se puede enviar: faltan los secrets$MISSING. Ver docs/REPORTES_CORREO_SETUP.md"
+            exit 1
+          fi
+          echo "::notice::Envío omitido: el módulo de reportes todavía no está configurado (faltan$MISSING)."
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.configured == 'true'
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
         with:
           node-version: '20'
       - name: Install deps
+        if: steps.check.outputs.configured == 'true'
         run: npm ci
       - name: Send due reports
+        if: steps.check.outputs.configured == 'true'
         run: npx tsx scripts/reportMailer.ts
